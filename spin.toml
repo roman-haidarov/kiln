@@ -1,5 +1,4 @@
 [package]
 name = "kiln"
 version = "0.1.0"
-
-# published repos are conventionally named spinel-kiln
+sources = ["ext/picohttpparser/picohttpparser.c", "ext/kiln_http.c"]

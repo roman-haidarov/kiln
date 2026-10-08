@@ -1,0 +1,18 @@
+-- CpuPool: caller timeout
+ok   caller timeout -> PoolTimeout
+ok   expired queued task is not started
+ok   full queue -> PoolTimeout, task is not run
+-- CpuPool: worker recovery
+ok   both workers started
+ok   SystemExit in task -> WorkerLost, worker replaced
+ok   pool runs tasks after worker replacement
+ok   kill during task: caller immediately gets WorkerLost
+ok   after kill: two workers restored and busy is correct
+ok   task finishing after deadline is counted in overran
+ok   after close: new work rejected and workers exit without replacement
+-- CpuPool: deterministic interruption (test holds pool mutex)
+ok   kill after pop, before busy accounting: immediate WorkerLost
+ok   busy unchanged and worker restored
+ok   kill after task, before accounting: WorkerLost and busy returns to 0
+ok   shutdown interrupts running task without replacement
+ok   infinite timeout rejected

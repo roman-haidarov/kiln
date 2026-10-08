@@ -1,7 +1,10 @@
-# Kiln — минимальный веб-рантайм для Spinel (прототип).
 require "socket"
 require "kiln/core"
 require "kiln/http"
+require "kiln/http_syntax"
+require "kiln/http_native"
+require "kiln/read_buffer"
+require "kiln/path_syntax"
 require "kiln/log"
 require "kiln/pool"
 require "kiln/context"

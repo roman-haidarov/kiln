@@ -1,0 +1,143 @@
+-- Pool
+ok   application error does not recreate resource
+ok   IO failure: resource replaced and old resource closed
+ok   task acquired resource before kill
+ok   kill inside with: resource replaced
+ok   pool holder acquired resource
+ok   empty pool -> PoolTimeout
+ok   with returns block value
+ok   discard failure preserves slot and original error
+ok   factory is not called when pool is created
+ok   resource is reused instead of recreated
+ok   factory error during checkout restores capacity
+ok   factory cannot return nil
+ok   interrupt during validate closes checked-out resource and restores capacity
+ok   interrupt during close keeps slot quarantined
+ok   no new resource is created after interrupted close
+ok   max_lifetime: expired resource is closed and replaced
+ok   validate: rejected resource is replaced
+-- Response
+ok   204 sends no body or Content-Length
+ok   304 sends no body
+ok   205 sends zero length and no body
+ok   informational status cannot be sent as final response
+ok   response formatting does not modify input
+ok   unsafe header is rejected on insertion
+ok   Date header is recognized case-insensitively
+ok   coop_budget rejects negative values
+-- HTTP syntax
+ok   header parsing does not modify input string
+ok   repeated headers are combined
+ok   duplicate Host is rejected
+ok   body length limit works independently of server
+ok   absolute-form extracts path and authority
+ok   keep-alive honors version and Connection
+-- Router
+ok   route blocks receive the router context
+ok   context JSON helper delegates response status and content type
+ok   context status and header helpers
+ok   route registration requires a handler
+ok   GET selects its route and parameters
+ok   POST selects its route
+ok   HEAD uses GET
+ok   405 lists methods without duplicates
+ok   unknown path returns 404
+ok   root route is found through index
+ok   dynamic first segment preserves order
+ok   static route also preserves order
+ok   dynamic route works with a new prefix
+ok   plain byte path is normalized to UTF-8
+ok   percent-encoded segment is decoded
+ok   invalid percent escape is rejected
+ok   router chains and module scopes compose
+ok   nested scope prefixes routes
+ok   configure mounts module routes
+ok   resource controller procedure accepts context
+ok   resources maps GET /api/books
+ok   resources maps GET /api/books/7
+ok   resources maps POST /api/books
+ok   resources maps PUT /api/books/7
+ok   resources maps PATCH /api/books/7
+ok   resources maps DELETE /api/books/7
+ok   resources only registers selected actions
+-- Context
+ok   all: result order preserved; nil and false are valid
+ok   all: sibling error propagates immediately, not at deadline
+ok   first: false is a successful result
+ok   first: all tasks failed -> task error
+ok   first: empty list -> ArgumentError
+ok   subtask inherits request id and deadline
+ok   all does not start tasks after deadline
+ok   ctx.sleep observes deadline without thread-local state
+-- CpuPool
+ok   CPU task inherits request id
+ok   CPU worker started task
+ok   CPU queue is full
+ok   full CPU queue at deadline -> DeadlineExceeded
+-- Supervisor
+ok   service retries until startup succeeds
+ok   stop does not raise
+-- Log
+ok   newline cannot forge a log entry
+ok   no log entries were dropped
+-- Spinel guards
+ok   AccessLog: logging failure does not erase completed response
+ok   Rescue: error -> 500 without re-raise; outer ensure ran
+ok   Pool#with: block error reaches caller and resource returns to pool
+ok   Kiln.pause returns without recursing into Kernel.sleep
+-- Visibility and purity
+ok   HttpSyntax: helper functions are private
+ok   PathSyntax.decode is private
+ok   Set-Cookie: both values are sent
+ok   []= replaces values case-insensitively
+ok   managed and invalid headers are rejected
+ok   PathSyntax.segments does not modify input
+ok   PathSyntax.segments decodes UTF-8
+ok   parameter names are computed at registration
+ok   PathSyntax.params
+-- HttpNative compared with reference HttpSyntax
+ok   browser request uses C fast path
+ok   constructed cases match reference (41)
+ok   mutation fuzzing: 4000 cases; no mismatches
+ok   some mutations use fast path (true)
+-- Pool: kill during checkout
+ok   resources remain after 300 killed threads
+-- Router: seal and parameters
+ok   routes cannot be added after seal!
+ok   DELETE route and shared empty params
+-- Pool: boundary cases
+ok   negative max_lifetime is rejected
+ok   second thread waits for resource
+ok   kill while waiting for resource does not lose capacity
+-- HttpNative: scan_at boundaries
+ok   scan_at within data bounds
+ok   scan_at outside data bounds -> reject
+ok   scan_at with negative start -> reject
+-- Response: body without copy
+ok   payload returns original body object
+ok   non-ASCII body is serialized byte-for-byte
+-- C byte checks compared with regexes
+ok   Host: C matches regex on 3029 inputs
+ok   token: C matches regex
+ok   ctl: C matches regex
+ok   digits: C matches regex
+-- Pool: kill at different stages
+ok   after kill during factory/validate/block/close: invariant and quarantine
+-- HTTP: limits
+ok   Content-Length longer than 9 digits with large max_body
+ok   Content-Length exceeds max_body -> too_long
+ok   invalid server options are rejected (9)
+-- Pool: deterministic interruptions (test holds pool mutex)
+ok   resource return does not wait for pool mutex
+ok   kill while waiting for checkout mutex leaves accounting unchanged
+ok   infinite max_lifetime is rejected
+ok   after stage stress: open == idle + out; no resource remains checked out
+-- Pool: physical capacity during close
+ok   slot remains occupied while resource is closing
+ok   second request waits instead of opening an extra resource
+ok   second request gets new resource after close
+ok   live resources never exceed size
+ok   close failure is counted and slot remains quarantined
+ok   stale-close counts fatal error and keeps slot
+ok   close start without result keeps slot occupied
+ok   late and duplicate close result is applied once

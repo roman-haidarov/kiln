@@ -1,0 +1,14 @@
+ok   close failure preserves physical capacity limit
+ok   fatal stale-close error is counted without creating a new resource
+ok   interrupted close keeps its slot
+ok   close thread exit keeps its slot quarantined
+ok   late duplicate result releases the slot only once
+-- quarantine: release and policy
+ok   stale resource close failure quarantined; another resource checked out
+ok   release_quarantined restores capacity
+ok   on_close_failure: :release restores capacity immediately
+ok   late close success does not release capacity twice after manual release
+ok   release_quarantined rejects invalid count
+ok   release_quarantined rejects invalid count
+ok   release_quarantined rejects invalid count
+ok   unknown close-failure policy is rejected

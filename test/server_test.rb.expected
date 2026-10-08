@@ -1,0 +1,94 @@
+-- protocol
+ok   GET /health 200
+ok   TE+CL -> 400, hidden request is not executed
+ok   chunked body is decoded
+ok   valid trailer is accepted
+ok   space before chunk size -> 400
+ok   invalid trailer -> 400
+ok   Content-Length in trailer -> 400
+ok   total trailer size is limited
+ok   tab in request line -> 400
+ok   duplicate Content-Length -> 400
+ok   Content-Length 5abc -> 400
+ok   TE in HTTP/1.0 -> 400 and response stays HTTP/1.0
+ok   HTTP/1.1 without Host -> 400
+ok   empty Host in HTTP/1.1 -> 400
+ok   absolute-form: Host ignored per RFC 9112
+ok   header terminator split across three reads is found
+ok   16 pipelined requests in one packet -> 16 responses
+ok   pipelined good + malformed: 200 is sent before 400
+ok   pipelined response is sent before 100 Continue
+ok   pipelined good + stuck handler: 200 then 504 from reaper
+ok   handler sees client disconnect via client_gone?
+ok   client_gone? is false while the client waits
+ok   client_gone? follows platform semantics with unread bytes pending
+ok   ClientGone closes the connection without a 500 response
+ok   GET * -> 400
+ok   invalid status: 500 with full body; next response remains aligned
+ok   OPTIONS * -> 204 with method list
+ok   authority-form without CONNECT -> 400
+ok   CONNECT -> 501
+ok   chunked with oversized extensions -> 400 (overhead limit)
+ok   multiple Set-Cookie headers reach the client
+ok   large response is received in full
+ok   HEAD for large response: length present, no body
+ok   TE gzip (chunked is not last) -> 400
+ok   TE gzip, chunked (unknown coding) -> 501
+ok   duplicate chunked coding -> 400
+ok   unknown Expect -> 417
+ok   more than 100 headers -> 431
+ok   response includes Date
+ok   413 reaches a client still sending its body
+ok   Host with space -> 400
+ok   IPv6 Host with port is accepted
+ok   Host with invalid percent escape -> 400
+ok   absolute-form is routed and replaces Host
+ok   userinfo in absolute-form -> 400
+ok   absolute-form scheme is case-insensitive
+ok   method is case-sensitive -> 405
+ok   body > max_body -> 413
+ok   HEAD: same Content-Length as GET, no body
+ok   204 does not corrupt next keep-alive response
+ok   100 Continue without Content-Length, then 200
+ok   //admin is distinct from /admin
+ok   %20 is decoded in route parameter
+ok   %00 in path -> 400
+ok   unsupported method -> 405 with Allow
+ok   header containing CR/LF is discarded
+-- strict chunked boundaries
+ok   invalid extension "3;" -> 400
+ok   invalid extension "3;=x" -> 400
+ok   invalid extension "3;foo=\"" -> 400
+ok   invalid extension "3;foo=bad space" -> 400
+ok   invalid extension "3;foo=" -> 400
+ok   valid size/extension "3;foo=\"a\\\"b\""
+ok   valid size/extension "3 ; foo = bar"
+ok   valid size/extension "0000000000000003"
+ok   very large hex size -> 413 without overflow
+ok   absolute-form without Host -> 400
+ok   origin-form without Host -> 400
+-- deadlines
+ok   ctx.sleep hits deadline -> fast 504
+ok   handler that ignores deadline is killed by reaper -> 504
+ok   pool wait is bounded by deadline -> 504
+ok   resource held during with is closed after kill; slot restored
+ok   next checkout lazily creates a new resource
+ok   CpuPool: 504; task after deadline was not started
+ok   CpuPool remains alive
+ok   five stuck requests at once -> all receive 504
+-- write timeout
+ok   write reaches response body
+ok   expired write deadline closes the connection
+-- in-flight request accounting
+ok   200 requests served on one connection
+ok   in-flight request set is empty (no leak)
+-- lifecycle: slot held until thread exits
+ok   slot stays occupied after kill while thread is alive
+ok   client received 504 from reaper
+ok   slot restored after thread exits
+ok   shutdown during cleanup releases slot and connection
+-- shutdown
+ok   in-flight is 0; reaper killed exactly eight threads
+ok   shutdown returned 0
+ok   idle keep-alive connection closed without kill
+ok   repeated shutdown is safe
