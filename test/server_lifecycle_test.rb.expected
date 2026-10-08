@@ -1,0 +1,10 @@
+ok   request parsed before shutdown
+ok   grace expired: parsed request interrupted before handler starts
+ok   registration after shutdown: explicit 503 and handler not started
+ok   request parsed before grace ends is served
+ok   shutdown wakes reaper after last connection is removed
+ok   server can restart after shutdown
+ok   server enters response writing
+ok   shutdown returns only after a response being written is finished
+ok   grace expired: shutdown reports unfinished writing and stops the writer
+ok   pipelined batches respect the 16-response limit

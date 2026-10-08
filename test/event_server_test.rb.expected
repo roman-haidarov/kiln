@@ -1,0 +1,22 @@
+ok   inline: 200 with body and close
+ok   inline: 16 pipelined requests -> 16 responses
+ok   inline: Content-Length body reaches the handler
+ok   inline: non-ASCII body is sent byte-for-byte
+ok   inline: HEAD keeps Content-Length and sends no body
+ok   inline: two large pipelined responses arrive whole and in order
+ok   inline: malformed request -> 400
+ok   inline: missing Host on HTTP/1.1 -> 400
+ok   inline: Transfer-Encoding -> 501
+ok   inline: handler error -> 500
+ok   inline: unknown route -> 404
+ok   inline: request after Connection: close is not executed
+ok   inline: HTTP/1.0 without keep-alive stops after one request
+ok   inline: request deadline is visible to Kiln.deadline
+ok   inline: Kiln.check! after the deadline -> 504
+ok   inline: unsupported Expect -> 417
+ok   inline: 100 Continue after earlier responses, then the body is served
+ok   inline: shutdown finishes every request already parsed from a pipeline
+ok   inline: shutdown releases connections
+ok   inline: unfinished count includes queued requests when the handler is stopped
+ok   inline: the response finished during shutdown says Connection: close
+ok   inline: listens on ::1 when the host has IPv6

@@ -1,0 +1,9 @@
+ok   lanes: a waiting handler does not block another connection
+ok   lanes: 16 pipelined requests keep their order
+ok   lanes: request after Connection: close is not executed
+ok   lanes: HTTP/1.0 with both keep-alive and close stops after one request
+ok   lanes: shutdown finishes every request already parsed from a pipeline
+ok   lanes: grace expired -> active and queued handlers are counted
+ok   lanes: a new server starts in the same process after a grace cutoff
+ok   lanes: shutdown returns in bounded time when the loop thread has died
+ok   lanes: during shutdown only the last response on a connection says Connection: close

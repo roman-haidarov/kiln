@@ -1,0 +1,27 @@
+ok   spawn failure retries and restores worker
+ok   replacement reached the gate
+ok   replacement after close does not call Thread.new
+ok   close during replacement leaves no new worker
+ok   shutdown rejects both running and queued tasks
+ok   shutdown is safe to call again
+ok   cleanup of killed worker does not wait for mutex
+ok   worker exits while mutex is held
+ok   kill during stale resource close does not close twice
+ok   await_workers rejects invalid timeout
+ok   await_workers rejects invalid timeout
+ok   await_workers rejects invalid timeout
+ok   shutdown rejects invalid grace
+ok   shutdown rejects invalid grace
+ok   shutdown rejects invalid grace
+ok   connection ensure completes while server mutex is held
+ok   connection cleanup closes socket and returns exactly one slot
+ok   Content-Length at int64 boundary is compared without overflow
+ok   int64 Content-Length accepted without a hidden limit
+ok   constructor failure closes workers already started
+ok   deadline while waiting for CPU accounting returns timeout
+ok   task does not start after deadline while waiting for mutex
+ok   Connection close takes precedence over HTTP/1.0 keep-alive
+ok   overran_seconds reports work time beyond deadline
+ok   batched returns wake all waiters without polling
+ok   server wait is bounded while thread is alive
+ok   server wait recognizes an exited thread

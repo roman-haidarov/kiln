@@ -1,1 +1,11 @@
 /build/
+/.ruby-lsp/
+/validation/
+.DS_Store
+*.dSYM/
+*.core
+*.log
+*.folded
+*.prof
+*.zip
+AGENTS.md

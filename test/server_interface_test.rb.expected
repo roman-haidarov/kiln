@@ -1,0 +1,8 @@
+PASS event is the default backend
+PASS event exposes the server contract
+PASS event starts and shuts down through the facade
+PASS base backend is selectable
+PASS base exposes the server contract
+PASS base starts and shuts down through the facade
+PASS unsupported event option is rejected
+PASS unknown backend is rejected
