@@ -65,6 +65,112 @@ static long kiln_open_components(int current, int owned, const char *path, long 
     return -1;
 }
 
+static long kiln_skip_ows(const unsigned char *value, long index, long limit) {
+    while (index < limit && (value[index] == ' ' || value[index] == '\t'))
+        index++;
+    return index;
+}
+
+static long kiln_trim_ows(const unsigned char *value, long start, long limit) {
+    while (limit > start && (value[limit - 1] == ' ' || value[limit - 1] == '\t'))
+        limit--;
+    return limit;
+}
+
+static int kiln_quality(const unsigned char *value, long start, long limit) {
+    long length = limit - start;
+    if (length == 1) {
+        if (value[start] == '1')
+            return 1;
+        return value[start] == '0' ? 0 : -1;
+    }
+    if (length < 2 || length > 5)
+        return -1;
+    if (value[start + 1] != '.')
+        return -1;
+    unsigned char first = value[start];
+    if (first != '0' && first != '1')
+        return -1;
+    int positive = first == '1';
+    for (long i = start + 2; i < limit; i++) {
+        unsigned char digit = value[i];
+        if (digit < '0' || digit > '9' || (first == '1' && digit != '0'))
+            return -1;
+        positive |= digit != '0';
+    }
+    return first == '1' || positive;
+}
+
+static int kiln_gzip_kind(const unsigned char *value, long start, long limit) {
+    long length = limit - start;
+    if ((length == 4 && kiln_ascii_case_equal((const char *)value + start, "gzip", 4)) ||
+        (length == 6 && kiln_ascii_case_equal((const char *)value + start, "x-gzip", 6)))
+        return 1;
+    return length == 1 && value[start] == '*' ? 2 : 0;
+}
+
+static int kiln_accept_parameters(
+    const unsigned char *value, long start, long size, long *next_start, int *quality) {
+    int valid = 1;
+    long param_start = start;
+    while (param_start < size && value[param_start] != ',') {
+        if (value[param_start] == ';')
+            param_start++;
+        long param_end = param_start;
+        while (param_end < size && value[param_end] != ';' && value[param_end] != ',')
+            param_end++;
+        long equals = param_start;
+        while (equals < param_end && value[equals] != '=')
+            equals++;
+        long key_start = kiln_skip_ows(value, param_start, equals);
+        long key_end = kiln_trim_ows(value, key_start, equals);
+        if (key_end - key_start == 1 && (value[key_start] == 'q' || value[key_start] == 'Q')) {
+            if (equals == param_end) {
+                valid = 0;
+            } else {
+                long q_start = kiln_skip_ows(value, equals + 1, param_end);
+                long q_end = kiln_trim_ows(value, q_start, param_end);
+                int parsed = kiln_quality(value, q_start, q_end);
+                if (parsed < 0)
+                    valid = 0;
+                else
+                    *quality = parsed;
+            }
+        }
+        param_start = param_end;
+    }
+    *next_start = param_start + 1;
+    return valid;
+}
+
+long kiln_http_accepts_gzip(const char *text, long len) {
+    if (!text || len <= 0)
+        return 0;
+    const unsigned char *value = (const unsigned char *)text;
+    int star = 0;
+    long size = len;
+    long part_start = 0;
+    while (part_start < size) {
+        long token_end = part_start;
+        while (token_end < size && value[token_end] != ';' && value[token_end] != ',')
+            token_end++;
+        long token_start = kiln_skip_ows(value, part_start, token_end);
+        long token_limit = kiln_trim_ows(value, token_start, token_end);
+        int kind = kiln_gzip_kind(value, token_start, token_limit);
+        int quality = 1;
+        long next_start;
+        int valid = kiln_accept_parameters(value, token_end, size, &next_start, &quality);
+        if (valid) {
+            if (kind == 1)
+                return quality;
+            if (kind == 2)
+                star = quality;
+        }
+        part_start = next_start;
+    }
+    return star;
+}
+
 long kiln_http_open_beneath(long base_fd, const char *path, long len) {
     if (!path || len < 0 || memchr(path, '\0', (size_t)len))
         return -1;
@@ -465,6 +571,15 @@ long kiln_recv_status(void) {
 }
 
 long kiln_peer_closed(long fd);
+
+long kiln_socket_nonblock(long fd) {
+    if (fd < 0)
+        return -1;
+    int flags = fcntl((int)fd, F_GETFL);
+    if (flags < 0 || fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) < 0)
+        return -1;
+    return 0;
+}
 
 long kiln_sendv(
     long fd, const char *head, long head_len, const char *body, long body_len, long off) {

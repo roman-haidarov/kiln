@@ -234,7 +234,7 @@ module Kiln
       rescue StandardError
         true
       end)
-      return false if @max_lifetime.positive? && Kiln.now - entry.born >= @max_lifetime
+      return false if self.lifetime_spent?(entry)
 
       healthy
     end
@@ -275,8 +275,12 @@ module Kiln
       nil
     end
 
+    def lifetime_spent?(entry)
+      @max_lifetime.positive? && Kiln.now - entry.born >= @max_lifetime
+    end
+
     def stale_entry?(entry)
-      return true if @max_lifetime.positive? && Kiln.now - entry.born >= @max_lifetime
+      return true if self.lifetime_spent?(entry)
       return false unless @validate
 
       begin

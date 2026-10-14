@@ -52,20 +52,15 @@ module Kiln
       def begin_handling(slot, deadline)
         shard = slot.shard
         @shard_locks[shard].synchronize do
-          unless @shut_by_shard[shard] || slot.done || slot.state == :reaping
+          unless @draining || @shut_by_shard[shard] || slot.done || slot.state == :reaping
             slot.flying = true
             slot.deadline = deadline
             slot.state = :handling
             heap_push(slot)
-            if slot.hidx.zero? && @reap_wake.empty?
-              begin
-                @reap_wake.push(true, true)
-              rescue ThreadError
-                nil
-              end
-            end
+            signal_reaper if slot.hidx.zero?
             @in_flight[shard] += 1
             @seq[shard] += @shard_count
+            @seq[shard]
           end
         end
       end
@@ -98,8 +93,7 @@ module Kiln
         limit = Kiln.now + @write_timeout
         return false unless flush_outbox(sock, box, limit)
 
-        size = res.stream_length
-        head = Response.build_head(res.status, res.headers, size.nil? ? -1 : size, keep, version:)
+        head = Response.build_head(res.status, res.headers, Response.stream_size(res.stream_length), keep, version:)
         return false unless write_all(sock, head, limit)
         return keep if req.verb == 'HEAD'
 

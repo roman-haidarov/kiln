@@ -46,11 +46,11 @@ settings=build/ext/settings
 if [ ! -f "$settings" ] || [ "$(cat "$settings")" != "$build_key" ]; then
   rebuild=1
 fi
-for source in ext/picohttpparser/picohttpparser.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_json.c ext/kiln_yyjson.c ext/uvsrc/*.c; do
+for source in ext/picohttpparser/picohttpparser.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/uvsrc/*.c ext/zngsrc/*.c; do
   object=build/ext/$(basename "$source" .c).o
   extra=""
   case "$source" in
-    ext/kiln_json.c | ext/kiln_yyjson.c) extra="-ftls-model=initial-exec -I$hdr_dir" ;;
+    ext/kiln_json.c | ext/kiln_yyjson.c | ext/kiln_gzip.c) extra="-ftls-model=initial-exec -I$hdr_dir" ;;
   esac
   if [ "$rebuild" -eq 1 ] || [ ! -f "$object" ]; then
     "$cc_bin" $flags $extra -c "$source" -o "$object"

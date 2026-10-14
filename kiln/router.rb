@@ -353,7 +353,7 @@ module Kiln
       seq = @seq
       node, names, glob = insert(segments, seq)
       refuse_duplicate(node, verb, path)
-      dynamic = glob || names.any? { |name| !name.empty? }
+      dynamic = variable_route?(names, glob)
       node.add(Route.new(verb, names, wrap(handler), dynamic, glob, seq))
       @seq = seq + 1
       index_route(verb, segments, names, glob)
@@ -407,8 +407,10 @@ module Kiln
       decoded[0]
     end
 
+    def variable_route?(names, glob) = glob || names.any? { |name| !name.empty? }
+
     def exact_key(segments, names, glob)
-      return nil if glob || names.any? { |name| !name.empty? }
+      return nil if variable_route?(names, glob)
       return EXACT_ROOT if segments.empty?
       return nil if segments.any? { |seg| seg.include?('%') }
 

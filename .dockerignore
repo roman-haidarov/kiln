@@ -1,0 +1,12 @@
+.git
+.ruby-lsp
+build
+validation
+AGENTS.md
+.DS_Store
+*.dSYM
+*.core
+*.log
+*.folded
+*.prof
+*.zip

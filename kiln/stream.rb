@@ -24,10 +24,9 @@ module Kiln
       text = data.to_s
       return self if text.empty?
 
-      bytes = text.ascii_only? ? text : text.b
-      return send_now(bytes) if bytes.bytesize >= FLUSH_AT
+      return send_now(text) if text.bytesize >= FLUSH_AT
 
-      @buffer << bytes
+      @buffer << text
       flush if @buffer.bytesize >= FLUSH_AT
       self
     end

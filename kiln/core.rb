@@ -76,7 +76,9 @@ module Kiln
       reply = timeout_reply(err)
       return fail_request(log, ctx, err) unless reply
 
-      ctx.res.text(reply[0], status: reply[1])
+      apply_reply(ctx, reply)
     end
+
+    def apply_reply(ctx, reply) = ctx.res.text(reply[0], status: reply[1])
   end
 end

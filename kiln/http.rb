@@ -3,13 +3,19 @@ module Kiln
     FORMAT = '%a, %d %b %Y %H:%M:%S GMT'
 
     class << self
-      def value
+      def value = current.dup
+
+      def append(out) = out << current
+
+      private
+
+      def current
         sec = Process.clock_gettime(Process::CLOCK_REALTIME, :second)
         cached = @cached
         return cached[1] if cached && cached[0] == sec
 
-        text = Time.now.utc.strftime(FORMAT).b.freeze
-        @cached = [sec, text].freeze
+        text = Time.now.utc.strftime(FORMAT).b
+        @cached = [sec, text]
         text
       end
     end
@@ -79,20 +85,31 @@ module Kiln
       @date = false
     end
 
+    LOWER = %w[Content-Type Content-Length Content-Encoding Content-Range Content-Disposition Cache-Control ETag
+               Last-Modified Location Vary Set-Cookie Accept-Ranges Access-Control-Allow-Origin
+               Access-Control-Allow-Credentials Access-Control-Allow-Methods Access-Control-Allow-Headers
+               Access-Control-Expose-Headers Access-Control-Max-Age X-Request-Id Allow Date Expires
+               X-Accel-Buffering].to_h { |name| [name.freeze, name.downcase.freeze] }.freeze
+    CANONICAL = LOWER.keys.to_h { |name| [name, name] }.freeze
+
     def []=(name, value)
       text = name.to_s
-      key = text.downcase
+      key = lower(text)
       delete_key(key)
       store(text, key, value.to_s)
     end
 
     def add(name, value)
       text = name.to_s
-      store(text, text.downcase, value.to_s)
+      store(text, lower(text), value.to_s)
     end
 
     def [](name)
-      key = name.to_s.downcase
+      key = lower(name.to_s)
+      lookup(key)
+    end
+
+    def lookup(key)
       index = 1
       while index < @items.size
         return @items[index + 1] if @items[index] == key
@@ -105,7 +122,7 @@ module Kiln
     def key?(name) = !self[name].nil?
 
     def delete(name)
-      delete_key(name.to_s.downcase)
+      delete_key(lower(name.to_s))
     end
 
     def plain = write_type(TEXT_PLAIN)
@@ -115,13 +132,34 @@ module Kiln
     def each
       index = 0
       while index < @items.size
-        yield @items[index], @items[index + 2]
+        yield @items[index].dup, @items[index + 2]
         index += 3
       end
     end
 
+    def append_to(out)
+      index = 0
+      while index < @items.size
+        name = @items[index]
+        value = @items[index + 2]
+        out << name << Response::FIELD_SEP << value << Response::CRLF if value.frozen? || !HttpNative.ctl?(value)
+        index += 3
+      end
+      out
+    end
+
     def size = @items.size / 3
     def date? = @date
+
+    def no_transform?
+      index = 1
+      while index < @items.size
+        return true if @items[index] == 'cache-control' && @items[index + 1].downcase.include?('no-transform')
+
+        index += 3
+      end
+      false
+    end
 
     private
 
@@ -130,14 +168,26 @@ module Kiln
       return if HOP.include?(key)
       return if HttpNative.ctl?(value)
 
-      @items.push(frozen_copy(name))
-      @items.push(frozen_copy(key))
-      @items.push(frozen_copy(value))
+      @items.push(owned_name(name))
+      @items.push(key)
+      @items.push(owned(value))
       @date = true if key == 'date'
     end
 
-    def frozen_copy(text)
-      text.frozen? ? text : text.dup.freeze
+    def owned(text) = text.frozen? ? text : text.dup
+
+    def owned_name(text)
+      return text if text.frozen?
+
+      known = CANONICAL[text]
+      known.nil? ? text.dup : known
+    end
+
+    def lower(text)
+      known = LOWER[text]
+      return known unless known.nil?
+
+      text.downcase
     end
 
     def delete_key(key)
@@ -191,12 +241,24 @@ module Kiln
     STATUS_11.freeze
     STATUS_10.freeze
     attr_accessor :status, :body
-    attr_reader :headers, :stream_body, :stream_length
+    attr_reader :headers, :stream_body, :stream_length, :noted_length, :noted_type
 
     def initialize
       @status = 200
       @headers = Headers.new
       @body = ''
+      @stream_body = nil
+      @stream_length = nil
+      @noted_length = nil
+      @noted_type = nil
+    end
+
+    def note_representation(size, type)
+      @noted_length = size
+      @noted_type = type
+    end
+
+    def unstream
       @stream_body = nil
       @stream_length = nil
     end
@@ -282,9 +344,13 @@ module Kiln
           size = no_body?(status) ? 0 : body_size
           out << LENGTH_PREFIX << (size < LENGTHS.size ? LENGTHS[size] : size.to_s) << CRLF
         end
-        out << DATE_PREFIX << HttpDate.value << CRLF unless valid && headers.date?
+        unless valid && headers.date?
+          out << DATE_PREFIX
+          HttpDate.append(out)
+          out << CRLF
+        end
         if valid
-          headers.each { |name, value| out << name << FIELD_SEP << (value.ascii_only? ? value : value.b) << CRLF }
+          headers.append_to(out)
         end
         if keep_alive && old
           out << KEEP_ALIVE
@@ -301,6 +367,8 @@ module Kiln
 
         body_value.is_a?(String) ? body_value : body_value.to_s
       end
+
+      def stream_size(length) = length.nil? ? -1 : length
 
       def stream_framing(res, version, keep)
         length = res.stream_length

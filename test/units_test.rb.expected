@@ -24,6 +24,9 @@ ok   informational status cannot be sent as final response
 ok   response formatting does not modify input
 ok   unsafe header is rejected on insertion
 ok   stored header cannot be changed after insertion
+ok   a stored header changed to carry CR or LF never reaches the wire
+ok   each returns detached header names that cannot rename stored headers
+ok   HttpDate.value is a copy; changing it never reaches the wire
 ok   Date header is recognized case-insensitively
 ok   coop_budget rejects negative values
 -- HTTP syntax

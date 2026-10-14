@@ -2,7 +2,9 @@
 #define _GNU_SOURCE
 #endif
 #include <arpa/inet.h>
+#include <signal.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +29,35 @@ long kiln_scan_request_head(const char *buf, long len, int64_t *out, long cap);
 #define KUV_EXPECT            24
 #define KUV_WRITEV_MIN        4096
 #define KUV_PIPELINE_MAX      16
+
+static __thread sigset_t kuv_old_sigmask;
+static __thread int kuv_sigpipe_blocked;
+
+long kiln_uv_sigpipe_enter(void) {
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, SIGPIPE);
+    int rc = pthread_sigmask(SIG_BLOCK, &set, &kuv_old_sigmask);
+    if (rc == 0)
+        kuv_sigpipe_blocked = 1;
+    return rc;
+}
+
+long kiln_uv_sigpipe_leave(void) {
+    if (!kuv_sigpipe_blocked)
+        return 0;
+    sigset_t pending;
+    sigpending(&pending);
+    if (sigismember(&pending, SIGPIPE) == 1) {
+        sigset_t set;
+        sigemptyset(&set);
+        sigaddset(&set, SIGPIPE);
+        int signal_number;
+        sigwait(&set, &signal_number);
+    }
+    kuv_sigpipe_blocked = 0;
+    return pthread_sigmask(SIG_SETMASK, &kuv_old_sigmask, NULL);
+}
 
 typedef struct kuv_conn {
     uv_tcp_t tcp;
@@ -318,7 +349,7 @@ static void kuv_parse(kuv_conn *c) {
         int has_keep = 0;
         int expect_continue = 0;
         for (long i = 0; i < n; i++) {
-            int64_t *h = scan + 5 + 5 * i;
+            const int64_t *h = scan + 5 + 5 * i;
             if (h[4] == KUV_TRANSFER_ENCODING)
                 bad = 501;
             else if (h[4] == KUV_CONTENT_LENGTH && kuv_digits(start + h[2], (long)h[3], &body) < 0)

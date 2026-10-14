@@ -67,15 +67,15 @@ server shutdown, and worker lifecycle. The mutation runner checks that selected
 regressions are detected:
 
 ```sh
-SPINEL_WORKERS=1 python3 bench/mutations.py
+SPINEL_WORKERS=1 ruby bench/mutations.rb
 ```
 
 ## HTTP parser checks
 
-`bench/differential.mjs` compares the parser with llhttp WASM over generated
+`bench/differential.rb` compares the parser with llhttp WASM over generated
 inputs and records complete counters and examples as JSON. The captured corpus
 contained 100,056 cases across two seeds, with no unexplained acceptance or
-request-boundary mismatch. `bench/native_fuzz.c` runs native parser cases under
+request-boundary mismatch. `bench/native_fuzz.rb` runs native parser cases under
 ASan and UBSan; 100,000 cases completed without sanitizer errors. These checks
 do not prove correctness for every possible input, and sanitizer runs do not
 check for data races.
@@ -308,3 +308,25 @@ methods, and `Style/HashEachMethods` on `refresh_backlog`, whose loop deletes
 from the Hash it walks, so it iterates a copy of the values. Reek, flog, flay
 and rubyfast were not run here: they install from rubygems.org, which the
 sandbox could not reach.
+
+## Compression
+
+`test/compress_test.rb` inflates every answer with Spinel's own
+`zlib` package, a different DEFLATE implementation from the vendored zlib-ng.
+It covers `Accept-Encoding` with q-values, the type and size rules, `Vary`,
+the weakened `ETag`, untouched 204, 206 and 304 answers, `no-transform`, an
+existing `Content-Encoding`, a sized stream that loses its length, SSE, and a
+static file whose weak ETag still revalidates. On the event backend with
+`handlers: 0` and `handlers: 2` and on the base backend, the first compressed
+SSE event reaches the client while the stream is still open. It passes under
+`SPINEL_GC_STRESS=1`. On Linux x86-64 with Spinel `9922a2c` the updated
+fourteen-file suite passes with `SPINEL_WORKERS=2`; the compiled tests also
+pass against their snapshots with `SPINEL_WORKERS=1`. The blocked-handler
+deadline test uses `handlers: 2`: inline handlers on the event loop cannot
+be preempted safely. The server lifecycle test passed twelve consecutive runs
+at `SPINEL_WORKERS=2`, checking the shutdown and free-slot transition.
+
+`ext/kiln_gzip.c` is clean under clang-tidy 18, cppcheck 2.13 (exhaustive) and
+lizard, apart from `no-int-to-ptr` on the GC macros and `unusedFunction` on the
+FFI exports. The vendored zlib-ng sources are not linted, like libuv. RuboCop
+1.39 reports only `Metrics` on the test's router builder in the new files.

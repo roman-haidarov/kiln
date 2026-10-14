@@ -1,0 +1,59 @@
+-- negotiation
+ok   plain gzip
+ok   list with q
+ok   gzip refused with q=0
+ok   x-gzip alias
+ok   star allows gzip
+ok   explicit gzip;q=0 beats star
+ok   identity only
+ok   case and spaces
+ok   q outside 0..1 is ignored
+ok   q without a value is ignored
+ok   an invalid gzip q leaves the star
+ok   q accepts an empty fractional part
+ok   q accepts three decimal places
+ok   q rejects more than three decimal places
+ok   the last valid q parameter wins
+ok   levels are validated
+-- bodies
+ok   text is gzipped
+ok   gzip round-trips through another inflater
+ok   Vary is set
+ok   json is gzipped
+ok   no Accept-Encoding: identity with Vary
+ok   q=0 is respected
+ok   small bodies stay as they are, without Vary
+ok   images are not recompressed
+ok   an existing Content-Encoding is kept
+ok   no-transform is honoured
+ok   a second Cache-Control no-transform is honoured
+ok   205 is not encoded
+ok   an application 304 without a length is left unchanged
+ok   204 is untouched
+ok   strong ETag becomes weak
+ok   Accept-Ranges is dropped
+ok   HEAD carries the same encoding
+ok   a body that raises is a plain 500
+-- streams
+ok   a sized stream loses its length and is gzipped
+ok   SSE is gzipped
+-- files
+ok   a static file is gzipped with a weak ETag
+ok   a 206 range is not gzipped
+ok   a compressed file revalidates with the weak ETag
+ok   an identity revalidation keeps the strong ETag and Vary
+ok   a small static file is not compressed
+ok   a small file revalidates with its strong ETag
+ok   If-Match of the uncompressed tag is 412
+ok   If-Match star still compresses
+ok   a conditional POST is not rejected after its handler has run
+ok   event/0: gzip over the wire
+ok   event/0: the first gzipped event arrives before the stream ends
+ok   event/0: the whole SSE stream inflates
+ok   event/2: gzip over the wire
+ok   event/2: the first gzipped event arrives before the stream ends
+ok   event/2: the whole SSE stream inflates
+ok   base: gzip over the wire
+ok   base: the first gzipped event arrives before the stream ends
+ok   base: the whole SSE stream inflates
+done

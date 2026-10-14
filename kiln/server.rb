@@ -2,19 +2,20 @@ module Kiln
   class Server
     EventOptions = Data.define(:handler, :app, :log, :host, :port, :max_conns,
                                :read_timeout, :request_timeout, :write_timeout,
-                               :max_body, :handlers) do
+                               :max_body, :handlers, :max_streams) do
       include Check
 
       def initialize(handler:, app:, log:, port:, host: '0.0.0.0',
                      max_conns: 10_000, read_timeout: 5.0, request_timeout: 2.0,
-                     write_timeout: 10.0, max_body: 1 << 20, handlers: 0)
+                     write_timeout: 10.0, max_body: 1 << 20, handlers: 0, max_streams: 1024)
         check_rules([
                       ['max_conns', max_conns, :int_at_least_one],
                       ['max_body', max_body, :int_at_least_zero],
                       ['read_timeout', read_timeout, :seconds_above],
                       ['request_timeout', request_timeout, :seconds_above],
                       ['write_timeout', write_timeout, :seconds_above],
-                      ['handlers', handlers, :int_at_least_zero]
+                      ['handlers', handlers, :int_at_least_zero],
+                      ['max_streams', max_streams, :int_at_least_one]
                     ])
         super
       end

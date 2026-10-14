@@ -21,6 +21,8 @@ module Kiln
     ffi_func :kiln_uv_busy, [], :long
     ffi_func :kiln_uv_aborted, [], :long
     ffi_func :kiln_uv_closes_after, %i[long long long], :long
+    ffi_func :kiln_uv_sigpipe_enter, [], :long
+    ffi_func :kiln_uv_sigpipe_leave, [], :long
   end
 
   class Server
@@ -43,12 +45,15 @@ module Kiln
         @app = config.app
         @log = config.log
         @wake_lock = Mutex.new
-        @in_handler = false
+        @parked = false
+        @wake_at = 0.0
+        @inline_busy = false
         @pump_stopping = false
         @uv_closed = false
         @host = config.host
         @port = config.port
         @max_conns = config.max_conns
+        @max_streams = config.max_streams
         @max_body = config.max_body
         @idle_ms = (config.read_timeout * 1000).to_i
         @write_ms = (config.write_timeout * 1000).to_i
@@ -95,7 +100,14 @@ module Kiln
         end
         @pump = Thread.new do
           Thread.current.report_on_exception = false
-          pump
+          rc = Uv.kiln_uv_sigpipe_enter
+          raise IOError, "cannot block SIGPIPE on event thread (#{rc})" unless rc.zero?
+
+          begin
+            pump
+          ensure
+            Uv.kiln_uv_sigpipe_leave
+          end
         end
         self
       end
@@ -133,7 +145,7 @@ module Kiln
 
       def stream_ready(outlet)
         @ready << outlet
-        wake_pump
+        nudge_pump
       end
 
       def draining? = @draining
@@ -151,28 +163,32 @@ module Kiln
         meta = Array.new(5, 0)
         drained = false
         until @stop && workers_stopped?
-          if @draining && !drained
-            Uv.kiln_uv_drain
-            drained = true
-          end
-          Uv.kiln_uv_poll
-          handled = drain_done + pump_streams + expire_handlers
-          loop do
-            src = Uv.kiln_uv_next(scan, HttpNative::CAP, meta)
-            break if src.empty?
-
-            if @cutoff
-              Uv.kiln_uv_abort(meta[3], meta[4])
-              @aborted_taken += 1
-            else
-              serve(src, scan, meta)
+          begin
+            if @draining && !drained
+              Uv.kiln_uv_drain
+              drained = true
             end
-            handled += 1
+            Uv.kiln_uv_poll
+            handled = drain_done + pump_streams + expire_handlers
+            loop do
+              src = Uv.kiln_uv_next(scan, HttpNative::CAP, meta)
+              break if src.empty?
+
+              if @cutoff
+                Uv.kiln_uv_abort(meta[3], meta[4])
+                @aborted_taken += 1
+              else
+                serve(src, scan, meta)
+              end
+              handled += 1
+            end
+            @dispatch_ready = true if @cutoff
+            Uv.kiln_uv_flush
+            @quiet = drained && @inflight.zero? && Uv.kiln_uv_busy.zero?
+            park(drained ? 0.01 : handler_wait) if handled.zero?
+          rescue DeadlineExceeded
+            nil
           end
-          @dispatch_ready = true if @cutoff
-          Uv.kiln_uv_flush
-          @quiet = drained && @inflight.zero? && Uv.kiln_uv_busy.zero?
-          IO.select([@poller], nil, nil, drained ? 0.01 : handler_wait) if handled.zero?
         end
         drain_done
         Uv.kiln_uv_flush
@@ -257,9 +273,36 @@ module Kiln
       end
 
       def wake_pump
+        @wake_lock.synchronize { Uv.kiln_uv_wake if wakeable? }
+      end
+
+      def nudge_pump(deadline = nil)
         @wake_lock.synchronize do
-          Uv.kiln_uv_wake if !@uv_closed && !@pump_stopping && @pump && @pump.alive?
+          return unless @parked
+          return if deadline && deadline >= @wake_at
+
+          Uv.kiln_uv_wake if wakeable?
         end
+      end
+
+      def wakeable? = !@uv_closed && !@pump_stopping && @pump&.alive? == true
+
+      def park(timeout)
+        @wake_lock.synchronize do
+          @parked = true
+          @wake_at = Kiln.now + timeout
+        end
+        IO.select([@poller], nil, nil, timeout) if @done.empty? && @ready.empty?
+      ensure
+        @wake_lock.synchronize { @parked = false }
+      end
+
+      def fallback_context(ctx, status, body)
+        response = Response.new
+        response.text(body, status:)
+        fallback = Context.new(ctx.req, response, ctx.app, ctx.id, ctx.deadline)
+        fallback.gone = ctx.gone
+        fallback
       end
 
       def stop_threads(threads, deadline)
@@ -278,7 +321,7 @@ module Kiln
         wait_dead(thread, deadline)
         if thread.alive?
           @wake_lock.synchronize do
-            thread.kill if @in_handler && !@pump_stopping
+            thread.kill if @inline_busy && !@pump_stopping
           end
         end
         wait_dead(thread, Kiln.now + 1.0)
@@ -324,23 +367,30 @@ module Kiln
           return 0
         end
         @inflight += 1
-        @wake_lock.synchronize { @in_handler = true }
         begin
-          run(ctx)
+          @wake_lock.synchronize { @inline_busy = true }
+          begin
+            run(ctx)
+          ensure
+            @wake_lock.synchronize { @inline_busy = false }
+          end
+          if Kiln.now >= ctx.deadline
+            deliver(fallback_context(ctx, 504, "deadline exceeded\n"), slot, gen)
+          else
+            deliver(ctx, slot, gen)
+          end
         ensure
-          @wake_lock.synchronize { @in_handler = false }
+          @inflight -= 1
         end
-        deliver(ctx, slot, gen)
-        @inflight -= 1
       end
 
       def work(lane, index)
         while (job = lane.pop)
           @active_locks[index].synchronize { @active[index] = job }
-          wake_pump
           ctx = job[0]
+          nudge_pump(ctx.deadline)
           run(ctx) if Kiln.now < ctx.deadline
-          ctx.res.text("deadline exceeded\n", status: 504) if Kiln.now >= ctx.deadline
+          job[0] = fallback_context(ctx, 504, "deadline exceeded\n") if Kiln.now >= ctx.deadline
           accepted = @active_locks[index].synchronize do
             if @active[index].equal?(job)
               @active[index] = nil
@@ -352,7 +402,7 @@ module Kiln
           break unless accepted
 
           @done << job
-          wake_pump
+          nudge_pump
         end
       end
 
@@ -404,11 +454,11 @@ module Kiln
         res = ctx.res
         version = req.http_version
         chunked, keep = Response.stream_framing(res, version, keep)
-        size = res.stream_length
-        head = Response.build_head(res.status, res.headers, size.nil? ? -1 : size, keep, version:)
+        head = Response.build_head(res.status, res.headers, Response.stream_size(res.stream_length), keep, version:)
         if req.verb == HEAD
           return Uv.kiln_uv_send(slot, gen, head, head.bytesize, EMPTY_BODY, 0, keep ? 0 : 1)
         end
+        return deliver(fallback_context(ctx, 503, "too many streams\n"), slot, gen) if @outlets.size >= @max_streams
         return -1 if Uv.kiln_uv_part(slot, gen, head, head.bytesize).negative?
 
         spawn_stream(ctx, Outlet.new(self, slot, gen, keep, chunked))
@@ -528,7 +578,7 @@ module Kiln
           @log.error("#{err.class}: #{err.message}")
           reply = ["internal error\n", 500]
         end
-        ctx.res.text(reply[0], status: reply[1])
+        Kiln.apply_reply(ctx, reply)
       end
     end
 

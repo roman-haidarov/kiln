@@ -1,5 +1,212 @@
 # Changelog
 
+## 0.0.3
+
+A per-request memory leak, a crash on Linux when a streaming client hangs up,
+two changes to what `Headers` and `HttpDate` hand out, and fixes to lanes
+deadline handling and event-loop wake-ups.
+
+### Lanes: a late job answered with its untouched response
+
+When a lane took a job whose deadline had already passed, it built a 504
+context with `fallback_context` but queued the original job, so the client got
+the handler's untouched response (an empty 200) instead of `504 deadline
+exceeded`. The lane now queues the 504 context. `test/event_lanes_test.rb`
+sends 20 requests to a lane with a 1 µs `request_timeout` and expects 504 for
+all of them; the check fails without the fix.
+
+### Lanes: wake the event thread only when it sleeps
+
+A lane woke the event thread twice per request: once after taking the job, so
+the deadline watchdog could recompute its timeout, and once after finishing.
+`wake_pump` is now kept for control paths (start, shutdown) and lanes and
+streams call `nudge_pump`, which wakes the event thread only if it is parked,
+and for a new job only if the job's deadline is earlier than the time the
+thread will wake by itself (at most 0.25 s ahead). Before parking, the event
+thread records that it is parked under `@wake_lock` and checks the done and
+ready queues again, so a job finished in between is never left waiting.
+Streams use the same parked-state check. The event loop parks immediately
+when there is no work, without active spinning.
+
+### Memory leak from `String#freeze`
+
+Spinel makes a frozen heap String immortal: `sp_str_freeze_val` pins it in its
+slab (`sp_slab_pin`), and `GC.start` does not free it. Measured on Linux:
+49 bytes kept for every `freeze` of a short String, 33 bytes for every header
+written through `Headers#[]=` or `#add`, which froze a copy of the name, the
+key and the value. `Static` froze its `ETag` and `Last-Modified` on every
+response, and the `Date` cache froze a new String once a second. Under load
+RSS grew by 30 to 83 bytes per request and never came back (38 MB to 806 MB
+across one regression run), and every collection swept the pinned Strings,
+so GC sweeping took 11% of busy CPU on the first feature of a run and 61% by
+the fifth. Nothing on the request path calls `freeze` now; RSS growth per
+request is about 0.
+
+### `Headers` contract
+
+- A frozen name is stored as it is, a common name as the table's frozen String,
+  and any other name as a copy; nothing is interned. `each` yields a copy of
+  each name, so changing it cannot rename the stored header, and the caller's
+  own String is not frozen. Names never leave `Headers` otherwise, so
+  `append_to` writes them without checking them again.
+- Values are no longer frozen. `[]=` and `add` still store a copy of an
+  unfrozen value, so changing the caller's String later does not change the
+  header, and a frozen value is stored as it is. The copy that `[]` and `each`
+  return can be changed, and the change is sent. Before, it raised
+  `FrozenError`.
+- A value is checked for control bytes when it is stored, as before. `[]` and
+  `each` hand out the stored value, so `append_to` checks an unfrozen value
+  again and drops the header if it now carries CR or LF.
+- Lookups use a table from common names to their lowercase keys and call
+  `downcase` only for other names, so a lookup or write of a common name
+  allocates nothing for the key.
+
+`test/units_test.rb` checks that two passes of `each` yield different name
+objects. Changing a yielded name and checking the wire is not enough on its
+own: with Spinel's default String semantics the change does not reach the
+stored String, so that check passed even when `each` yielded the stored name.
+
+`append_to` appends to the String it is given and its return value is not
+used. Spinel `9922a2c` refuses the other shape, `out = headers.append_to(out)`:
+"a String a method returns as its parameter is mutated in place ... Mutate and
+read the String through the variable passed in". The 0.0.2 row saying that
+`<<` on a String argument does not change the caller's String did not
+reproduce in a minimal case, `Stream.sse`'s old `field` helper included; what
+triggered it there is not known.
+
+Rechecking each name with `token?` and each key against the hop-by-hop list at
+serialisation cost about 300 ns per response with four headers
+(`Kiln::Response.build_wire` with `Content-Type`, `Vary`, `X-Request-Id` and a
+frozen `X-Frame-Options`: 3.6-4.1 µs against 3.2-3.8 µs over six runs), and
+copying frozen names added an allocation per such header; both are gone. On
+`/text` of the regression server, which sends two headers, the difference is
+within noise: 12.68 and 13.14 µs of CPU per request before, 12.62 and 12.72
+after, alternating builds.
+
+### `HttpDate.value`
+
+`HttpDate.value` returns a copy of the cached `Date` value, which the caller
+may change. `build_head` appends the cache itself through `HttpDate.append`.
+Before, `value` returned the cached String. With Spinel's default String
+semantics a change to it made a copy and did not reach the cache, but under
+`--share-strings` it did: a reproduction of the old module wrote an injected
+line into the next `Date` header. The new module keeps the cache private in
+both modes.
+
+### SIGPIPE on Linux
+
+A client that closed its connection during a stream ended the whole process
+with SIGPIPE (exit 141) on the event backend: libuv writes with `write`, and
+only macOS sets `SO_NOSIGPIPE` on the socket. `kiln_uv_listen` now ignores
+SIGPIPE, as Rust's standard library does at startup, so the write fails with
+`EPIPE` and the stream ends with `Kiln::ClientGone`. The base backend already
+sent with `MSG_NOSIGNAL`. Ignoring SIGPIPE is process-wide.
+
+### Smaller changes
+
+- `Kiln::Gzip.once` takes a deflate state from a pool of up to 4 per level and
+  compresses into a per-thread scratch buffer (released above 1 MiB), then
+  copies the result into a GC String of its exact size.
+- `kiln_json_generate` starts its buffer at the size of the previous result on
+  that thread (up to 1 MiB).
+- `Stream#write` no longer scans each write with `ascii_only?`: Spinel appends
+  any String to a binary buffer byte for byte.
+- `Compress` writes `Vary`, `Content-Encoding` and `Accept-Ranges` through
+  frozen constants.
+
+On Linux x86-64 with Spinel `9922a2c`, inline mode, two rounds alternating the
+old and new builds under `wrk -c25`: `/text` 73.4k-74.3k against 78.6k-81.4k
+requests/s, `/json` 41.5k-45.9k against 43.2k-49.0k, `/gzip` 35.1k-37.5k
+against 40.6k-44.9k. Allocations per request: `/text` 23.2 to 21.2, `/gzip`
+31.2 to 26.2.
+
+### Compression
+
+`Kiln::Compress.new(app, level: 2, stream_level: 1, min_size: 1024)` is a
+middleware after actix's `Compress` and Go's `gzhttp`. It gzips a response
+when its `Content-Type` is `text/*`, `application/json`, `javascript`, `xml`,
+`xhtml+xml`, `wasm`, any `+json` or `+xml` type, or `image/svg+xml`; its body
+is at least `min_size` bytes (1 KiB, gzhttp's default), or it is a stream; and
+`Accept-Encoding` allows gzip. `Accept-Encoding` is read with q-values:
+`gzip;q=0` refuses it, `x-gzip` counts as gzip, and `*` allows it unless gzip
+is listed. A qvalue outside 0..1 is ignored, and only that one preference is
+dropped. A response that could be compressed gets `Vary: Accept-Encoding`
+whether or not this client accepts gzip. A compressed response gets
+`Content-Encoding: gzip`, a strong `ETag` becomes weak, and `Accept-Ranges`
+is removed. For `GET` and `HEAD`, `If-Match` is checked again against that weak
+validator, so a tag that matched the uncompressed bytes is a 412, while `*`
+still passes. Other conditional methods retain the identity representation;
+their handlers must evaluate the precondition before doing work. A 304
+for a response this layer would compress carries that `Vary` and weak `ETag`
+and drops `Accept-Ranges`; it does not carry `Content-Encoding`. A 304 for a
+small or incompressible representation is unchanged. The body is compressed
+before those fields are written, so a body that raises does not leave the
+500 marked as gzip. Status 204, 205 and 206, responses with a
+`Content-Encoding` or `Content-Range`, and any `Cache-Control: no-transform`
+field are left alone.
+
+A stream is compressed on the fly at `stream_level`. Its `out` wraps the
+stream's writer: writes go through deflate, and `out.flush`, `out.event` and
+`out.comment` do a `Z_SYNC_FLUSH` and flush the writer, so each SSE event
+reaches the client when it is sent. A stream with `length:` loses the length,
+since compressing changes it, and goes out chunked.
+
+`ext/kiln_gzip.c` binds zlib-ng's native API (`zng_*`) with Spinel
+`native_func`s that return GC Strings: `Kiln::Gzip.once` for a whole body, and
+a handle for streams, closed in `ensure`. Errors raise `Kiln::CompressError`.
+
+### Choosing the deflate library
+
+AGENTS.md asks for the fastest library with evidence, on Linux and ARM. Four
+were measured with the same harness (gzip, one core, Linux x86-64): a 686 KB
+JSON document, a 177 KB HTML page, a 1.7 KB JSON object, and an SSE event of
+120 bytes followed by `Z_SYNC_FLUSH`.
+
+| Library | Level | JSON MB/s | ratio | HTML MB/s | SSE flush |
+|---|---|---|---|---|---|
+| system zlib 1.3 | 1 / 2 / 6 | 180 / 162 / 78 | .164 / .158 / .131 | 155 / 140 / 32 | 1148 ns |
+| zlib-ng, SIMD | 1 / 2 / 6 | 490 / 331 / 139 | .211 / .151 / .129 | 465 / 315 / 46 | 87 ns |
+| zlib-ng, generic C | 1 / 2 | 375 / 238 | .211 / .151 | 359 / 231 | 224 ns |
+| libdeflate | 1 / 2 / 6 | 321 / 224 / 142 | .150 / .140 / .118 | 335 / 241 / 94 | no streaming |
+| miniz | 1 / 6 | 151 / 48 | .174 / .131 | 139 / 21 | 2240 ns |
+
+libdeflate matches zlib-ng at the same ratio but cannot stream, and kiln needs
+`Z_SYNC_FLUSH` for SSE; miniz is the slowest; system zlib is about 1.5 times
+slower than generic zlib-ng and 2 times slower than its SIMD build. zlib-ng is
+vendored in `ext/zlib-ng` (zlib license) as its generic C build, which is
+portable to Linux, macOS and ARM by construction: the SIMD build is faster
+again but relies on per-architecture dispatch that could not be checked on ARM
+here. Only compression is vendored; the six files from `arch/generic` sit in
+the root as `generic_*.c` so their includes resolve, and `ext/zngsrc` holds one
+wrapper per file with the defines `configure` would pass. The native API keeps
+zlib-ng's symbols apart from a system libz that Spinel's own `zlib` package may
+link into the same program.
+
+Level 1 is zlib-ng's `deflate_quick`: 40% larger output than level 2. Level 2
+is the default for bodies. A 120-byte event compresses to 9 bytes at every
+level, while its flush costs 224 ns at level 1 and 1678 ns at level 2, so
+streams default to level 1.
+
+End to end (`bench/compress_server.rb`, event backend, `wrk -c20`, one core):
+the 686 KB document goes out as 106 KB, 3.0 ms of CPU per request against
+0.1 ms uncompressed, nearly all of it deflate; the 1.7 KB object goes out as
+523 bytes, 28 µs against 8 µs. Reusing a compressor per thread with
+`zng_deflateReset` saved about 5% on the small object and was left out: it
+keeps some 280 KB per thread and level, and the base backend runs a thread per
+connection.
+
+### Server
+
+An event handler running on a worker thread (`handlers: N`) that blocks past
+`request_timeout` is answered 504, and the worker is replaced. Inline handlers
+(`handlers: 0`) cannot be preempted without interrupting the event loop; use
+worker threads when a strict deadline matters. Once `Server::Base` shutdown
+has begun, a connection that has not yet been registered is not handed to the
+handler; the client gets 503. Base sockets are set to nonblocking mode when
+accepted. This bounds `sendmsg` on Darwin even when `MSG_DONTWAIT` is ignored:
+the write waits in `IO.select` until the peer reads or `write_timeout`
+expires.
+
 ## 0.0.2
 
 Trie router, `Server#run`, background tasks, CORS and default headers, a

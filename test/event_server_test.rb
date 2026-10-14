@@ -50,7 +50,24 @@ router = Kiln::Router.new
                                      Kernel.sleep 1.5
                                      ctx.res.text("late\n")
                                    })
+                     .get('/noncooperative', lambda do |ctx|
+                       Kernel.sleep 0.3
+                       ctx.res.headers['Content-Encoding'] = 'gzip'
+                       ctx.res.text('late')
+                     end)
                      .seal!
+
+pipe_marker = -> {}
+old_pipe_handler = Signal.trap('PIPE', pipe_marker)
+pipe_server = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+pipe_server.start
+pipe_after_start = Signal.trap('PIPE', 'DEFAULT')
+Signal.trap('PIPE', pipe_marker)
+pipe_server.shutdown(grace: 0)
+pipe_after_stop = Signal.trap('PIPE', 'DEFAULT')
+Signal.trap('PIPE', old_pipe_handler)
+check 'event server preserves the process SIGPIPE handler',
+      pipe_after_start.equal?(pipe_marker) && pipe_after_stop.equal?(pipe_marker)
 
 inline = Kiln::Server::Event.new(router, nil, log: log, port: 0, request_timeout: 0.2)
 inline.start
@@ -96,6 +113,10 @@ check 'inline: request deadline is visible to Kiln.deadline',
       exchange(ip, "GET /deadline HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").end_with?('set')
 check 'inline: Kiln.check! after the deadline -> 504',
       exchange(ip, "GET /late HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").start_with?('HTTP/1.1 504 ')
+late_inline = exchange(ip, "GET /noncooperative HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+check 'inline: a late handler returns a clean 504 without interrupting the event loop',
+      late_inline.start_with?('HTTP/1.1 504 ') && !late_inline.include?('Content-Encoding:') && inline.killed.zero? &&
+      exchange(ip, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").end_with?("Hello, World!\n")
 check 'inline: unsupported Expect -> 417',
       exchange(ip,
                "POST /echo HTTP/1.1\r\nHost: x\r\nExpect: magic\r\n" \
@@ -229,7 +250,7 @@ deadline_router.get('/blocked', lambda do |ctx|
 end)
 deadline_router.get('/fast', ->(ctx) { ctx.res.text('fast') })
 deadline_server = Kiln::Server::Event.new(deadline_router, nil, log: log, port: 0,
-                                                                request_timeout: 0.05)
+                                                                request_timeout: 0.05, handlers: 2)
 deadline_server.start
 blocked_client = Thread.new do
   exchange(deadline_server.port, "GET /blocked HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
@@ -243,3 +264,31 @@ check 'a blocked handler gets 504 at its deadline', blocked_reply.start_with?('H
                                                     deadline_server.killed == 1
 check 'a blocked handler does not stall the next request', fast_reply.end_with?('fast') && fast_elapsed < 0.3
 deadline_server.shutdown(grace: 1)
+
+stream_started = Queue.new
+stream_release = Queue.new
+stream_router = Kiln::Router.new.get('/stream', lambda do |ctx|
+  ctx.res.headers['Content-Type'] = 'text/plain'
+  ctx.res.stream do |out|
+    stream_started << true
+    stream_release.pop
+    out.write('streamed')
+  end
+end).seal!
+gzip_streams = Kiln::Compress.new(stream_router, min_size: 1)
+limited_streams = Kiln::Server::Event.new(gzip_streams, nil, log: log, port: 0, max_streams: 1)
+limited_streams.start
+stream_client = TCPSocket.new('127.0.0.1', limited_streams.port)
+stream_client.write("GET /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+stream_started.pop(timeout: 1)
+overflow_request = "GET /stream HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n"
+overflow_stream = exchange(limited_streams.port, overflow_request)
+bounded_stream = overflow_stream.start_with?('HTTP/1.1 503 ') && overflow_stream.end_with?("too many streams\n") &&
+                 !overflow_stream.include?('Content-Encoding: gzip') &&
+                 !overflow_stream.include?('Vary: Accept-Encoding')
+check 'event stream overflow discards headers from the gzip representation', bounded_stream
+stream_release << true
+stream_reply = read_until_closed(stream_client, 2)
+stream_client.close
+limited_streams.shutdown(grace: 1)
+check 'a stream below max_streams completes', stream_reply.include?('streamed')

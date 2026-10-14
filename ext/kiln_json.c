@@ -1,5 +1,6 @@
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include "spinel/runtime.h"
@@ -194,6 +195,7 @@ sp_RbVal kiln_json_parse(const char *src, sp_int max_depth) {
 }
 
 #define KILN_GEN_MAX_NESTING 100
+#define KILN_GEN_HINT_MAX    ((size_t)1 << 20)
 
 typedef struct {
     char *p;
@@ -267,6 +269,11 @@ static size_t kiln_utf8_seq(const unsigned char *s, size_t left) {
 
 static int kiln_put_str(kiln_gen *g, const char *src, size_t len) {
     static const char hex[] = "0123456789abcdef";
+    static const uint64_t high = UINT64_C(0x8080808080808080);
+    static const uint64_t low32 = UINT64_C(0x2020202020202020);
+    static const uint64_t ones = UINT64_C(0x0101010101010101);
+    static const uint64_t quotes = UINT64_C(0x2222222222222222);
+    static const uint64_t slashes = UINT64_C(0x5c5c5c5c5c5c5c5c);
     const unsigned char *s = (const unsigned char *)src;
     if (!kiln_reserve(g, len + 2))
         return 0;
@@ -274,6 +281,18 @@ static int kiln_put_str(kiln_gen *g, const char *src, size_t len) {
     size_t i = 0;
     while (i < len) {
         size_t run = i;
+        while (len - run >= sizeof(uint64_t)) {
+            uint64_t word;
+            memcpy(&word, s + run, sizeof(word));
+            uint64_t at_least_space = (word | high) - low32;
+            uint64_t quote_test = word ^ quotes;
+            uint64_t slash_test = word ^ slashes;
+            if ((word & high) || (at_least_space & high) != high ||
+                (((quote_test - ones) & ~quote_test & high) != 0) ||
+                (((slash_test - ones) & ~slash_test & high) != 0))
+                break;
+            run += sizeof(uint64_t);
+        }
         while (run < len && s[run] >= 0x20 && s[run] < 0x80 && s[run] != '"' && s[run] != '\\')
             run++;
         if (run > i && !kiln_put(g, src + i, run - i))
@@ -452,14 +471,19 @@ static int kiln_gen_value(kiln_gen *g, sp_RbVal v, int depth) {
     return kiln_putc(g, '}');
 }
 
+static __thread size_t kiln_gen_hint;
+
 const char *kiln_json_generate(sp_RbVal v) {
     SP_GC_ROOT_RBVAL(v);
     kiln_gen g = {{NULL, 0, 0}, NULL};
+    if (kiln_gen_hint && !kiln_reserve(&g, kiln_gen_hint))
+        kiln_raise(KILN_JSON_GEN_ERROR, kiln_gc_str("out of memory", 13));
     if (!kiln_gen_value(&g, v, 0)) {
         const char *msg = g.error ? g.error : "cannot generate JSON";
         free(g.out.p);
         kiln_raise(KILN_JSON_GEN_ERROR, kiln_gc_str(msg, strlen(msg)));
     }
+    kiln_gen_hint = g.out.len < KILN_GEN_HINT_MAX ? g.out.len + 64 : KILN_GEN_HINT_MAX;
     char *out = sp_str_alloc(g.out.len);
     if (g.out.len)
         memcpy(out, g.out.p, g.out.len);

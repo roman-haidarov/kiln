@@ -66,6 +66,8 @@ floats = [0.1, 1.0 / 3, 123_456.789, 2.2250738585072014e-308, 1.7976931348623157
 check 'floats parse back exactly', Kiln::Json.parse(Kiln::Json.generate(floats)) == floats
 check 'Bignum', Kiln::Json.generate(2**70) == '1180591620717411303424'
 check 'escapes', Kiln::Json.generate("q\"b\\n\n\r\t\b\f\u0001/") == '"q\\"b\\\\n\\n\\r\\t\\b\\f\\u0001/"'
+ascii_bytes = (0..127).map { |byte| byte.chr }.join * 2
+check 'SWAR safe ASCII runs round trip', Kiln::Json.parse(Kiln::Json.generate(ascii_bytes)) == ascii_bytes
 check 'NUL is escaped, not truncated', Kiln::Json.generate("a\u0000b") == '"a\\u0000b"'
 check 'UTF-8 is written as-is', Kiln::Json.generate("д\u{1F600}") == "\"д\u{1F600}\""
 check 'symbol keys and values', Kiln::Json.generate({ id: 1, kind: :user }) == '{"id":1,"kind":"user"}'

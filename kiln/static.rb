@@ -244,12 +244,16 @@ module Kiln
     def hidden?(path)
       return false if path == @root
 
-      rel = path.byteslice(@prefix.bytesize, path.bytesize - @prefix.bytesize)
+      rel = relative(path)
       rel.start_with?('.') || rel.include?('/.')
     end
 
+    def relative(path)
+      path.byteslice(@prefix.bytesize, path.bytesize - @prefix.bytesize)
+    end
+
     def open_path(path)
-      rel = path.byteslice(@prefix.bytesize, path.bytesize - @prefix.bytesize)
+      rel = relative(path)
       fd = HttpNative.kiln_http_open_beneath(@root_dir.fileno, rel, rel.bytesize)
       fd.negative? ? nil : IO.for_fd(fd)
     end
@@ -261,11 +265,11 @@ module Kiln
       modified = stat.mtime.to_i
       changed = stat.ctime
       revision = "#{stat.dev.to_s(16)}-#{stat.ino.to_s(16)}-#{changed.to_i.to_s(16)}"
-      etag = %("#{revision}-#{changed.nsec.to_s(16)}-#{stat.mtime.nsec.to_s(16)}-#{size.to_s(16)}").freeze
+      etag = %("#{revision}-#{changed.nsec.to_s(16)}-#{stat.mtime.nsec.to_s(16)}-#{size.to_s(16)}")
       stamp(res.headers, path, etag, stat)
       verdict = Conditional.precondition(req, etag, modified)
       unless verdict == 200
-        answer_bare(res, verdict)
+        answer_bare(res, verdict, size)
         return nil
       end
 
@@ -280,14 +284,17 @@ module Kiln
 
     def stamp(headers, path, etag, stat)
       headers[TYPE] = TYPES[File.extname(path).downcase] || OCTETS
-      headers[MODIFIED] = stat.mtime.httpdate.freeze
+      headers[MODIFIED] = stat.mtime.httpdate
       headers[TAG] = etag
       headers[RANGES] = BYTES
       headers[CACHE] = @cache if @cache
     end
 
-    def answer_bare(res, status)
-      res.headers.delete(TYPE) if status == 304
+    def answer_bare(res, status, size)
+      if status == 304
+        res.note_representation(size, res.headers[TYPE])
+        res.headers.delete(TYPE)
+      end
       res.status = status
       res.body = ''
     end

@@ -29,6 +29,7 @@ ok   float formatting
 ok   floats parse back exactly
 ok   Bignum
 ok   escapes
+ok   SWAR safe ASCII runs round trip
 ok   NUL is escaped, not truncated
 ok   UTF-8 is written as-is
 ok   symbol keys and values

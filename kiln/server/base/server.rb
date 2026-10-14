@@ -120,6 +120,11 @@ module Kiln
         return 0 unless @acceptor || @listener
 
         @lock.synchronize { @draining = true }
+        shard = 0
+        while shard < @shard_count
+          @shard_locks[shard].synchronize { @shut_by_shard[shard] = true }
+          shard += 1
+        end
         close_quietly(@listener)
         stop_thread(@acceptor)
         deadline = Kiln.now + grace
@@ -217,6 +222,10 @@ module Kiln
             next
           end
           delay = 0.0
+          if HttpNative.kiln_socket_nonblock(sock.fileno).negative?
+            close_quietly(sock)
+            next
+          end
           if @draining
             close_quietly(sock)
             break
@@ -233,16 +242,24 @@ module Kiln
         handed = false
         begin
           @lock.synchronize do
-            shard = @next_shard
-            @next_shard = (@next_shard + 1) % @shard_count
-            box = Outbox.new
-            slot = Slot.new(nil, sock, 0.0, :idle, false, false, -1, box, shard)
-            th = Thread.new(slot, box) do |conn, outbox|
-              Thread.current.report_on_exception = false
-              connection(conn, outbox)
+            unless @draining || @shut
+              shard = @next_shard
+              @next_shard = (@next_shard + 1) % @shard_count
+              box = Outbox.new
+              slot = Slot.new(nil, sock, 0.0, :idle, false, false, -1, box, shard)
+              th = Thread.new(slot, box) do |conn, outbox|
+                Thread.current.report_on_exception = false
+                connection(conn, outbox)
+              end
+              slot.thread = th
+              @conns[th] = slot
+              handed = true
             end
-            slot.thread = th
-            @conns[th] = slot
+          end
+          unless handed
+            write_fixed(sock, 503, 'shutting down', Kiln.now + 0.2)
+            close_quietly(sock)
+            @slots << true
             handed = true
           end
         rescue Exception => err
@@ -415,13 +432,7 @@ module Kiln
 
       def finish(slot)
         @finished << slot
-        return unless @reap_wake.empty?
-
-        begin
-          @reap_wake.push(true, true)
-        rescue ThreadError
-          nil
-        end
+        signal_reaper
       end
 
       def settle_finished?
@@ -450,9 +461,13 @@ module Kiln
           end
           unhandle(slot)
         end
-        @lock.synchronize { @conns.delete(slot.thread) } if first
-        close_quietly(slot.sock) if first
-        @slots << true if first
+        if first
+          close_quietly(slot.sock)
+          @lock.synchronize do
+            @slots << true
+            @conns.delete(slot.thread)
+          end
+        end
       end
 
       def sum_shards(values)

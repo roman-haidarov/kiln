@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SPINEL_REF: 9922a2c74ee1128162abf48b645575f0c8cc254d
+
+jobs:
+  linux:
+    name: linux/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build toolchain image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          build-args: SPINEL_REF=${{ env.SPINEL_REF }}
+          load: true
+          tags: kiln-ci:${{ matrix.arch }}
+          cache-from: type=gha,scope=kiln-ci-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=kiln-ci-${{ matrix.arch }}
+
+      - name: Run CI in the image
+        run: |
+          mkdir -p "$RUNNER_TEMP/kiln-ci"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e SPINEL_WORKERS=1 \
+            -e KILN_ARTIFACTS=/artifacts \
+            -e TEST_TIMEOUT=180 \
+            -v "$GITHUB_WORKSPACE:/src" \
+            -v "$RUNNER_TEMP/kiln-ci:/artifacts" \
+            kiln-ci:${{ matrix.arch }} ci/run.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiln-ci-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/kiln-ci
+          if-no-files-found: ignore
+          retention-days: 7

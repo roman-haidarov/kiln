@@ -1,6 +1,6 @@
 # kiln
 
-HTTP/1.1 server for Spinel. Version 0.0.2. Behavior and measurements are in
+HTTP/1.1 server for Spinel. Version 0.0.3. Behavior and measurements are in
 [CHANGELOG.md](CHANGELOG.md). Recorded checks are in
 [VALIDATION.md](VALIDATION.md).
 
@@ -37,10 +37,12 @@ that handles signals itself.
 
 `backend: :base` selects the thread-per-connection engine. The event backend
 runs handlers inline by default. `handlers: N` runs handlers on N worker
-threads; `handlers: 0` keeps them on the event loop. A handler that passes its
-`request_timeout` gets a 504 response, and its worker is replaced so other
-requests can continue. Work already done by that handler cannot be rolled
-back.
+threads; `handlers: 0` keeps them on the event loop. With `handlers: N`, a
+handler that passes its `request_timeout` gets a 504 response, and its worker
+is replaced so other requests can continue. Inline handlers share the event
+loop: blocking calls delay all connections and cannot be forcibly timed out
+without interrupting the loop itself. Work already done by a handler cannot
+be rolled back.
 
 ## Routes
 
@@ -140,6 +142,36 @@ rules to any handler that has an ETag.
 chunked framing; writing more than `n` bytes raises `ArgumentError`, and
 writing fewer closes the connection.
 
+## Compression
+
+```ruby
+app = Kiln::Compress.new(router, level: 2, stream_level: 1, min_size: 1024)
+```
+
+`Kiln::Compress` gzips text, JSON, JavaScript, XML and SVG responses of at
+least `min_size` bytes when the client accepts gzip, and every stream of those
+types; `out.flush`, `out.event` and `out.comment` push the compressed bytes at
+once, so SSE is not held back. Compressed streams use chunked framing and do
+not keep a declared `Content-Length`. It sets `Vary: Accept-Encoding`, weakens
+a strong `ETag` and drops `Accept-Ranges`, and leaves 204, 206, 304, responses
+that already have a `Content-Encoding`, and `Cache-Control: no-transform`
+alone. Compression uses a vendored zlib-ng.
+
+Wrap only routes that need compression when small responses dominate:
+
+```ruby
+router.scope("/api", wrap: ->(nxt) { Kiln::Compress.new(nxt) }) do |api|
+  api.get("/report", Reports.method(:show))
+end
+```
+
+Do not compress responses that combine secrets with reflected user input over
+HTTPS. Set `Cache-Control: no-transform` on a response to disable this
+middleware for that response. The event backend allows up to 1024 active
+streams by default; set `max_streams:` to adjust the limit. Requests that exceed
+it receive 503. The base backend uses its `max_conns` limit for concurrent
+streams.
+
 ## Tasks
 
 ```ruby
@@ -190,8 +222,28 @@ cpu.shutdown(grace: 1.0)
 
 ```sh
 SPINEL=/path/to/spinel SPINEL_WORKERS=1 ./test-spinel.sh
-SPINEL_WORKERS=2 ./test-spinel.sh
 ```
 
 Do not use `spin test --regen`. Output is written to
 `/tmp/kiln-validation/tests/`. Set `KILN_VALIDATION_DIR` to change that.
+
+## CI
+
+`ci/run.sh` is the one CI entry point: it runs the suite with
+`SPINEL_WORKERS=1`, then a short benchmark (`SAMPLE=0`) and checks its
+performance and memory tables. Every job uses one Spinel worker. Linux x86_64
+(`ubuntu-24.04`) and Linux ARM64 (`ubuntu-24.04-arm`) run it in the image built
+from `Dockerfile`, which holds only the toolchain; the source is mounted at
+`/src`. macOS runners cannot run Docker (no nested virtualization), so
+`.github/workflows/ci-macos.yml` runs the same script natively.
+
+The same run locally, on any machine with Docker (on Apple silicon this is the
+linux/arm64 job of CI):
+
+```sh
+docker build -t kiln-ci .
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" kiln-ci ci/run.sh
+```
+
+`CI_BENCH` (default `1`), `KILN_ARTIFACTS` (default `$TMPDIR/kiln-ci`) and
+`TEST_TIMEOUT` adjust a run.

@@ -42,7 +42,7 @@ module Kiln
         reply = Kiln.timeout_reply(e)
         raise unless reply
 
-        ctx.res.text(reply[0], status: reply[1])
+        Kiln.apply_reply(ctx, reply)
       end
 
       def lower(headers)
