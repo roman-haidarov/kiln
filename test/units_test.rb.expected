@@ -23,6 +23,7 @@ ok   205 sends zero length and no body
 ok   informational status cannot be sent as final response
 ok   response formatting does not modify input
 ok   unsafe header is rejected on insertion
+ok   stored header cannot be changed after insertion
 ok   Date header is recognized case-insensitively
 ok   coop_budget rejects negative values
 -- HTTP syntax
@@ -93,6 +94,7 @@ ok   parameter names are computed at registration
 ok   PathSyntax.params
 -- HttpNative compared with reference HttpSyntax
 ok   browser request uses C fast path
+ok   C header lookup recognizes every common name regardless of case
 ok   constructed cases match reference (41)
 ok   mutation fuzzing: 4000 cases; no mismatches
 ok   some mutations use fast path (true)

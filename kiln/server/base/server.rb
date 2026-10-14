@@ -161,7 +161,7 @@ module Kiln
             stop_reading(slot)
           end
           release_socket(slot) if handling || writing
-          handling
+          handling || writing
         end
         thread = slot.thread
         thread.kill if kill && thread&.alive?

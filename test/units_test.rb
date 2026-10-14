@@ -178,6 +178,24 @@ wire = Kiln::Response.build_wire(200, headers, payload, false)
 check 'response formatting does not modify input', headers['Content-Type'] == 'text/plain' && payload == 'hello'
 check 'unsafe header is rejected on insertion',
       wire.include?("Content-Type: text/plain\r\n") && !wire.include?('X-Bad:') && !headers.key?('X-Bad')
+caller_name = +'X-Ok'
+caller_value = +'fine'
+owned = Kiln::Headers.new
+owned[caller_name] = caller_value
+stored_value = owned['X-Ok']
+caller_name << '-Renamed'
+caller_value << '-tampered'
+owned_wire = Kiln::Response.build_wire(200, owned, 'z', false)
+frozen_value = begin
+  stored_value << 'x'
+  false
+rescue FrozenError
+  true
+end
+check 'stored header cannot be changed after insertion',
+      frozen_value && stored_value == 'fine' && !stored_value.equal?(caller_value) &&
+      owned_wire.include?("X-Ok: fine\r\n") && !owned_wire.include?('tampered') &&
+      !owned_wire.include?('Renamed')
 dated = Kiln::Headers.new
 dated['DATE'] = 'custom'
 wire = Kiln::Response.build_wire(200, dated, 'ok', false)
@@ -524,6 +542,13 @@ browser_head = "GET /products/42?ref=home HTTP/1.1\r\n" \
 native_out = Kiln::HttpNative.scratch
 check 'browser request uses C fast path',
       Kiln::HttpNative.kiln_http_scan(browser_head, browser_head.bytesize, native_out, Kiln::HttpNative::CAP) == 16
+common_names = Kiln::HttpNative::COMMON
+common_lines = common_names.map { |name| "#{name.upcase}: v" }
+common_head = "GET / HTTP/1.1\r\n#{common_lines.join("\r\n")}\r\nX-Other: v"
+common_count = Kiln::HttpNative.kiln_http_scan(common_head, common_head.bytesize, native_out, Kiln::HttpNative::CAP)
+all_known = common_names.each_index.all? { |index| native_out[9 + (5 * index)] == index }
+check 'C header lookup recognizes every common name regardless of case',
+      common_count == common_names.length + 1 && all_known && native_out[9 + (5 * common_names.length)] == -1
 crafted = [
   "GET /health HTTP/1.1\r\nHost: x", 'GET / HTTP/1.0', "POST /a?b=1 HTTP/1.1\r\nHost: x\r\nContent-Length: 5",
   "GET /a HTTP/1.1\r\nHost: x\r\nX-A: 1\r\nX-A: 2", "GET /a HTTP/1.1\r\nHost: x\r\nHost: y",

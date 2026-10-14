@@ -20,6 +20,7 @@ module Kiln
     ffi_func :kiln_chunk_size, %i[str long long], :long
     ffi_func :kiln_host, %i[str long], :long
     ffi_func :kiln_http_scan_at, %i[str long long long int_array long], :long
+    ffi_func :kiln_http_open_beneath, %i[long str long], :long
 
     class << self
       def scratch = Array.new(CAP, 0)

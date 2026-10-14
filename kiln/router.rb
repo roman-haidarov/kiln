@@ -1,21 +1,70 @@
 module Kiln
   class Router
-    Route = Struct.new(:verb, :segments, :names, :handler, :dynamic)
     RESOURCE_ACTIONS = { index: true, show: true, create: true, update: true, destroy: true }.freeze
     RESOURCE_ROUTES = [
       ['GET', :index, false], ['GET', :show, true], ['POST', :create, false],
       ['PUT', :update, true], ['PATCH', :update, true], ['DELETE', :destroy, true]
     ].freeze
-
+    TRAILING_SLASH = %i[strict redirect].freeze
     EXACT_ROOT = '/'.freeze
+    DOT_SEGMENTS = %w[. ..].freeze
+    PERMANENT = %w[GET HEAD].freeze
+    PARAM_LEADS = %w[: *].freeze
+    SLASH = '/'.freeze
+    HEAD = 'HEAD'.freeze
+    GET = 'GET'.freeze
+    UNSET = 1 << 62
 
-    def initialize
-      @prefix = {}
-      @dynamic = []
+    Route = Struct.new(:verb, :names, :handler, :dynamic, :glob, :seq)
+
+    class Node
+      attr_reader :static, :param, :glob, :routes, :first
+
+      def initialize
+        @static = {}
+        @param = nil
+        @glob = nil
+        @routes = []
+        @first = UNSET
+      end
+
+      def reach(seq)
+        @first = seq if seq < @first
+        self
+      end
+
+      def static_child(seg) = @static[seg] ||= Node.new
+
+      def param_child
+        @param = Node.new if @param.nil?
+        @param
+      end
+
+      def glob_child
+        @glob = Node.new if @glob.nil?
+        @glob
+      end
+
+      def add(route)
+        @routes << route
+        self
+      end
+    end
+
+    def initialize(trailing_slash: :strict)
+      raise ArgumentError, 'trailing_slash must be :strict or :redirect' unless TRAILING_SLASH.include?(trailing_slash)
+
+      @root = Node.new
       @exact = {}
-      @exact_only = true
-      @scope = []
+      @fast = {}
+      @seq = 0
+      @verbs = [GET].drop(1)
+      @scope = [GET].drop(1)
+      @wraps = [->(nxt) { nxt }].drop(1)
       @sealed = false
+      @redirect_slash = trailing_slash == :redirect
+      @not_found = nil
+      @not_allowed = nil
     end
 
     def draw
@@ -28,16 +77,19 @@ module Kiln
       self
     end
 
-    def namespace(prefix, &blk) = scope(prefix, &blk)
+    def namespace(prefix, wrap: nil, &blk) = scope(prefix, wrap:, &blk)
 
-    def scope(prefix)
+    def scope(prefix, wrap: nil)
       demand_open
       depth = @scope.size
+      wraps = @wraps.size
       @scope.concat(PathSyntax.compile(prefix))
+      @wraps << wrap if wrap
       yield self
       self
     ensure
       @scope.slice!(depth, @scope.size - depth) if depth
+      @wraps.slice!(wraps, @wraps.size - wraps) if wraps
     end
 
     def resources(path, handlers, only: nil)
@@ -59,97 +111,214 @@ module Kiln
       self
     end
 
+    def get(path, handler) = add('GET', path, handler)
+    def post(path, handler) = add('POST', path, handler)
     def put(path, handler) = add('PUT', path, handler)
     def patch(path, handler) = add('PATCH', path, handler)
     def delete(path, handler) = add('DELETE', path, handler)
     def options(path, handler) = add('OPTIONS', path, handler)
 
+    def not_found(handler)
+      demand_open
+      @not_found = handler
+      self
+    end
+
+    def method_not_allowed(handler)
+      demand_open
+      @not_allowed = handler
+      self
+    end
+
     def seal!
+      @exact.each_key { |path| @fast[path] = winners(path) }
       @sealed = true
       self
     end
 
     def sealed? = @sealed == true
-    def get(path, handler) = add('GET', path, handler)
-    def post(path, handler) = add('POST', path, handler)
 
     def call(ctx)
       req = ctx.req
-      res = ctx.res
       path = req.path
       return server_options(ctx) if path == '*'
 
-      routes = nil
-      routes = @exact[path] if @exact_only && !path.include?('%')
-      if routes
-        route, allow = match_exact(req.verb, routes)
-        return invoke(route, ctx, nil) if route
-        return reject_verb(ctx, allow) if allow
+      verb = req.verb
+      known = @fast[path]
+      if known
+        route = known[verb]
+        return route.handler.call(ctx) if route
       end
 
       segs = PathSyntax.segments(path)
-      if segs == :bad
-        return res.text("bad request\n", status: 400)
-      elsif segs
-        route, allow = match_route(req.verb, segs)
-        return invoke(route, ctx, segs) if route
-        return reject_verb(ctx, allow) if allow
-      end
+      return ctx.res.text("bad request\n", status: 400) if segs == :bad
+      return missing(ctx, path) unless segs
 
-      res.text("not found\n", status: 404)
+      route = match(segs, verb)
+      return invoke(route, ctx, segs) if route
+
+      allow = [GET].drop(1)
+      collect(@root, segs, 0, allow)
+      return reject_verb(ctx, allow) unless allow.empty?
+
+      fallback(ctx)
     end
 
     private
 
-    def match_exact(verb, routes)
-      fallback = nil
-      allow = nil
+    def match(segs, verb)
+      route = find(@root, segs, 0, verb, nil)
+      return route if route || verb != HEAD
+
+      find(@root, segs, 0, GET, nil)
+    end
+
+    def find(node, segs, index, verb, best)
+      return best if best && node.first > best.seq
+      return earlier(pick(node.routes, verb), best) if index == segs.size
+
+      child = node.static[segs[index]]
+      best = find(child, segs, index + 1, verb, best) if child
+      param = node.param
+      best = find(param, segs, index + 1, verb, best) if param
+      glob = node.glob
+      return best unless glob && tail_safe?(segs, index)
+
+      earlier(pick(glob.routes, verb), best)
+    end
+
+    def earlier(route, best)
+      return best if route.nil?
+      return route if best.nil? || route.seq < best.seq
+
+      best
+    end
+
+    def winners(path)
+      out = {}
+      segs = PathSyntax.segments(path)
+      return out unless segs.is_a?(Array)
+
+      verbs = @verbs
+      index = 0
+      while index < verbs.size
+        settle(out, segs, verbs[index])
+        index += 1
+      end
+      settle(out, segs, HEAD)
+      out
+    end
+
+    def settle(out, segs, verb)
+      route = match(segs, verb)
+      out[verb] = route if route && !route.dynamic
+    end
+
+    def collect(node, segs, index, allow)
+      return remember_all(node.routes, allow) if index == segs.size
+
+      child = node.static[segs[index]]
+      collect(child, segs, index + 1, allow) if child
+      param = node.param
+      collect(param, segs, index + 1, allow) if param
+      glob = node.glob
+      remember_all(glob.routes, allow) if glob && tail_safe?(segs, index)
+    end
+
+    def pick(routes, verb)
       index = 0
       limit = routes.size
       while index < limit
         route = routes[index]
-        index += 1
-        verb_name = route.verb
-        return [route, nil] if verb_name == verb
+        return route if route.verb == verb
 
-        fallback ||= route if verb == 'HEAD' && verb_name == 'GET'
-        allow ||= []
-        remember(allow, verb_name)
+        index += 1
       end
-      fallback ? [fallback, nil] : [nil, allow]
+      nil
     end
 
-    def match_route(verb, segs)
-      fallback = nil
-      allow = nil
-      candidates = @prefix[segs[0] || ''] || @dynamic
+    def remember_all(routes, allow)
       index = 0
-      limit = candidates.size
-      while index < limit
-        route = candidates[index]
+      while index < routes.size
+        remember(allow, routes[index].verb)
         index += 1
-        segments = route.segments
-        verb_name = route.verb
-        next unless segments.size == segs.size
-        next unless PathSyntax.match?(segments, route.names, segs)
-        return [route, nil] if verb_name == verb
-
-        fallback ||= route if verb == 'HEAD' && verb_name == 'GET'
-        allow ||= []
-        remember(allow, verb_name)
       end
-      [fallback, allow]
+    end
+
+    def tail_safe?(segs, index)
+      while index < segs.size
+        seg = segs[index]
+        return false if DOT_SEGMENTS.include?(seg) || seg.include?(SLASH)
+
+        index += 1
+      end
+      true
     end
 
     def invoke(route, ctx, segs)
-      ctx.req.params = PathSyntax.params(route.names, segs) if route.dynamic
+      ctx.req.params = params(route, segs) if route.dynamic
       route.handler.call(ctx)
+    end
+
+    def params(route, segs)
+      names = route.names
+      out = {}
+      last = names.size - 1
+      index = 0
+      while index < last
+        name = names[index]
+        out[name] = segs[index] unless name.empty?
+        index += 1
+      end
+      tail(out, route, segs, last)
+    end
+
+    def tail(out, route, segs, last)
+      name = route.names[last]
+      if route.glob
+        out[name] = segs[last, segs.size - last].join(SLASH)
+      elsif !name.empty?
+        out[name] = segs[last]
+      end
+      out
+    end
+
+    def missing(ctx, path)
+      return fallback(ctx) unless @redirect_slash && slash_redirect?(path)
+
+      stripped = path.byteslice(0, path.bytesize - 1)
+      segs = PathSyntax.segments(stripped)
+      return fallback(ctx) unless segs.is_a?(Array) && match(segs, ctx.req.verb)
+
+      redirect(ctx, stripped)
+    end
+
+    def redirect(ctx, target)
+      req = ctx.req
+      query = req.query
+      res = ctx.res
+      res.headers['Location'] = query.empty? ? target : "#{target}?#{query}"
+      res.text("redirect\n", status: PERMANENT.include?(req.verb) ? 301 : 308)
+    end
+
+    def slash_redirect?(path)
+      path.bytesize > 1 && path.end_with?(SLASH) && !path.include?('//') && !path.include?('\\')
+    end
+
+    def fallback(ctx)
+      handler = @not_found
+      return handler.call(ctx) if handler
+
+      ctx.res.text("not found\n", status: 404)
     end
 
     def reject_verb(ctx, allow)
       allow_head(allow)
       res = ctx.res
       res.headers['Allow'] = allow.join(', ')
+      handler = @not_allowed
+      return handler.call(ctx) if handler
+
       res.text("method not allowed\n", status: 405)
     end
 
@@ -158,28 +327,12 @@ module Kiln
       res = ctx.res
       return res.text("bad request\n", status: 400) unless req.verb == 'OPTIONS'
 
-      verbs = []
-      record_verbs(verbs)
+      verbs = @verbs.dup
       allow_head(verbs)
       remember(verbs, 'OPTIONS')
       res.headers['Allow'] = verbs.join(', ')
       res.status = 204
       res.body = ''
-    end
-
-    def record_verbs(verbs)
-      buckets = [@dynamic]
-      @prefix.each_value { |bucket| buckets << bucket }
-      index = 0
-      while index < buckets.size
-        routes = buckets[index]
-        cursor = 0
-        while cursor < routes.size
-          remember(verbs, routes[cursor].verb)
-          cursor += 1
-        end
-        index += 1
-      end
     end
 
     def remember(verbs, verb)
@@ -197,37 +350,78 @@ module Kiln
     def add(verb, path, handler)
       demand_open
       segments = @scope + PathSyntax.compile(path)
-      names = PathSyntax.param_names(segments)
-      dynamic = names.any? { |name| !name.empty? }
-      route = Route.new(verb, segments, names, handler, dynamic)
-      @exact_only = false if dynamic
-      first = segments[0]
-      if first&.start_with?(':')
-        @dynamic << route
-        @prefix.each_key { |key| @prefix[key] << route }
-      else
-        key = first || ''
-        bucket = @prefix[key] ||= @dynamic.dup
-        bucket << route
-      end
-      unless dynamic
-        exact = exact_key(segments)
-        (@exact[exact] ||= []) << route if exact
-      end
+      seq = @seq
+      node, names, glob = insert(segments, seq)
+      refuse_duplicate(node, verb, path)
+      dynamic = glob || names.any? { |name| !name.empty? }
+      node.add(Route.new(verb, names, wrap(handler), dynamic, glob, seq))
+      @seq = seq + 1
+      index_route(verb, segments, names, glob)
       self
     end
 
-    def exact_key(segments)
-      index = 0
-      limit = segments.size
-      while index < limit
-        return nil if segments[index].include?('%')
+    def refuse_duplicate(node, verb, path)
+      raise ArgumentError, "duplicate route #{verb} #{path}" if node.routes.any? { |route| route.verb == verb }
+    end
 
+    def index_route(verb, segments, names, glob)
+      remember(@verbs, verb)
+      exact = exact_key(segments, names, glob)
+      @exact[exact] = true if exact
+    end
+
+    def insert(segments, seq)
+      node = @root.reach(seq)
+      names = [GET].drop(1)
+      last = segments.size - 1
+      index = 0
+      while index < segments.size
+        node = descend(node, segments[index], index == last, names).reach(seq)
         index += 1
       end
-      return EXACT_ROOT if limit.zero?
+      names << '' if segments.empty?
+      [node, names, !segments.empty? && segments[last].start_with?('*')]
+    end
+
+    def descend(node, seg, last, names)
+      lead = seg[0]
+      unless PARAM_LEADS.include?(lead)
+        names << ''
+        return node.static_child(static_segment(seg))
+      end
+
+      name = seg[1..]
+      raise ArgumentError, "empty parameter name in #{seg}" if name.empty?
+
+      names << name
+      return node.param_child if lead == ':'
+      raise ArgumentError, "*#{name} must be the last segment" unless last
+
+      node.glob_child
+    end
+
+    def static_segment(seg)
+      decoded = PathSyntax.segments("/#{seg}")
+      raise ArgumentError, "invalid path segment #{seg}" unless decoded.is_a?(Array) && decoded.size == 1
+
+      decoded[0]
+    end
+
+    def exact_key(segments, names, glob)
+      return nil if glob || names.any? { |name| !name.empty? }
+      return EXACT_ROOT if segments.empty?
+      return nil if segments.any? { |seg| seg.include?('%') }
 
       "/#{segments.join('/')}".freeze
+    end
+
+    def wrap(handler)
+      index = @wraps.size - 1
+      while index >= 0
+        handler = @wraps[index].call(handler)
+        index -= 1
+      end
+      handler
     end
   end
 end

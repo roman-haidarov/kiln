@@ -19,7 +19,47 @@ checked-in snapshot, and stores raw output under
 is not on `PATH`. `TEST_TIMEOUT` controls the per-test timeout in seconds.
 
 The full eight-file suite passed 293 checks on macOS with Spinel `9922a2c` and
-both `SPINEL_WORKERS=1` and `2`. MRI was not used.
+both `SPINEL_WORKERS=1` and `2`. MRI was not used. After JSON landed, the
+ten-file suite (including `test/json_test.rb`) passed on macOS with that same
+Spinel and both worker counts.
+
+On Linux x86-64 with Spinel `9922a2c` built from source, the ten-file suite
+(including `test/json_test.rb`, 75 checks) passes with `SPINEL_WORKERS=1` and
+`2`. `json_test` also passes unchanged with `SPINEL_GC_STRESS=1`, which
+collects on nearly every allocation and so exercises the GC roots in
+`ext/kiln_json.c`.
+
+The JSON binding was run with kiln's C compiled under ASan and UBSan
+(`KILN_EXT_CFLAGS="-O1 -g -fsanitize=address,undefined"`, the program linked
+with `--link -lasan --link -lubsan`): four threads each parsed and regenerated
+a 686 KB document ten times and fed 20,000 randomly corrupted inputs to the
+parser, with no report. Instrumenting the whole program is not possible: the
+Spinel collector scans stacks conservatively and reads ASan's redzones, and
+`__asan_handle_no_return` fails on Spinel's own stacks, which is why
+`kiln_json.c` hides `noreturn` from the compiler in sanitizer builds only.
+
+With the router tree, `Server#run`, `Kiln::Tasks`, `Kiln::Testing`, `Cors`
+and `DefaultHeaders`, the eleven-file suite (including
+`test/features_test.rb`, 60 checks) passes on Linux x86-64 with Spinel
+`9922a2c` and `SPINEL_WORKERS=1` and `2`. The same eleven-file suite passed
+on macOS with that Spinel and both worker counts. `features_test` and `json_test`
+pass unchanged under `SPINEL_GC_STRESS=1`, and `features_test`, which sends
+itself SIGTERM, passed 8 repeated runs alternating the worker count. The
+router benchmark ran the old and new routers alternately, three rounds of
+three runs each.
+
+RuboCop 1.39 (Ubuntu's; `TargetRubyVersion: 3.2`, the newest it knows) over
+`kiln kiln.rb test bench` reports 496 offenses against 516 before; the router
+went from 4 `AbcSize` and 4 `PerceivedComplexity` findings to 3 and 1, with
+`call` and `find` left whole because they are the hot path. New files add only
+`FrozenStringLiteralComment` and `Documentation`, which would need comments.
+Reek, flog, flay and rubyfast were not run: they install from rubygems.org,
+which the sandbox could not reach. `kiln_json.c` is formatted with the repo
+`.clang-format` (minus `BinPackLongBracedList`, unknown to clang-format 18),
+cppcheck 2.13 (also exhaustive) reports nothing in it, and clang-tidy 18 reports
+the categories `kiln_http.c` also has (braces, include-cleaner) plus GC-macro
+`no-int-to-ptr`, the bounded recursion, and Annex K `memcpy_s`/`snprintf_s`.
+The analyzer's null `memcpy` on an empty buffer was real and is fixed.
 
 Tests cover HTTP parsing and framing, routing, response ordering, request and
 CPU deadlines, pool ownership and close failures, client disconnect handling,
@@ -246,3 +286,25 @@ instead of leaving the write count raised. Test: two pipelined 2 MB responses
 arrive whole and in order; on Linux the first `uv_try_write` sent 3.9 MB and
 left 80 KB, so the partial path runs, and a mutant that starts the write at the
 beginning of the block instead of the first unsent byte fails it.
+
+## Streaming
+
+`test/stream_test.rb` (54 checks) runs every network case on the event
+backend with `handlers: 0` and `handlers: 2` and on the base backend: chunked
+framing decoded by the test, the SSE wire format, HTTP/1.0 and `HEAD`, a
+response pipelined behind a stream arriving after its final chunk, a stream
+outliving `request_timeout`, a client that closes, a client that never reads
+(cut off through the 256 KiB limit and `write_timeout`), an error that ends the
+connection without the final chunk, and `shutdown` ending an SSE loop through
+`closed?`. On Linux x86-64 with Spinel `9922a2c` it passes under
+`SPINEL_GC_STRESS=1` and in six runs alternating `SPINEL_WORKERS=1` and `2`,
+and the twelve-file suite passes with both worker counts.
+
+For `ext/kiln_uv.c`, clang-tidy 18 and cppcheck 2.13 (also exhaustive) report
+nothing new against 0.0.2 except the house `braces-around-statements` style
+and `unusedFunction` on the two new FFI exports. RuboCop 1.39
+(`TargetRubyVersion: 3.2`) reports new `Metrics` findings only on per-stream
+methods, and `Style/HashEachMethods` on `refresh_backlog`, whose loop deletes
+from the Hash it walks, so it iterates a copy of the values. Reek, flog, flay
+and rubyfast were not run here: they install from rubygems.org, which the
+sandbox could not reach.

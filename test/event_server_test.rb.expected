@@ -20,3 +20,10 @@ ok   inline: shutdown releases connections
 ok   inline: unfinished count includes queued requests when the handler is stopped
 ok   inline: the response finished during shutdown says Connection: close
 ok   inline: listens on ::1 when the host has IPv6
+ok   inline: half-close after a complete request still gets a response
+ok   inline: a good request is answered before the following 400
+ok   inline: 17 pipelined requests -> 17 responses
+ok   inline: a slow reader is closed by write_timeout
+ok   a later server keeps the loop fd after an earlier one is collected
+ok   a blocked handler gets 504 at its deadline
+ok   a blocked handler does not stall the next request

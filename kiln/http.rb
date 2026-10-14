@@ -34,6 +34,37 @@ module Kiln
     end
 
     def header(name) = @headers[name] || @headers[name.downcase]
+
+    def query_params = @query_params ||= Form.decode(@query)
+
+    def form
+      return @form if @form
+
+      unless Media.form?(header('content-type'))
+        raise UnsupportedMediaType, 'expected application/x-www-form-urlencoded'
+      end
+
+      @form = Form.decode(@body.to_s)
+    end
+
+    def json(max_nesting: Json::MAX_NESTING)
+      return @json if @json_ready && max_nesting >= @json_nesting
+
+      raise UnsupportedMediaType, 'expected application/json' unless Media.json?(header('content-type'))
+
+      begin
+        @json = Json.parse(@body.to_s, max_nesting: max_nesting)
+      rescue JsonError => e
+        raise BadRequest, "invalid JSON: #{e.message}"
+      end
+      @json_ready = true
+      @json_nesting = max_nesting
+      @json
+    end
+
+    def cookies = @cookies ||= Cookies.parse(header('cookie'))
+
+    def cookie(name) = cookies[name]
   end
 
   class Headers
@@ -99,10 +130,14 @@ module Kiln
       return if HOP.include?(key)
       return if HttpNative.ctl?(value)
 
-      @items.push(name)
-      @items.push(key)
-      @items.push(value)
+      @items.push(frozen_copy(name))
+      @items.push(frozen_copy(key))
+      @items.push(frozen_copy(value))
       @date = true if key == 'date'
+    end
+
+    def frozen_copy(text)
+      text.frozen? ? text : text.dup.freeze
     end
 
     def delete_key(key)
@@ -128,7 +163,8 @@ module Kiln
       301 => 'Moved Permanently', 302 => 'Found', 304 => 'Not Modified',
       400 => 'Bad Request', 401 => 'Unauthorized', 403 => 'Forbidden',
       404 => 'Not Found', 405 => 'Method Not Allowed', 408 => 'Request Timeout', 417 => 'Expectation Failed',
-      413 => 'Payload Too Large', 431 => 'Request Header Fields Too Large',
+      413 => 'Payload Too Large', 415 => 'Unsupported Media Type',
+      431 => 'Request Header Fields Too Large',
       500 => 'Internal Server Error', 501 => 'Not Implemented', 503 => 'Service Unavailable',
       504 => 'Gateway Timeout'
     }.freeze
@@ -140,6 +176,8 @@ module Kiln
     UNKNOWN_REASON = " Status\r\n".b.freeze
     LENGTH_PREFIX = 'Content-Length: '.b.freeze
     LENGTH_ZERO = "Content-Length: 0\r\n".b.freeze
+    CHUNKED = "Transfer-Encoding: chunked\r\n".b.freeze
+    EVENT_STREAM = 'text/event-stream; charset=utf-8'.freeze
     DATE_PREFIX = 'Date: '.b.freeze
     KEEP_ALIVE = "Connection: keep-alive\r\n".b.freeze
     CLOSE = "Connection: close\r\n".b.freeze
@@ -153,24 +191,63 @@ module Kiln
     STATUS_11.freeze
     STATUS_10.freeze
     attr_accessor :status, :body
-    attr_reader :headers
+    attr_reader :headers, :stream_body, :stream_length
 
     def initialize
       @status = 200
       @headers = Headers.new
       @body = ''
+      @stream_body = nil
+      @stream_length = nil
     end
+
+    def stream(status: 200, type: nil, length: nil, &body)
+      raise ArgumentError, 'stream needs a block' unless body
+      unless length.nil? || (length.is_a?(Integer) && length >= 0)
+        raise ArgumentError, 'length must be a non-negative Integer'
+      end
+
+      @status = status
+      @headers['Content-Type'] = type if type
+      @body = ''
+      @stream_length = length
+      @stream_body = body
+    end
+
+    def sse(status: 200, &body)
+      raise ArgumentError, 'sse needs a block' unless body
+
+      @headers['Cache-Control'] = 'no-cache'
+      @headers['X-Accel-Buffering'] = 'no'
+      stream(status:, type: EVENT_STREAM, &body)
+    end
+
+    def streaming? = !@stream_body.nil?
 
     def text(body, status: 200)
       @status = status
       @headers.plain
       @body = body
+      @stream_body = nil
     end
 
     def json(body, status: 200)
       @status = status
       @headers.json_type
       @body = body
+      @stream_body = nil
+    end
+
+    def json_value(value, status: 200) = json(Json.generate(value), status: status)
+
+    def set_cookie(name, value, path: '/', domain: nil, max_age: nil, secure: false, http_only: true,
+                   same_site: 'Lax')
+      @headers.add('Set-Cookie',
+                   Cookies.serialize(name, value, path, domain, max_age, secure, http_only, same_site))
+    end
+
+    def delete_cookie(name, path: '/', domain: nil)
+      @headers.add('Set-Cookie', Cookies.serialize(name, '', path, domain, 0, false, false, nil))
     end
 
     def to_wire(keep_alive, version: '1.1', head: false)
@@ -199,6 +276,8 @@ module Kiln
         end
         if status == 205
           out << LENGTH_ZERO
+        elsif body_size.negative?
+          out << CHUNKED unless old
         elsif status != 204 && status != 304
           size = no_body?(status) ? 0 : body_size
           out << LENGTH_PREFIX << (size < LENGTHS.size ? LENGTHS[size] : size.to_s) << CRLF
@@ -221,6 +300,19 @@ module Kiln
         return ''.b if no_body?(status_value) || body_value.nil?
 
         body_value.is_a?(String) ? body_value : body_value.to_s
+      end
+
+      def stream_framing(res, version, keep)
+        length = res.stream_length
+        chunked = length.nil? && version != HTTP_10
+        [chunked, keep && (chunked || !length.nil?)]
+      end
+
+      def streams?(res)
+        return false unless res.streaming?
+
+        status = res.status
+        valid_status?(status) && !no_body?(status)
       end
 
       def valid_status?(status_value) = status_value.is_a?(Integer) && status_value >= 200 && status_value <= 599
