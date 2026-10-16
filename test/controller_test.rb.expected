@@ -1,0 +1,46 @@
+-- controller resources
+ok   router module configures resources
+ok   index
+ok   show reads params through the controller
+ok   create sets its status
+ok   update via PUT
+ok   update via PATCH
+ok   destroy
+ok   HEAD falls back to show
+-- custom routes in the router module
+ok   static custom route wins over resource show
+ok   custom route dispatches to controller action
+ok   member path gets :id and private helpers
+ok   member path dispatches to controller action
+ok   show still answers other ids
+ok   member route keeps its method (405 with Allow)
+-- isolation
+ok   each request gets a new controller
+ok   same action names in two controllers stay apart
+ok   collection routes of two controllers stay apart
+ok   an action missing from the handlers is not a route
+ok   a missing action is not a route
+ok   concurrent requests do not share instance state
+-- options
+ok   only limits controller actions
+ok   scope prefix and wrap reach custom routes
+ok   scope prefix and wrap reach controller routes
+ok   controller actions work as plain route handlers
+-- hash handlers keep working
+ok   custom collection route and hash resources
+ok   custom member route and hash resources
+ok   hash resources still map show
+-- errors
+ok   resource handlers must be a hash
+ok   only cannot select an unregistered handler
+-- over a socket
+ok   event, handlers: 0: collection route
+ok   event, handlers: 0: member route
+ok   event, handlers: 0: show
+ok   event, handlers: 2: collection route
+ok   event, handlers: 2: member route
+ok   event, handlers: 2: show
+ok   base: collection route
+ok   base: member route
+ok   base: show
+done

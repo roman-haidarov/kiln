@@ -1,6 +1,6 @@
 # kiln
 
-HTTP/1.1 server for Spinel. Version 0.0.3. Behavior and measurements are in
+HTTP/1.1 server for Spinel. Version 0.0.4. Behavior and measurements are in
 [CHANGELOG.md](CHANGELOG.md). Recorded checks are in
 [VALIDATION.md](VALIDATION.md).
 
@@ -18,15 +18,17 @@ spin add kiln --path ../kiln
 require "kiln"
 
 router = Kiln::Router.new
-  .get("/", ->(ctx) { ctx.res.text("Hello, world!\n") })
-  .namespace("/api") { |api| api.configure(Api::Users) }
-  .seal!
+router.get("/", ->(ctx) { ctx.res.text("Hello, world!\n") })
+router.seal!
 
-log = Kiln::Log.new($stdout)
+log = Kiln::Log.new
 app = Kiln::Rescue.new(router, log)
 server = Kiln::Server.new(app, nil, log: log, host: "127.0.0.1", port: 8080)
-server.run(grace: 30.0)
-log.close
+begin
+  server.run(grace: 30.0)
+ensure
+  log.close
+end
 ```
 
 A handler reads `ctx.req` and writes `ctx.res`. `ctx.sleep`, `ctx.all`,
@@ -46,26 +48,89 @@ be rolled back.
 
 ## Routes
 
-```ruby
-module Api
-  module Users
-    class << self
-      def configure(router)
-        router.resources("/users", {
-                           index: method(:index), show: method(:show), create: method(:create)
-                         })
-      end
+Keep route declarations in router modules and request logic in controllers:
 
-      def index(ctx) = ctx.res.text("Users")
-      def show(ctx) = ctx.res.text("User #{ctx.req.params["id"]}")
-      def create(ctx) = ctx.res.text("created", status: 201)
+```text
+app/
+  main.rb
+  controllers/users.rb
+  routers/users.rb
+```
+
+`app/controllers/users.rb`:
+
+```ruby
+module Controllers
+  class Users < Kiln::Controller
+    def index = res.text("users")
+    def show = res.text("User #{params['id']}")
+    def create = res.text("created", status: 201)
+    def search = res.text("search #{req.query_params['q']}")
+    def ban = res.text("banned #{params['id']}")
+  end
+end
+```
+
+`app/routers/users.rb`:
+
+```ruby
+require "controllers/users"
+
+module Routers
+  module Users
+    def self.configure(router)
+      router.get("/users/search", ->(ctx) { Controllers::Users.new(ctx).search })
+      router.post("/users/:id/ban", ->(ctx) { Controllers::Users.new(ctx).ban })
+      router.resources("/users", {
+        index: ->(ctx) { Controllers::Users.new(ctx).index },
+        show: ->(ctx) { Controllers::Users.new(ctx).show },
+        create: ->(ctx) { Controllers::Users.new(ctx).create }
+      })
     end
   end
 end
 ```
 
+`app/main.rb`:
+
+```ruby
+require "kiln"
+require "routers/users"
+
+router = Kiln::Router.new
+router.configure(Routers::Users)
+router.seal!
+log = Kiln::Log.new($stdout)
+server = Kiln::Server.new(router, nil, log: log, host: "127.0.0.1", port: 8080)
+begin
+  server.run(grace: 5.0)
+ensure
+  log.close
+end
+```
+
+Compile and run the entry point with `app/` on Spinel's require path so the
+router module and controller files resolve:
+
+```sh
+spinel -I app app/main.rb -o app_server
+./app_server
+```
+
 `resources` accepts `index`, `show`, `create`, `update` (PUT and PATCH), and
-`destroy`. Pass only the actions the module implements.
+`destroy`. The router module maps each action to a handler. `configure` lets
+`main.rb` compose router modules without containing their route definitions.
+
+## Controllers
+
+Each route handler creates a controller for that request. Controllers contain
+request logic and private helpers, with no route table or route registration
+code. Custom paths use the same `get`, `post`, `put`, `patch` and `delete`
+methods as every other route. Register static paths such as `/users/search`
+before `resources("/users", ...)`, so they take precedence over `/users/:id`.
+Keep controller action lambdas in application router modules; Kiln should not
+generate action-dispatch lambdas, because they can make Spinel fail to compile
+programs that do not use that shortcut.
 
 ```ruby
 router = Kiln::Router.new(trailing_slash: :redirect)
@@ -73,8 +138,8 @@ router.get("/files/*path", ->(ctx) { ctx.res.text(ctx.req.params["path"]) })
 router.get("/health", ->(ctx) { ctx.res.text("ok") })
 router.not_found(->(ctx) { ctx.res.json_value({ "error" => "not found" }, status: 404) })
 router.method_not_allowed(->(ctx) { ctx.res.json_value({ "allow" => ctx.res.headers["Allow"] }, status: 405) })
-router.scope("/admin", wrap: ->(nxt) { AdminOnly.new(nxt) }) do |admin|
-  admin.get("/stats", Stats.method(:show))
+router.scope("/admin") do |admin|
+  admin.get("/stats", ->(ctx) { ctx.res.text("stats") })
 end
 router.seal!
 ```
@@ -82,14 +147,18 @@ router.seal!
 ## Request data
 
 ```ruby
+router = Kiln::Router.new
 router.post("/users", lambda { |ctx|
   input = ctx.req.json
-  page = ctx.req.query_params["page"]
-  sid = ctx.req.cookie("sid")
   ctx.res.set_cookie("seen", "1", max_age: 3600)
-  ctx.res.json_value({ "id" => 1, "name" => input["name"] }, status: 201)
+  ctx.res.json_value({ "name" => input["name"], "page" => ctx.req.query_params["page"],
+                       "session" => ctx.req.cookie("sid") }, status: 201)
 })
+router.seal!
 ```
+
+Send this route JSON with `Content-Type: application/json`; `query_params` and
+`cookie` read the URL query and `Cookie` header.
 
 `ctx.req.form` reads an `application/x-www-form-urlencoded` body.
 `Kiln::Json.parse` and `Kiln::Json.generate` are the direct calls. Inside a
@@ -98,20 +167,20 @@ request, `Kiln.pop(queue)` waits on a queue only until the deadline.
 ## Streaming
 
 ```ruby
+router = Kiln::Router.new
 router.get("/export", lambda { |ctx|
   ctx.res.stream(type: "text/csv") do |out|
-    Report.each_row { |row| out.write(row.to_csv) }
+    out.write("id,name\n")
+    out.write("1,Ada\n")
   end
 })
 
 router.get("/events", lambda { |ctx|
   ctx.res.sse do |out|
-    until out.closed?
-      out.event(Clock.now.to_s, event: "tick")
-      Kernel.sleep 1
-    end
+    out.event("ready", event: "status")
   end
 })
+router.seal!
 ```
 
 The block runs after the handler returns, while the response is written, so
@@ -122,10 +191,15 @@ is shutting down. A write to a client that has gone raises `Kiln::ClientGone`.
 
 ## Static files
 
+Put files under `public/` before starting the server; the route parameter
+`*path` selects a file below that directory.
+
 ```ruby
+router = Kiln::Router.new
 assets = Kiln::Static.new("public", max_age: 3600)
 router.get("/", assets)
 router.get("/assets/*path", assets)
+router.seal!
 ```
 
 `Kiln::Static` serves files under its root with `Content-Type` by extension,
@@ -145,7 +219,11 @@ writing fewer closes the connection.
 ## Compression
 
 ```ruby
-app = Kiln::Compress.new(router, level: 2, stream_level: 1, min_size: 1024)
+router = Kiln::Router.new
+router.scope("/api", wrap: ->(nxt) { Kiln::Compress.new(nxt, min_size: 1024) }) do |api|
+  api.get("/report", ->(ctx) { ctx.res.json_value({ "status" => "ready" }) })
+end
+router.seal!
 ```
 
 `Kiln::Compress` gzips text, JSON, JavaScript, XML and SVG responses of at
@@ -157,14 +235,6 @@ a strong `ETag` and drops `Accept-Ranges`, and leaves 204, 206, 304, responses
 that already have a `Content-Encoding`, and `Cache-Control: no-transform`
 alone. Compression uses a vendored zlib-ng.
 
-Wrap only routes that need compression when small responses dominate:
-
-```ruby
-router.scope("/api", wrap: ->(nxt) { Kiln::Compress.new(nxt) }) do |api|
-  api.get("/report", Reports.method(:show))
-end
-```
-
 Do not compress responses that combine secrets with reflected user input over
 HTTPS. Set `Cache-Control: no-transform` on a response to disable this
 middleware for that response. The event backend allows up to 1024 active
@@ -175,20 +245,28 @@ streams.
 ## Tasks
 
 ```ruby
+log = Kiln::Log.new
 tasks = Kiln::Tasks.new(log)
-tasks.every("cache sweep", 60.0) { |_token| Cache.sweep }
-tasks.spawn("consumer") do |token|
-  until token.cancelled?
-    job = queue.pop(timeout: 1.0)
-    process(job) if job
-  end
+tasks.every("heartbeat", 60.0) { |_token| log.info("still running") }
+
+router = Kiln::Router.new
+router.get("/", ->(ctx) { ctx.res.text("Hello, world!\n") })
+router.seal!
+server = Kiln::Server.new(router, nil, log: log, host: "127.0.0.1", port: 8080)
+begin
+  server.run(grace: 30.0, tasks: tasks)
+ensure
+  log.close
 end
-server.run(grace: 30.0, tasks: tasks)
 ```
 
 ## Middleware
 
 ```ruby
+router = Kiln::Router.new
+router.get("/health", ->(ctx) { ctx.res.text("ok") })
+router.seal!
+
 app = Kiln::Cors.new(
   Kiln::DefaultHeaders.new(router, { "X-Content-Type-Options" => "nosniff" }),
   origins: ["https://app.example"],
@@ -201,13 +279,21 @@ app = Kiln::Cors.new(
 ## Calling a handler
 
 ```ruby
-res = Kiln::Testing.call(app, "GET", "/users/7?full=1", headers: { "Cookie" => "sid=1" })
-res = Kiln::Testing.json(app, "POST", "/users", { "name" => "Ann" })
+router = Kiln::Router.new
+router.get("/users/:id", ->(ctx) { ctx.res.json_value({ "id" => ctx.req.params["id"] }) })
+router.post("/users", ->(ctx) { ctx.res.json_value(ctx.req.json, status: 201) })
+router.seal!
+get = Kiln::Testing.call(router, "GET", "/users/7?full=1", headers: { "Cookie" => "sid=1" })
+post = Kiln::Testing.json(router, "POST", "/users", { "name" => "Ann" })
 ```
 
-`res.status` and `res.body` are what the handler wrote.
+`get.status` and `get.body` and `post.status` and `post.body` contain the
+responses produced by those handlers.
 
 ## Pools
+
+Provide a resource factory and replace the sample work with your application
+operations:
 
 ```ruby
 pool = Kiln::Pool.new(4) { connect_to_service }

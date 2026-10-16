@@ -6,6 +6,14 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+Current tree: 15 test files and 701 snapshot checks, including
+`test/controller_test.rb` (38 checks for router modules, per-request
+controllers, resource and custom routes, handler isolation, scopes, and all
+server backends). The full suite passed in a Linux aarch64 Docker container on
+the macOS host with Spinel `9922a2c` and `SPINEL_WORKERS=1` on 2026-10-16.
+Historical run summaries below record suite sizes at the time of those checks;
+they do not describe the current test set.
+
 Run all test files with:
 
 ```sh
