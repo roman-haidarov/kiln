@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.4
+
+### Controllers
+
+`Kiln::Controller` provides request-scoped access to `ctx`, `req`, `res` and
+`params`. Controller classes contain action methods and private helpers. Router
+modules own route declarations and connect paths to controller actions with
+ordinary handlers. `Router#configure` composes those modules in the application
+entry point.
+
 ## 0.0.3
 
 A per-request memory leak, a crash on Linux when a streaming client hangs up,

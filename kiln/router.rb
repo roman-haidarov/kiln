@@ -94,8 +94,10 @@ module Kiln
 
     def resources(path, handlers, only: nil)
       demand_open
-      names = handlers.keys if handlers.is_a?(Hash)
-      raise ArgumentError, 'resource handlers' unless names&.all? { |action| RESOURCE_ACTIONS.key?(action) }
+      raise ArgumentError, 'resource handlers' unless handlers.is_a?(Hash)
+
+      names = handlers.keys
+      raise ArgumentError, 'resource handlers' unless names.all? { |action| RESOURCE_ACTIONS.key?(action) }
 
       actions = only || names
       unless actions.is_a?(Array) && actions.all? { |action| handlers.key?(action) }
