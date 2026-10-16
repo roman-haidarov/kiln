@@ -6,11 +6,14 @@ ARG SPINEL_REF=9922a2c74ee1128162abf48b645575f0c8cc254d
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
+    clang-18 \
     curl \
     git \
+    libclang-rt-18-dev \
     libffi-dev \
     libssl-dev \
     pkg-config \
+    llvm-18 \
     wrk \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
