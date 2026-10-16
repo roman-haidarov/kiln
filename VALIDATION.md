@@ -88,6 +88,53 @@ ASan and UBSan; 100,000 cases completed without sanitizer errors. These checks
 do not prove correctness for every possible input, and sanitizer runs do not
 check for data races.
 
+## Native C checks
+
+CI runs Clang Static Analyzer on `kiln_http.c`, `kiln_uv.c` and
+`kiln_uv_parse.c`. When the pinned Spinel headers are available, it also checks
+`kiln_json.c` and `kiln_gzip.c`. `kiln_yyjson.c` only includes the vendored
+yyjson implementation, so that translation unit and all vendored parser and
+codec code are excluded.
+
+The HTTP helper targets and the event request parser run under libFuzzer,
+AddressSanitizer and UndefinedBehaviorSanitizer. Each target has its own seed
+corpus and HTTP dictionary. The campaign runs for five seconds per target by
+default, and the corpus is minimized with `-merge=1` after each target and
+cached between CI runs. Set `KILN_FUZZ_SECONDS` to change the duration. Before
+fuzzing, a seed check reads the seed files from the corpus directory and
+requires successful parses, the expected helper results and the expected event
+parser states and error statuses (400, 413, 417, 431, 501). The
+event parser's seed corpus includes a header larger than its 16 KiB limit, and
+its targets allow inputs up to 32 KiB plus one byte that selects `max_body`.
+The `uv-parse-diff` target compares `kiln_uv_parse_request` with the 0.0.4
+inline framing logic. Coverage output lists the selected parser and helper
+functions only; it does not present whole-file coverage as parser coverage.
+Coverage varies by Clang version and platform.
+
+Recorded on Linux x86-64 (Ubuntu 24.04, clang 18.1.3), five seconds per target:
+the static analyzer passed for `kiln_http.c`, `kiln_uv.c`, `kiln_uv_parse.c`,
+`kiln_json.c` and `kiln_gzip.c` with the Spinel `9922a2c` headers; the seed
+check and all nine targets passed from an empty corpus and again from the
+minimized corpus; TSan passed. Every listed helper function and every
+`kiln_uv_parse.c` function had full line coverage except
+`kiln_uv_parse_request` (89%, its argument checks) and `kiln_http_scan_at`
+(88%). A mutant that answered 413 at `body == max_body` was caught by
+`uv-parse-diff` within 30 seconds, and a seed that no longer parsed failed the
+seed check. A separate 60-second differential run of 1.3 million inputs found
+no difference between the two implementations.
+
+The native TSan harness checks concurrent calls against thread-local socket
+receive buffers and status. It does not exercise libuv's event-loop-owned
+queues or Spinel's green-thread scheduler, and it is not a whole-runtime race
+check. Run the native checks with `ci/c-native.sh all` using Clang with
+libFuzzer support and matching `llvm-profdata` and `llvm-cov` tools. Locally,
+results go to `/tmp/kiln-c-native/` and the corpus to `/tmp/kiln-corpus/` by
+default. CI uploads the reports as `kiln-ci-linux-amd64`,
+`kiln-ci-linux-arm64` and `kiln-ci-macos-arm64` artifacts, under `c-native/`.
+The macOS workflow installs Homebrew `lld` and uses it for sanitizer and
+coverage-instrumented binaries because Apple's linker rejects relocations
+emitted by recent LLVM versions in this configuration.
+
 ## Load and performance
 
 The recorded load check used 10,000 idle clients for 10 seconds, then sent
@@ -126,9 +173,9 @@ work that has already started. Client disconnect detection uses `POLLRDHUP`
 where available; the `MSG_PEEK` fallback cannot detect closure while unread
 bytes remain queued.
 
-The native parser is tested with differential and sanitizer checks. TSan was
-not run. Load and performance figures describe the recorded machines and
-workloads; they are not guarantees for other systems.
+The native parser is tested with differential, fuzzing, and sanitizer checks.
+Load and performance figures describe the recorded machines and workloads;
+they are not guarantees for other systems.
 
 ## References
 

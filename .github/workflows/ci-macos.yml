@@ -25,8 +25,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Determine Homebrew LLVM cache key
+        id: llvm-cache
+        run: |
+          fingerprint=$(brew info --json=v2 llvm lld | shasum -a 256 | cut -c1-16)
+          printf 'fingerprint=%s\n' "$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/homebrew-cache
+          key: homebrew-llvm-${{ runner.os }}-${{ runner.arch }}-${{ steps.llvm-cache.outputs.fingerprint }}
+          restore-keys: |
+            homebrew-llvm-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Install native dependencies
-        run: brew install pkg-config libffi openssl@3 wrk
+        env:
+          HOMEBREW_CACHE: ${{ runner.temp }}/homebrew-cache
+        run: brew install llvm lld pkg-config libffi openssl@3 wrk
+
+      - name: Restore fuzz corpus
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/kiln-corpus
+          key: kiln-corpus-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            kiln-corpus-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Restore Spinel
         id: spinel-cache
@@ -49,6 +73,12 @@ jobs:
           mkdir -p "$RUNNER_TEMP/kiln-ci"
           SPINEL="$RUNNER_TEMP/spinel-install/bin/spinel" \
           SPINEL_WORKERS=1 \
+          CI_NATIVE_C=1 \
+          KILN_NATIVE_CC="$(brew --prefix llvm)/bin/clang" \
+          KILN_NATIVE_LDFLAGS=-fuse-ld=lld \
+          KILN_C_CORPUS="$RUNNER_TEMP/kiln-corpus" \
+          LLVM_PROFDATA="$(brew --prefix llvm)/bin/llvm-profdata" \
+          LLVM_COV="$(brew --prefix llvm)/bin/llvm-cov" \
           KILN_ARTIFACTS="$RUNNER_TEMP/kiln-ci" \
           TEST_TIMEOUT=180 \
             ci/run.sh

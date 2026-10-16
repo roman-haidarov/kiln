@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include "kiln_ascii.h"
+#include "kiln_uv_parse.h"
 #include "libuv/uv.h"
 
 #ifdef SP_THREADS
@@ -18,17 +18,9 @@ extern __thread int sp_ffi_bin_len;
 extern int sp_ffi_bin_len;
 #endif
 
-long kiln_scan_request_head(const char *buf, long len, int64_t *out, long cap);
-
-#define KUV_MAX_SLOTS         65536
-#define KUV_HEAD_MAX          16384
-#define KUV_SCAN_CAP          (5 + 5 * 100)
-#define KUV_CONTENT_LENGTH    6
-#define KUV_TRANSFER_ENCODING 23
-#define KUV_CONNECTION        5
-#define KUV_EXPECT            24
-#define KUV_WRITEV_MIN        4096
-#define KUV_PIPELINE_MAX      16
+#define KUV_MAX_SLOTS    65536
+#define KUV_WRITEV_MIN   4096
+#define KUV_PIPELINE_MAX 16
 
 static __thread sigset_t kuv_old_sigmask;
 static __thread int kuv_sigpipe_blocked;
@@ -255,37 +247,6 @@ static void kuv_maybe_continue(kuv_conn *c) {
     kuv_queue_flush(c);
 }
 
-static int kuv_has_token(const char *s, long len, const char *token) {
-    long n = (long)strlen(token);
-    long i = 0;
-    while (i < len) {
-        while (i < len && (s[i] == ' ' || s[i] == '\t' || s[i] == ','))
-            i++;
-        long start = i;
-        while (i < len && s[i] != ',')
-            i++;
-        long end = i;
-        while (end > start && (s[end - 1] == ' ' || s[end - 1] == '\t'))
-            end--;
-        if (end - start == n && kiln_ascii_case_equal(s + start, token, (size_t)n))
-            return 1;
-    }
-    return 0;
-}
-
-static long kuv_digits(const char *s, long len, long *value) {
-    long v = 0;
-    if (len <= 0 || len > 18)
-        return -1;
-    for (long i = 0; i < len; i++) {
-        if (s[i] < '0' || s[i] > '9')
-            return -1;
-        v = v * 10 + (s[i] - '0');
-    }
-    *value = v;
-    return 0;
-}
-
 static size_t kuv_align8(size_t n) {
     return (n + 7U) & ~(size_t)7U;
 }
@@ -323,65 +284,33 @@ static void kuv_parse(kuv_conn *c) {
             uv_read_stop((uv_stream_t *)&c->tcp);
             break;
         }
-        char *start = c->in + pos;
+        const char *start = c->in + pos;
         size_t avail = c->in_len - pos;
-        const char *end = memmem(start, avail, "\r\n\r\n", 4);
-        if (!end) {
-            if (avail > KUV_HEAD_MAX)
-                kuv_error(c, KUV_431);
+        int64_t scan[KILN_UV_SCAN_CAP];
+        kiln_uv_parse_result parsed;
+        int state =
+            kiln_uv_parse_request(start, avail, kuv_max_body, scan, KILN_UV_SCAN_CAP, &parsed);
+        if (state < 0) {
+            kuv_close(c);
+            return;
+        }
+        if (state == KILN_UV_PARSE_ERROR) {
+            kuv_error(c, parsed.error_status == 501   ? KUV_501
+                         : parsed.error_status == 413 ? KUV_413
+                         : parsed.error_status == 417 ? KUV_417
+                         : parsed.error_status == 431 ? KUV_431
+                                                      : KUV_400);
             break;
         }
-        long head_len = (long)(end - start);
-        if (head_len > KUV_HEAD_MAX) {
-            kuv_error(c, KUV_431);
-            break;
-        }
-        int64_t scan[KUV_SCAN_CAP];
-        long n = kiln_scan_request_head(start, head_len, scan, KUV_SCAN_CAP);
-        if (n < 0) {
-            kuv_error(c, KUV_400);
-            break;
-        }
-        long body = 0;
-        int bad = 0;
-        int minor = (int)(scan[4] & 1);
-        int has_close = 0;
-        int has_keep = 0;
-        int expect_continue = 0;
-        for (long i = 0; i < n; i++) {
-            const int64_t *h = scan + 5 + 5 * i;
-            if (h[4] == KUV_TRANSFER_ENCODING)
-                bad = 501;
-            else if (h[4] == KUV_CONTENT_LENGTH && kuv_digits(start + h[2], (long)h[3], &body) < 0)
-                bad = 400;
-            else if (h[4] == KUV_CONNECTION) {
-                has_close |= kuv_has_token(start + h[2], (long)h[3], "close");
-                has_keep |= kuv_has_token(start + h[2], (long)h[3], "keep-alive");
-            } else if (h[4] == KUV_EXPECT) {
-                if (h[3] == 12 && kiln_ascii_case_equal(start + h[2], "100-continue", 12))
-                    expect_continue = minor == 1;
-                else if (h[3] > 0)
-                    bad = 417;
-            }
-        }
-        if (!bad && body > kuv_max_body)
-            bad = 413;
-        if (bad) {
-            kuv_error(c, bad == 501   ? KUV_501
-                         : bad == 413 ? KUV_413
-                         : bad == 417 ? KUV_417
-                                      : KUV_400);
-            break;
-        }
-        size_t total = (size_t)head_len + 4 + (size_t)body;
-        if (avail < total) {
-            if (expect_continue) {
+        if (state == KILN_UV_PARSE_INCOMPLETE) {
+            if (parsed.expect_continue) {
                 c->want_continue = 1;
                 kuv_maybe_continue(c);
             }
             break;
         }
-        kuv_req *r = kuv_req_make(start, total, scan, n, c->slot, c->gen, head_len, body);
+        kuv_req *r = kuv_req_make(start, parsed.total_len, scan, parsed.nheaders, c->slot, c->gen,
+            (long)parsed.head_len, parsed.body_len);
         if (!r) {
             kuv_close(c);
             return;
@@ -395,8 +324,8 @@ static void kuv_parse(kuv_conn *c) {
         c->pending++;
         c->want_continue = 0;
         c->continue_sent = 0;
-        pos += total;
-        if (has_close || (minor == 0 && !has_keep)) {
+        pos += parsed.total_len;
+        if (parsed.has_close || (parsed.minor == 0 && !parsed.has_keep)) {
             c->stop_parse = 1;
             uv_read_stop((uv_stream_t *)&c->tcp);
         }
@@ -612,7 +541,7 @@ const char *kiln_uv_next(int64_t *scan, long cap, int64_t *meta) {
         free(kuv_current);
         kuv_current = NULL;
     }
-    while (kuv_head && cap >= KUV_SCAN_CAP) {
+    while (kuv_head && cap >= KILN_UV_SCAN_CAP) {
         kuv_req *r = kuv_head;
         kuv_head = r->next;
         if (!kuv_head)

@@ -12,12 +12,10 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include "kiln_ascii.h"
+#include "kiln_http_scan.h"
 #include "picohttpparser/picohttpparser.h"
 
-#define KILN_MAX_HEAD    16384
-#define KILN_MAX_HEADERS 100
-#define KILN_STRIDE      5
-#define KILN_RECV_MAX    16384
+#define KILN_RECV_MAX 16384
 
 static void kiln_free_components(char *copy, const char *local) {
     if (copy != local)
@@ -276,15 +274,15 @@ static int kiln_crlf_only(const char *head, long len) {
 }
 
 static long kiln_scan_terminated(const char *buf, long len, int64_t *out, long cap, long base) {
-    struct phr_header headers[KILN_MAX_HEADERS];
+    struct phr_header headers[KILN_HTTP_MAX_HEADERS];
     const char *method;
     const char *path;
     size_t method_len;
     size_t path_len;
-    size_t num = KILN_MAX_HEADERS;
+    size_t num = KILN_HTTP_MAX_HEADERS;
     int minor = -1;
 
-    if (len <= 0 || len > KILN_MAX_HEAD || cap < 5 + KILN_STRIDE * KILN_MAX_HEADERS)
+    if (len <= 0 || len > KILN_HTTP_HEAD_MAX || cap < KILN_HTTP_SCAN_CAP)
         return -1;
     if (buf[0] == '\r' || buf[0] == '\n' || !kiln_crlf_only(buf, len))
         return -1;
@@ -320,14 +318,14 @@ static long kiln_scan_terminated(const char *buf, long len, int64_t *out, long c
             (known == 23 && seen_encoding++))
             return -1;
         out[o + 4] = known;
-        o += KILN_STRIDE;
+        o += KILN_HTTP_SCAN_STRIDE;
     }
     return (long)num;
 }
 
 long kiln_http_scan(const char *head, long len, int64_t *out, long cap) {
-    char buf[KILN_MAX_HEAD + 4];
-    if (len <= 0 || len > KILN_MAX_HEAD)
+    char buf[KILN_HTTP_HEAD_MAX + 4];
+    if (len <= 0 || len > KILN_HTTP_HEAD_MAX)
         return -1;
     memcpy(buf, head, (size_t)len);
     memcpy(buf + len, "\r\n\r\n", 4);
@@ -335,7 +333,7 @@ long kiln_http_scan(const char *head, long len, int64_t *out, long cap) {
 }
 
 long kiln_http_scan_at(const char *data, long total, long start, long len, int64_t *out, long cap) {
-    if (total < 0 || start < 0 || len <= 0 || len > KILN_MAX_HEAD || start > total - len - 4)
+    if (total < 0 || start < 0 || len <= 0 || len > KILN_HTTP_HEAD_MAX || start > total - len - 4)
         return -1;
     const char *buf = data + start;
     if (memcmp(buf + len, "\r\n\r\n", 4) != 0)

@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.0.5
+
+CI adds Clang Static Analyzer checks for the owned HTTP, event request parsing,
+JSON binding and gzip binding sources, time-limited libFuzzer targets for HTTP
+parsing and event request framing, and a focused ThreadSanitizer check for
+thread-local socket receive state. The fuzzers use AddressSanitizer and
+UndefinedBehaviorSanitizer, retain their corpus between CI runs, and report
+coverage for the parser and helper functions they exercise. Native checks use
+a separate Clang compiler and do not use the Spinel toolchain; kiln's extension
+build keeps its platform default compiler. The Spinel test suite and benchmark
+smoke use one worker.
+
+### Event request parsing
+
+The request framing that `EventServer` ran inline in `kuv_parse` moved to
+`ext/kiln_uv_parse.c` as `kiln_uv_parse_request`, so it can be fuzzed without
+libuv. `kiln_uv.c` calls it for every request on the default backend. The
+behavior is unchanged: a differential libFuzzer target (`uv-parse-diff`) runs
+the 0.0.4 logic and the new function on the same input and the same
+`max_body`. It compares parser states and error statuses; for complete and
+incomplete requests it also compares lengths, the `Connection` and `Expect`
+flags and the header offsets. The new function also
+rejects a `Content-Length` whose value would overflow `head_len + 4 + body`;
+with the 18-digit limit and `max_body` this is not reachable. Invalid arguments
+(a scan buffer smaller than `KILN_UV_SCAN_CAP`, a negative `max_body`) close
+the connection. The head limit, header count and scan stride are defined in
+`kiln_http_scan.h` and shared by both parsers. The seed check verifies the
+scanner rejects an undersized output buffer.
+
+On Linux x86-64 with Spinel `9922a2c` and `SPINEL_WORKERS=1`, the fifteen-file
+suite passes with the new module.
+
+### Native check details
+
+- The seed check reads the seed files from the corpus directory instead of a
+  second copy of the strings, and also checks the parsed fields of the event
+  seeds, a 413 at a small `max_body`, a head of exactly 16 KiB and the scan
+  capacity both sides agree on.
+- The event parser targets take `max_body` from the first input byte (0, 1, 4,
+  1 KiB, 1 MiB or 18 digits), so 413 at small limits and `max_body: 0` are
+  fuzzed.
+- Each target's corpus is minimized with `-merge=1` after its run, so the
+  cached corpus does not grow with every CI run.
+- The coverage report also lists `kiln_chunk_size`, `kiln_token`, `kiln_ctl`,
+  `kiln_digits` and `kiln_host`, which have their own targets.
+- The macOS Homebrew cache key includes the LLVM version, so a new LLVM
+  release is cached once instead of downloaded on every run.
+
 ## 0.0.4
 
 ### Controllers

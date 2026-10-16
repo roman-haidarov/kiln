@@ -4,6 +4,8 @@ set -eu
 spinel=${SPINEL:-spinel}
 artifacts=${KILN_ARTIFACTS:-${TMPDIR:-/tmp}/kiln-ci}
 bench=${CI_BENCH:-1}
+c_compiler=${CC:-cc}
+native_compiler=${KILN_NATIVE_CC:-clang}
 
 command -v "$spinel" >/dev/null 2>&1 || { printf 'spinel not found: %s\n' "$spinel" >&2; exit 1; }
 export SPINEL="$spinel"
@@ -12,8 +14,18 @@ mkdir -p "$artifacts"
 {
   printf 'spinel: %s\n' "$("$spinel" --version 2>&1 | sed -n '1p')"
   printf 'system: %s\n' "$(uname -srm)"
-  printf 'cc: %s\n' "$(${CC:-cc} --version 2>&1 | sed -n '1p')"
+  printf 'cc: %s\n' "$($c_compiler --version 2>&1 | sed -n '1p')"
 } | tee "$artifacts/environment.txt"
+
+if [ "${CI_NATIVE_C:-0}" = 1 ]; then
+  command -v "$native_compiler" >/dev/null 2>&1 || {
+    printf 'native C compiler not found: %s\n' "$native_compiler" >&2
+    exit 1
+  }
+  printf '== native C analysis, fuzzing, TSan and coverage\n'
+  KILN_NATIVE_CC="$native_compiler" KILN_C_ARTIFACTS="$artifacts/c-native" \
+    ci/c-native.sh all
+fi
 
 printf '== test suite, SPINEL_WORKERS=1\n'
 SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/workers-1" ./test-spinel.sh

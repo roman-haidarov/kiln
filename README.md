@@ -1,6 +1,6 @@
 # kiln
 
-HTTP/1.1 server for Spinel. Version 0.0.4. Behavior and measurements are in
+HTTP/1.1 server for Spinel. Version 0.0.5. Behavior and measurements are in
 [CHANGELOG.md](CHANGELOG.md). Recorded checks are in
 [VALIDATION.md](VALIDATION.md).
 
