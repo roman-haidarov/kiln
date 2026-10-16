@@ -52,20 +52,15 @@ module Kiln
       def begin_handling(slot, deadline)
         shard = slot.shard
         @shard_locks[shard].synchronize do
-          unless @shut_by_shard[shard] || slot.done || slot.state == :reaping
+          unless @draining || @shut_by_shard[shard] || slot.done || slot.state == :reaping
             slot.flying = true
             slot.deadline = deadline
             slot.state = :handling
             heap_push(slot)
-            if slot.hidx.zero? && @reap_wake.empty?
-              begin
-                @reap_wake.push(true, true)
-              rescue ThreadError
-                nil
-              end
-            end
+            signal_reaper if slot.hidx.zero?
             @in_flight[shard] += 1
             @seq[shard] += @shard_count
+            @seq[shard]
           end
         end
       end
@@ -74,6 +69,8 @@ module Kiln
         version = req.http_version
         raw_status = res.status
         keep = HttpSyntax.persistent?(version, req.headers['connection']) && !@draining
+        return write_stream(sock, req, res, box, keep) if Response.streams?(res)
+
         body = Response.payload(raw_status, res.body)
         head = Response.build_head(raw_status, res.headers, body.bytesize, keep, version: version)
         limit = Kiln.now + @write_timeout
@@ -88,6 +85,43 @@ module Kiln
         end
         sent = write_all(sock, head, limit, body)
         keep && sent
+      end
+
+      def write_stream(sock, req, res, box, keep)
+        version = req.http_version
+        chunked, keep = Response.stream_framing(res, version, keep)
+        limit = Kiln.now + @write_timeout
+        return false unless flush_outbox(sock, box, limit)
+
+        head = Response.build_head(res.status, res.headers, Response.stream_size(res.stream_length), keep, version:)
+        return false unless write_all(sock, head, limit)
+        return keep if req.verb == 'HEAD'
+
+        stream_body(sock, res, chunked) && keep
+      end
+
+      def stream_body(sock, res, chunked)
+        Thread.current[:kiln_deadline] = nil
+        out = socket_writer(sock, chunked, res.stream_length)
+        res.stream_body.call(out)
+        out.flush
+        out.verify!
+        !chunked || write_all(sock, out.ending, Kiln.now + @write_timeout)
+      rescue ClientGone
+        false
+      rescue Exception => err
+        raise err if Kiln.unwind?(err)
+
+        @log.error("stream #{err.class}: #{err.message}")
+        false
+      end
+
+      def socket_writer(sock, chunked, length)
+        timeout = @write_timeout
+        push = lambda do |prefix, bytes|
+          raise ClientGone, 'stream write failed' unless write_all(sock, prefix, Kiln.now + timeout, bytes)
+        end
+        Stream.new(push, -> { @draining || Kiln.client_gone? }, chunked, length)
       end
 
       def dispatch(ctx)

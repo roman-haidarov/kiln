@@ -1,3 +1,4 @@
+ok   event server preserves the process SIGPIPE handler
 ok   inline: 200 with body and close
 ok   inline: 16 pipelined requests -> 16 responses
 ok   inline: Content-Length body reaches the handler
@@ -13,6 +14,7 @@ ok   inline: request after Connection: close is not executed
 ok   inline: HTTP/1.0 without keep-alive stops after one request
 ok   inline: request deadline is visible to Kiln.deadline
 ok   inline: Kiln.check! after the deadline -> 504
+ok   inline: a late handler returns a clean 504 without interrupting the event loop
 ok   inline: unsupported Expect -> 417
 ok   inline: 100 Continue after earlier responses, then the body is served
 ok   inline: shutdown finishes every request already parsed from a pipeline
@@ -20,3 +22,12 @@ ok   inline: shutdown releases connections
 ok   inline: unfinished count includes queued requests when the handler is stopped
 ok   inline: the response finished during shutdown says Connection: close
 ok   inline: listens on ::1 when the host has IPv6
+ok   inline: half-close after a complete request still gets a response
+ok   inline: a good request is answered before the following 400
+ok   inline: 17 pipelined requests -> 17 responses
+ok   inline: a slow reader is closed by write_timeout
+ok   a later server keeps the loop fd after an earlier one is collected
+ok   a blocked handler gets 504 at its deadline
+ok   a blocked handler does not stall the next request
+ok   event stream overflow discards headers from the gzip representation
+ok   a stream below max_streams completes

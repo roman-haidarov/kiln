@@ -3,13 +3,19 @@ module Kiln
     FORMAT = '%a, %d %b %Y %H:%M:%S GMT'
 
     class << self
-      def value
+      def value = current.dup
+
+      def append(out) = out << current
+
+      private
+
+      def current
         sec = Process.clock_gettime(Process::CLOCK_REALTIME, :second)
         cached = @cached
         return cached[1] if cached && cached[0] == sec
 
-        text = Time.now.utc.strftime(FORMAT).b.freeze
-        @cached = [sec, text].freeze
+        text = Time.now.utc.strftime(FORMAT).b
+        @cached = [sec, text]
         text
       end
     end
@@ -34,6 +40,37 @@ module Kiln
     end
 
     def header(name) = @headers[name] || @headers[name.downcase]
+
+    def query_params = @query_params ||= Form.decode(@query)
+
+    def form
+      return @form if @form
+
+      unless Media.form?(header('content-type'))
+        raise UnsupportedMediaType, 'expected application/x-www-form-urlencoded'
+      end
+
+      @form = Form.decode(@body.to_s)
+    end
+
+    def json(max_nesting: Json::MAX_NESTING)
+      return @json if @json_ready && max_nesting >= @json_nesting
+
+      raise UnsupportedMediaType, 'expected application/json' unless Media.json?(header('content-type'))
+
+      begin
+        @json = Json.parse(@body.to_s, max_nesting: max_nesting)
+      rescue JsonError => e
+        raise BadRequest, "invalid JSON: #{e.message}"
+      end
+      @json_ready = true
+      @json_nesting = max_nesting
+      @json
+    end
+
+    def cookies = @cookies ||= Cookies.parse(header('cookie'))
+
+    def cookie(name) = cookies[name]
   end
 
   class Headers
@@ -48,20 +85,31 @@ module Kiln
       @date = false
     end
 
+    LOWER = %w[Content-Type Content-Length Content-Encoding Content-Range Content-Disposition Cache-Control ETag
+               Last-Modified Location Vary Set-Cookie Accept-Ranges Access-Control-Allow-Origin
+               Access-Control-Allow-Credentials Access-Control-Allow-Methods Access-Control-Allow-Headers
+               Access-Control-Expose-Headers Access-Control-Max-Age X-Request-Id Allow Date Expires
+               X-Accel-Buffering].to_h { |name| [name.freeze, name.downcase.freeze] }.freeze
+    CANONICAL = LOWER.keys.to_h { |name| [name, name] }.freeze
+
     def []=(name, value)
       text = name.to_s
-      key = text.downcase
+      key = lower(text)
       delete_key(key)
       store(text, key, value.to_s)
     end
 
     def add(name, value)
       text = name.to_s
-      store(text, text.downcase, value.to_s)
+      store(text, lower(text), value.to_s)
     end
 
     def [](name)
-      key = name.to_s.downcase
+      key = lower(name.to_s)
+      lookup(key)
+    end
+
+    def lookup(key)
       index = 1
       while index < @items.size
         return @items[index + 1] if @items[index] == key
@@ -74,7 +122,7 @@ module Kiln
     def key?(name) = !self[name].nil?
 
     def delete(name)
-      delete_key(name.to_s.downcase)
+      delete_key(lower(name.to_s))
     end
 
     def plain = write_type(TEXT_PLAIN)
@@ -84,13 +132,34 @@ module Kiln
     def each
       index = 0
       while index < @items.size
-        yield @items[index], @items[index + 2]
+        yield @items[index].dup, @items[index + 2]
         index += 3
       end
     end
 
+    def append_to(out)
+      index = 0
+      while index < @items.size
+        name = @items[index]
+        value = @items[index + 2]
+        out << name << Response::FIELD_SEP << value << Response::CRLF if value.frozen? || !HttpNative.ctl?(value)
+        index += 3
+      end
+      out
+    end
+
     def size = @items.size / 3
     def date? = @date
+
+    def no_transform?
+      index = 1
+      while index < @items.size
+        return true if @items[index] == 'cache-control' && @items[index + 1].downcase.include?('no-transform')
+
+        index += 3
+      end
+      false
+    end
 
     private
 
@@ -99,10 +168,26 @@ module Kiln
       return if HOP.include?(key)
       return if HttpNative.ctl?(value)
 
-      @items.push(name)
+      @items.push(owned_name(name))
       @items.push(key)
-      @items.push(value)
+      @items.push(owned(value))
       @date = true if key == 'date'
+    end
+
+    def owned(text) = text.frozen? ? text : text.dup
+
+    def owned_name(text)
+      return text if text.frozen?
+
+      known = CANONICAL[text]
+      known.nil? ? text.dup : known
+    end
+
+    def lower(text)
+      known = LOWER[text]
+      return known unless known.nil?
+
+      text.downcase
     end
 
     def delete_key(key)
@@ -128,7 +213,8 @@ module Kiln
       301 => 'Moved Permanently', 302 => 'Found', 304 => 'Not Modified',
       400 => 'Bad Request', 401 => 'Unauthorized', 403 => 'Forbidden',
       404 => 'Not Found', 405 => 'Method Not Allowed', 408 => 'Request Timeout', 417 => 'Expectation Failed',
-      413 => 'Payload Too Large', 431 => 'Request Header Fields Too Large',
+      413 => 'Payload Too Large', 415 => 'Unsupported Media Type',
+      431 => 'Request Header Fields Too Large',
       500 => 'Internal Server Error', 501 => 'Not Implemented', 503 => 'Service Unavailable',
       504 => 'Gateway Timeout'
     }.freeze
@@ -140,6 +226,8 @@ module Kiln
     UNKNOWN_REASON = " Status\r\n".b.freeze
     LENGTH_PREFIX = 'Content-Length: '.b.freeze
     LENGTH_ZERO = "Content-Length: 0\r\n".b.freeze
+    CHUNKED = "Transfer-Encoding: chunked\r\n".b.freeze
+    EVENT_STREAM = 'text/event-stream; charset=utf-8'.freeze
     DATE_PREFIX = 'Date: '.b.freeze
     KEEP_ALIVE = "Connection: keep-alive\r\n".b.freeze
     CLOSE = "Connection: close\r\n".b.freeze
@@ -153,24 +241,75 @@ module Kiln
     STATUS_11.freeze
     STATUS_10.freeze
     attr_accessor :status, :body
-    attr_reader :headers
+    attr_reader :headers, :stream_body, :stream_length, :noted_length, :noted_type
 
     def initialize
       @status = 200
       @headers = Headers.new
       @body = ''
+      @stream_body = nil
+      @stream_length = nil
+      @noted_length = nil
+      @noted_type = nil
     end
+
+    def note_representation(size, type)
+      @noted_length = size
+      @noted_type = type
+    end
+
+    def unstream
+      @stream_body = nil
+      @stream_length = nil
+    end
+
+    def stream(status: 200, type: nil, length: nil, &body)
+      raise ArgumentError, 'stream needs a block' unless body
+      unless length.nil? || (length.is_a?(Integer) && length >= 0)
+        raise ArgumentError, 'length must be a non-negative Integer'
+      end
+
+      @status = status
+      @headers['Content-Type'] = type if type
+      @body = ''
+      @stream_length = length
+      @stream_body = body
+    end
+
+    def sse(status: 200, &body)
+      raise ArgumentError, 'sse needs a block' unless body
+
+      @headers['Cache-Control'] = 'no-cache'
+      @headers['X-Accel-Buffering'] = 'no'
+      stream(status:, type: EVENT_STREAM, &body)
+    end
+
+    def streaming? = !@stream_body.nil?
 
     def text(body, status: 200)
       @status = status
       @headers.plain
       @body = body
+      @stream_body = nil
     end
 
     def json(body, status: 200)
       @status = status
       @headers.json_type
       @body = body
+      @stream_body = nil
+    end
+
+    def json_value(value, status: 200) = json(Json.generate(value), status: status)
+
+    def set_cookie(name, value, path: '/', domain: nil, max_age: nil, secure: false, http_only: true,
+                   same_site: 'Lax')
+      @headers.add('Set-Cookie',
+                   Cookies.serialize(name, value, path, domain, max_age, secure, http_only, same_site))
+    end
+
+    def delete_cookie(name, path: '/', domain: nil)
+      @headers.add('Set-Cookie', Cookies.serialize(name, '', path, domain, 0, false, false, nil))
     end
 
     def to_wire(keep_alive, version: '1.1', head: false)
@@ -199,13 +338,19 @@ module Kiln
         end
         if status == 205
           out << LENGTH_ZERO
+        elsif body_size.negative?
+          out << CHUNKED unless old
         elsif status != 204 && status != 304
           size = no_body?(status) ? 0 : body_size
           out << LENGTH_PREFIX << (size < LENGTHS.size ? LENGTHS[size] : size.to_s) << CRLF
         end
-        out << DATE_PREFIX << HttpDate.value << CRLF unless valid && headers.date?
+        unless valid && headers.date?
+          out << DATE_PREFIX
+          HttpDate.append(out)
+          out << CRLF
+        end
         if valid
-          headers.each { |name, value| out << name << FIELD_SEP << (value.ascii_only? ? value : value.b) << CRLF }
+          headers.append_to(out)
         end
         if keep_alive && old
           out << KEEP_ALIVE
@@ -221,6 +366,21 @@ module Kiln
         return ''.b if no_body?(status_value) || body_value.nil?
 
         body_value.is_a?(String) ? body_value : body_value.to_s
+      end
+
+      def stream_size(length) = length.nil? ? -1 : length
+
+      def stream_framing(res, version, keep)
+        length = res.stream_length
+        chunked = length.nil? && version != HTTP_10
+        [chunked, keep && (chunked || !length.nil?)]
+      end
+
+      def streams?(res)
+        return false unless res.streaming?
+
+        status = res.status
+        valid_status?(status) && !no_body?(status)
       end
 
       def valid_status?(status_value) = status_value.is_a?(Integer) && status_value >= 200 && status_value <= 599

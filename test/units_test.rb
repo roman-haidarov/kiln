@@ -178,6 +178,42 @@ wire = Kiln::Response.build_wire(200, headers, payload, false)
 check 'response formatting does not modify input', headers['Content-Type'] == 'text/plain' && payload == 'hello'
 check 'unsafe header is rejected on insertion',
       wire.include?("Content-Type: text/plain\r\n") && !wire.include?('X-Bad:') && !headers.key?('X-Bad')
+caller_name = +'X-Ok'
+caller_value = +'fine'
+owned = Kiln::Headers.new
+owned[caller_name] = caller_value
+stored_value = owned['X-Ok']
+caller_name << '-Renamed'
+caller_value << '-tampered'
+owned_wire = Kiln::Response.build_wire(200, owned, 'z', false)
+check 'stored header cannot be changed after insertion',
+      stored_value == 'fine' && !stored_value.equal?(caller_value) &&
+      owned_wire.include?("X-Ok: fine\r\n") && !owned_wire.include?('tampered') &&
+      !owned_wire.include?('Renamed')
+stored_value << "\r\nX-Injected: 1"
+injected_wire = Kiln::Response.build_wire(200, owned, 'z', false)
+check 'a stored header changed to carry CR or LF never reaches the wire',
+      !injected_wire.include?('X-Injected') && !injected_wire.include?('X-Ok:')
+custom_name = +'X-Custom-Name'
+named = Kiln::Headers.new
+named[custom_name] = 'v'
+named['Content-Type'] = 'text/plain'
+yielded = []
+named.each { |name, _value| yielded << name }
+again = []
+named.each { |name, _value| again << name }
+yielded[0].replace('Content-Length')
+named_wire = Kiln::Response.build_wire(200, named, 'z', false)
+check 'each returns detached header names that cannot rename stored headers',
+      !yielded[0].equal?(again[0]) && !custom_name.frozen? && custom_name == 'X-Custom-Name' &&
+      named_wire.include?("X-Custom-Name: v\r\n") && !named_wire.include?("Content-Length: v\r\n")
+date_first = Kiln::HttpDate.value
+date_copy = Kiln::HttpDate.value
+date_copy << "\r\nX-Date-Injected: 1"
+dated_wire = Kiln::Response.build_wire(200, Kiln::Headers.new, 'z', false)
+check 'HttpDate.value is a copy; changing it never reaches the wire',
+      !dated_wire.include?('X-Date-Injected') && dated_wire.include?("\r\nDate: ") && !date_copy.frozen? &&
+      !date_first.equal?(date_copy)
 dated = Kiln::Headers.new
 dated['DATE'] = 'custom'
 wire = Kiln::Response.build_wire(200, dated, 'ok', false)
@@ -524,6 +560,13 @@ browser_head = "GET /products/42?ref=home HTTP/1.1\r\n" \
 native_out = Kiln::HttpNative.scratch
 check 'browser request uses C fast path',
       Kiln::HttpNative.kiln_http_scan(browser_head, browser_head.bytesize, native_out, Kiln::HttpNative::CAP) == 16
+common_names = Kiln::HttpNative::COMMON
+common_lines = common_names.map { |name| "#{name.upcase}: v" }
+common_head = "GET / HTTP/1.1\r\n#{common_lines.join("\r\n")}\r\nX-Other: v"
+common_count = Kiln::HttpNative.kiln_http_scan(common_head, common_head.bytesize, native_out, Kiln::HttpNative::CAP)
+all_known = common_names.each_index.all? { |index| native_out[9 + (5 * index)] == index }
+check 'C header lookup recognizes every common name regardless of case',
+      common_count == common_names.length + 1 && all_known && native_out[9 + (5 * common_names.length)] == -1
 crafted = [
   "GET /health HTTP/1.1\r\nHost: x", 'GET / HTTP/1.0', "POST /a?b=1 HTTP/1.1\r\nHost: x\r\nContent-Length: 5",
   "GET /a HTTP/1.1\r\nHost: x\r\nX-A: 1\r\nX-A: 2", "GET /a HTTP/1.1\r\nHost: x\r\nHost: y",

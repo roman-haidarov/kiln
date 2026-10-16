@@ -3,18 +3,189 @@
 #endif
 #include <stdint.h>
 #include <string.h>
-#include <strings.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include "kiln_ascii.h"
 #include "picohttpparser/picohttpparser.h"
 
 #define KILN_MAX_HEAD    16384
 #define KILN_MAX_HEADERS 100
 #define KILN_STRIDE      5
 #define KILN_RECV_MAX    16384
+
+static void kiln_free_components(char *copy, const char *local) {
+    if (copy != local)
+        free(copy);
+}
+
+static long kiln_open_components(int current, int owned, const char *path, long len) {
+    if (len == 0)
+        return current;
+    char local[256];
+    char *copy = (size_t)len >= sizeof(local) ? malloc((size_t)len + 1) : local;
+    if (!copy) {
+        if (owned)
+            close(current);
+        return -1;
+    }
+    memcpy(copy, path, (size_t)len);
+    copy[len] = '\0';
+    char *segment = copy;
+    while (segment) {
+        char *slash = strchr(segment, '/');
+        if (slash)
+            *slash = '\0';
+        if (!*segment || strcmp(segment, ".") == 0 || strcmp(segment, "..") == 0)
+            break;
+        int flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
+        if (slash)
+            flags |= O_DIRECTORY;
+        int next = openat(current, segment, flags);
+        if (owned)
+            close(current);
+        current = next;
+        owned = next >= 0;
+        if (next < 0)
+            break;
+        if (!slash) {
+            kiln_free_components(copy, local);
+            return current;
+        }
+        segment = slash + 1;
+    }
+    kiln_free_components(copy, local);
+    if (owned)
+        close(current);
+    return -1;
+}
+
+static long kiln_skip_ows(const unsigned char *value, long index, long limit) {
+    while (index < limit && (value[index] == ' ' || value[index] == '\t'))
+        index++;
+    return index;
+}
+
+static long kiln_trim_ows(const unsigned char *value, long start, long limit) {
+    while (limit > start && (value[limit - 1] == ' ' || value[limit - 1] == '\t'))
+        limit--;
+    return limit;
+}
+
+static int kiln_quality(const unsigned char *value, long start, long limit) {
+    long length = limit - start;
+    if (length == 1) {
+        if (value[start] == '1')
+            return 1;
+        return value[start] == '0' ? 0 : -1;
+    }
+    if (length < 2 || length > 5)
+        return -1;
+    if (value[start + 1] != '.')
+        return -1;
+    unsigned char first = value[start];
+    if (first != '0' && first != '1')
+        return -1;
+    int positive = first == '1';
+    for (long i = start + 2; i < limit; i++) {
+        unsigned char digit = value[i];
+        if (digit < '0' || digit > '9' || (first == '1' && digit != '0'))
+            return -1;
+        positive |= digit != '0';
+    }
+    return first == '1' || positive;
+}
+
+static int kiln_gzip_kind(const unsigned char *value, long start, long limit) {
+    long length = limit - start;
+    if ((length == 4 && kiln_ascii_case_equal((const char *)value + start, "gzip", 4)) ||
+        (length == 6 && kiln_ascii_case_equal((const char *)value + start, "x-gzip", 6)))
+        return 1;
+    return length == 1 && value[start] == '*' ? 2 : 0;
+}
+
+static int kiln_accept_parameters(
+    const unsigned char *value, long start, long size, long *next_start, int *quality) {
+    int valid = 1;
+    long param_start = start;
+    while (param_start < size && value[param_start] != ',') {
+        if (value[param_start] == ';')
+            param_start++;
+        long param_end = param_start;
+        while (param_end < size && value[param_end] != ';' && value[param_end] != ',')
+            param_end++;
+        long equals = param_start;
+        while (equals < param_end && value[equals] != '=')
+            equals++;
+        long key_start = kiln_skip_ows(value, param_start, equals);
+        long key_end = kiln_trim_ows(value, key_start, equals);
+        if (key_end - key_start == 1 && (value[key_start] == 'q' || value[key_start] == 'Q')) {
+            if (equals == param_end) {
+                valid = 0;
+            } else {
+                long q_start = kiln_skip_ows(value, equals + 1, param_end);
+                long q_end = kiln_trim_ows(value, q_start, param_end);
+                int parsed = kiln_quality(value, q_start, q_end);
+                if (parsed < 0)
+                    valid = 0;
+                else
+                    *quality = parsed;
+            }
+        }
+        param_start = param_end;
+    }
+    *next_start = param_start + 1;
+    return valid;
+}
+
+long kiln_http_accepts_gzip(const char *text, long len) {
+    if (!text || len <= 0)
+        return 0;
+    const unsigned char *value = (const unsigned char *)text;
+    int star = 0;
+    long size = len;
+    long part_start = 0;
+    while (part_start < size) {
+        long token_end = part_start;
+        while (token_end < size && value[token_end] != ';' && value[token_end] != ',')
+            token_end++;
+        long token_start = kiln_skip_ows(value, part_start, token_end);
+        long token_limit = kiln_trim_ows(value, token_start, token_end);
+        int kind = kiln_gzip_kind(value, token_start, token_limit);
+        int quality = 1;
+        long next_start;
+        int valid = kiln_accept_parameters(value, token_end, size, &next_start, &quality);
+        if (valid) {
+            if (kind == 1)
+                return quality;
+            if (kind == 2)
+                star = quality;
+        }
+        part_start = next_start;
+    }
+    return star;
+}
+
+long kiln_http_open_beneath(long base_fd, const char *path, long len) {
+    if (!path || len < 0 || memchr(path, '\0', (size_t)len))
+        return -1;
+    if (base_fd < 0) {
+        if (len == 0 || path[0] != '/')
+            return -1;
+        int root = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+        if (root < 0)
+            return -1;
+        return kiln_open_components(root, 1, path + 1, len - 1);
+    }
+    if (len == 0 || path[0] == '/')
+        return -1;
+    return kiln_open_components((int)base_fd, 0, path, len);
+}
 
 #ifdef SP_THREADS
 extern __thread int sp_ffi_bin_len;
@@ -26,22 +197,62 @@ static char kiln_rbuf[KILN_RECV_MAX];
 static long kiln_rstatus;
 #endif
 
-static const char *const kiln_common[] = {
-    "host", "user-agent", "accept", "accept-encoding", "accept-language", "connection",
-    "content-length", "content-type", "cookie", "referer", "cache-control", "upgrade-insecure-requests",
-    "sec-fetch-site", "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "sec-ch-ua",
-    "sec-ch-ua-mobile", "sec-ch-ua-platform", "origin", "authorization", "if-none-match",
-    "if-modified-since", "transfer-encoding", "expect", "x-forwarded-for", "x-request-id",
-    "pragma", "priority", "te", "range", "dnt"
-};
+static const char *const kiln_common[] = {"host", "user-agent", "accept", "accept-encoding",
+    "accept-language", "connection", "content-length", "content-type", "cookie", "referer",
+    "cache-control", "upgrade-insecure-requests", "sec-fetch-site", "sec-fetch-mode",
+    "sec-fetch-user", "sec-fetch-dest", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+    "origin", "authorization", "if-none-match", "if-modified-since", "transfer-encoding", "expect",
+    "x-forwarded-for", "x-request-id", "pragma", "priority", "te", "range", "dnt"};
+
+static const uint8_t kiln_common_lengths[] = {4, 10, 6, 15, 15, 10, 14, 12, 6, 7, 13, 25, 14, 14,
+    14, 14, 9, 16, 18, 6, 13, 13, 17, 17, 6, 15, 12, 6, 8, 2, 5, 3};
+
+static const uint8_t kiln_common_slots[256] = {[20] = 1,
+    [1] = 2,
+    [154] = 3,
+    [192] = 4,
+    [235] = 5,
+    [78] = 6,
+    [142] = 7,
+    [10] = 8,
+    [216] = 9,
+    [215] = 10,
+    [48] = 11,
+    [68] = 12,
+    [74] = 13,
+    [174] = 14,
+    [190] = 15,
+    [185] = 16,
+    [38] = 17,
+    [3] = 18,
+    [150] = 19,
+    [236] = 20,
+    [163] = 21,
+    [238] = 22,
+    [0] = 23,
+    [113] = 24,
+    [223] = 25,
+    [253] = 26,
+    [148] = 27,
+    [42] = 28,
+    [126] = 29,
+    [45] = 30,
+    [247] = 31,
+    [232] = 32};
 
 static long kiln_common_index(const char *name, size_t len) {
-    for (size_t i = 0; i < sizeof(kiln_common) / sizeof(kiln_common[0]); i++) {
-        const char *c = kiln_common[i];
-        if (strlen(c) == len && strncasecmp(c, name, len) == 0)
-            return (long)i;
-    }
-    return -1;
+    if (len < 2 || len > 25)
+        return -1;
+    uint32_t hash = 10;
+    for (size_t i = 0; i < len; i++)
+        hash = (hash ^ ((unsigned char)name[i] | 32U)) * 16777619U;
+    uint8_t slot = kiln_common_slots[hash & 255U];
+    if (!slot)
+        return -1;
+    size_t index = (size_t)slot - 1;
+    return kiln_common_lengths[index] == len && kiln_ascii_case_equal(kiln_common[index], name, len)
+               ? (long)index
+               : -1;
 }
 
 static int kiln_clean_value(const char *value, size_t len) {
@@ -136,8 +347,21 @@ static int kiln_tchar(unsigned char c) {
     if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
         return 1;
     switch (c) {
-    case '!': case '#': case '$': case '%': case '&': case '\'': case '*': case '+':
-    case '-': case '.': case '^': case '_': case '`': case '|': case '~':
+    case '!':
+    case '#':
+    case '$':
+    case '%':
+    case '&':
+    case '\'':
+    case '*':
+    case '+':
+    case '-':
+    case '.':
+    case '^':
+    case '_':
+    case '`':
+    case '|':
+    case '~':
         return 1;
     default:
         return 0;
@@ -344,6 +568,17 @@ const char *kiln_recv(long fd, long max) {
 
 long kiln_recv_status(void) {
     return kiln_rstatus;
+}
+
+long kiln_peer_closed(long fd);
+
+long kiln_socket_nonblock(long fd) {
+    if (fd < 0)
+        return -1;
+    int flags = fcntl((int)fd, F_GETFL);
+    if (flags < 0 || fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) < 0)
+        return -1;
+    return 0;
 }
 
 long kiln_sendv(

@@ -1,0 +1,88 @@
+-- parse
+ok   object with every value type
+ok   keys are strings
+ok   top-level scalar
+ok   integer past int64 is a Bignum
+ok   uint64 past int64 is a Bignum
+ok   int64 bounds stay exact
+ok   float overflow is Infinity
+ok   escaped NUL survives
+ok   surrogate pair decodes
+ok   duplicate key: last wins
+ok   repeated keys parse independently
+ok   parsed key is frozen
+ok   nesting at the limit parses
+ok   max_nesting is configurable
+ok   nesting past the limit
+ok   max_nesting lowers the limit
+ok   trailing comma
+ok   trailing garbage
+ok   empty input
+ok   invalid UTF-8
+ok   lone surrogate
+ok   unescaped control
+ok   NaN literal
+ok   comment
+-- generate
+ok   scalars
+ok   float formatting
+ok   floats parse back exactly
+ok   Bignum
+ok   escapes
+ok   SWAR safe ASCII runs round trip
+ok   NUL is escaped, not truncated
+ok   UTF-8 is written as-is
+ok   symbol keys and values
+ok   integer keys become strings
+ok   bignum keys become strings
+ok   typed hash
+ok   typed arrays
+ok   mutable String values and keys
+ok   header value in a Hash literal
+ok   empty containers
+ok   round trip
+ok   NaN
+ok   Infinity
+ok   invalid UTF-8
+ok   arbitrary object
+ok   circular structure
+-- media types
+ok   application/json
+ok   charset utf-8 and case
+ok   structured +json suffix
+ok   other charset refused
+ok   text/plain refused
+ok   form type
+-- request bodies
+ok   Request#json
+ok   Request#json is memoized
+ok   Request#json reapplies a stricter nesting limit
+ok   missing content type -> UnsupportedMediaType
+ok   bad body -> BadRequest
+ok   nil body -> BadRequest
+ok   query_params decodes, last value wins
+ok   empty query
+ok   query with invalid UTF-8
+ok   form
+ok   form needs its content type
+-- cookies
+ok   cookie parsing, first value wins
+ok   cookie lookup
+ok   no cookie header
+ok   Set-Cookie headers
+ok   cookie value with ;
+ok   cookie value with CRLF
+ok   cookie name
+ok   SameSite=None needs Secure
+-- dispatch
+ok   echo: 200 with JSON body
+ok   invalid body: 400 with reason
+ok   wrong content type: 415
+ok   JsonError outside Request#json is a 500
+ok   generate error is a 500
+-- server
+ok   event: JSON round trip over HTTP
+ok   event: invalid JSON over HTTP is 400
+ok   base: JSON round trip over HTTP
+ok   base: invalid JSON over HTTP is 400
+done

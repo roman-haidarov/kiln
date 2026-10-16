@@ -1,5 +1,5 @@
 [package]
 name = "kiln"
-version = "0.0.1"
-sources = ["ext/picohttpparser/picohttpparser.c", "ext/kiln_http.c", "ext/kiln_uv.c", "ext/uvsrc/*.c"]
-exclude = ["ext/libuv", "bench"]
+version = "0.0.3"
+sources = ["ext/picohttpparser/picohttpparser.c", "ext/kiln_http.c", "ext/kiln_uv.c", "ext/kiln_json.c", "ext/kiln_yyjson.c", "ext/kiln_gzip.c", "ext/uvsrc/*.c", "ext/zngsrc/*.c"]
+exclude = ["ext/libuv", "ext/yyjson", "ext/zlib-ng", "bench"]

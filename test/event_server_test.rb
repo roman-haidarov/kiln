@@ -50,7 +50,24 @@ router = Kiln::Router.new
                                      Kernel.sleep 1.5
                                      ctx.res.text("late\n")
                                    })
+                     .get('/noncooperative', lambda do |ctx|
+                       Kernel.sleep 0.3
+                       ctx.res.headers['Content-Encoding'] = 'gzip'
+                       ctx.res.text('late')
+                     end)
                      .seal!
+
+pipe_marker = -> {}
+old_pipe_handler = Signal.trap('PIPE', pipe_marker)
+pipe_server = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+pipe_server.start
+pipe_after_start = Signal.trap('PIPE', 'DEFAULT')
+Signal.trap('PIPE', pipe_marker)
+pipe_server.shutdown(grace: 0)
+pipe_after_stop = Signal.trap('PIPE', 'DEFAULT')
+Signal.trap('PIPE', old_pipe_handler)
+check 'event server preserves the process SIGPIPE handler',
+      pipe_after_start.equal?(pipe_marker) && pipe_after_stop.equal?(pipe_marker)
 
 inline = Kiln::Server::Event.new(router, nil, log: log, port: 0, request_timeout: 0.2)
 inline.start
@@ -96,6 +113,10 @@ check 'inline: request deadline is visible to Kiln.deadline',
       exchange(ip, "GET /deadline HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").end_with?('set')
 check 'inline: Kiln.check! after the deadline -> 504',
       exchange(ip, "GET /late HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").start_with?('HTTP/1.1 504 ')
+late_inline = exchange(ip, "GET /noncooperative HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+check 'inline: a late handler returns a clean 504 without interrupting the event loop',
+      late_inline.start_with?('HTTP/1.1 504 ') && !late_inline.include?('Content-Encoding:') && inline.killed.zero? &&
+      exchange(ip, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").end_with?("Hello, World!\n")
 check 'inline: unsupported Expect -> 417',
       exchange(ip,
                "POST /echo HTTP/1.1\r\nHost: x\r\nExpect: magic\r\n" \
@@ -161,3 +182,113 @@ if ipv6
   v6.shutdown(grace: 0)
 end
 check 'inline: listens on ::1 when the host has IPv6', v6_served
+
+more = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+more.start
+mp = more.port
+half = TCPSocket.new('127.0.0.1', mp)
+half.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+half.shutdown(Socket::SHUT_WR)
+half_body = read_until_closed(half, 2)
+half.close
+check 'inline: half-close after a complete request still gets a response',
+      half_body.start_with?('HTTP/1.1 200 ') && half_body.end_with?("Hello, World!\n")
+ordered = exchange(mp, "GET / HTTP/1.1\r\nHost: x\r\n\r\nGARBAGE\r\n\r\n")
+ok_at = ordered.index('HTTP/1.1 200 ')
+bad_at = ordered.index('HTTP/1.1 400 ')
+check 'inline: a good request is answered before the following 400',
+      ok_at && bad_at && ok_at < bad_at && ordered.include?("Hello, World!\n")
+wide = (+'').b
+16.times { wide << "GET / HTTP/1.1\r\nHost: x\r\n\r\n" }
+wide << "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+check 'inline: 17 pipelined requests -> 17 responses', exchange(mp, wide, 3).scan('HTTP/1.1 200 ').size == 17
+more.shutdown(grace: 0.5)
+
+slow = Kiln::Server::Event.new(->(ctx) { ctx.res.text('z' * (8 << 20)) }, nil,
+                               log: log, port: 0, write_timeout: 0.2)
+slow.start
+slow_sock = TCPSocket.new('127.0.0.1', slow.port)
+slow_sock.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+wait_for { slow.connections.positive? }
+slow_closed = false
+slow_limit = Kiln.now + 2
+while Kiln.now < slow_limit
+  if slow.connections.zero?
+    slow_closed = true
+    break
+  end
+  Kernel.sleep 0.05
+end
+slow_sock.close
+slow.shutdown(grace: 0.5)
+check 'inline: a slow reader is closed by write_timeout', slow_closed
+
+def serve_once(log)
+  again = Kiln::Server::Event.new(->(ctx) { ctx.res.text('again') }, nil, log:, port: 0)
+  again.start
+  again_sock = TCPSocket.new('127.0.0.1', again.port)
+  again_sock.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+  answered = read_until_closed(again_sock, 2).end_with?('again')
+  again_sock.close
+  again.shutdown(grace: 0.5)
+  answered
+end
+
+reused = Array.new(2) do
+  answered = serve_once(log)
+  GC.start
+  answered
+end
+check 'a later server keeps the loop fd after an earlier one is collected', reused == [true, true]
+
+blocked_started = Queue.new
+deadline_router = Kiln::Router.new
+deadline_router.get('/blocked', lambda do |ctx|
+  blocked_started << true
+  Kernel.sleep 0.5
+  ctx.res.text('late')
+end)
+deadline_router.get('/fast', ->(ctx) { ctx.res.text('fast') })
+deadline_server = Kiln::Server::Event.new(deadline_router, nil, log: log, port: 0,
+                                                                request_timeout: 0.05, handlers: 2)
+deadline_server.start
+blocked_client = Thread.new do
+  exchange(deadline_server.port, "GET /blocked HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+end
+blocked_started.pop
+fast_started = Kiln.now
+fast_reply = exchange(deadline_server.port, "GET /fast HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+fast_elapsed = Kiln.now - fast_started
+blocked_reply = blocked_client.value
+check 'a blocked handler gets 504 at its deadline', blocked_reply.start_with?('HTTP/1.1 504 ') &&
+                                                    deadline_server.killed == 1
+check 'a blocked handler does not stall the next request', fast_reply.end_with?('fast') && fast_elapsed < 0.3
+deadline_server.shutdown(grace: 1)
+
+stream_started = Queue.new
+stream_release = Queue.new
+stream_router = Kiln::Router.new.get('/stream', lambda do |ctx|
+  ctx.res.headers['Content-Type'] = 'text/plain'
+  ctx.res.stream do |out|
+    stream_started << true
+    stream_release.pop
+    out.write('streamed')
+  end
+end).seal!
+gzip_streams = Kiln::Compress.new(stream_router, min_size: 1)
+limited_streams = Kiln::Server::Event.new(gzip_streams, nil, log: log, port: 0, max_streams: 1)
+limited_streams.start
+stream_client = TCPSocket.new('127.0.0.1', limited_streams.port)
+stream_client.write("GET /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+stream_started.pop(timeout: 1)
+overflow_request = "GET /stream HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n"
+overflow_stream = exchange(limited_streams.port, overflow_request)
+bounded_stream = overflow_stream.start_with?('HTTP/1.1 503 ') && overflow_stream.end_with?("too many streams\n") &&
+                 !overflow_stream.include?('Content-Encoding: gzip') &&
+                 !overflow_stream.include?('Vary: Accept-Encoding')
+check 'event stream overflow discards headers from the gzip representation', bounded_stream
+stream_release << true
+stream_reply = read_until_closed(stream_client, 2)
+stream_client.close
+limited_streams.shutdown(grace: 1)
+check 'a stream below max_streams completes', stream_reply.include?('streamed')

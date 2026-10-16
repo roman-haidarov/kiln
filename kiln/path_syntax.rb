@@ -31,17 +31,6 @@ module Kiln
         pattern.map { |seg| seg.start_with?(':') ? seg[1..] : '' }
       end
 
-      def match?(pattern, names, segs)
-        index = 0
-        limit = pattern.size
-        while index < limit
-          return false unless !names[index].empty? || pattern[index] == segs[index]
-
-          index += 1
-        end
-        true
-      end
-
       def params(names, segs)
         out = {}
         index = 0

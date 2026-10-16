@@ -1,0 +1,64 @@
+-- writer
+ok   first chunk head
+ok   later chunk head closes the previous chunk, size in hex
+ok   sse event fields
+ok   sse empty data
+ok   write buffers until flush
+ok   flush sends one chunk head and its data
+ok   a large write goes out at once, its head carrying the previous CRLF
+ok   ending closes the last chunk
+ok   ending with nothing sent
+ok   empty flush sends nothing
+ok   empty write sends nothing
+ok   event name with a line break
+ok   id with a line break
+ok   comment with a line break
+ok   stream needs a block
+-- testing helper
+ok   Testing collects a stream
+ok   Testing collects SSE
+ok   a mapped error cancels an earlier stream
+ok   event/0: chunked head
+ok   event/0: chunked body
+ok   event/0: SSE wire format
+ok   event/0: HTTP/1.0 stream is close-delimited
+ok   event/0: HEAD sends the head only
+ok   event/0: pipelined reply waits for the stream
+ok   event/0: stream outlives request_timeout
+ok   event/0: a closed client ends the stream
+ok   event/0: a client that does not read is cut off
+ok   event/0: an error mid-stream aborts without a terminator
+ok   event/0: a broken stream does not send the next response
+ok   event/0: a mapped error does not execute the old stream
+ok   event/0: server still answers
+ok   event/0: shutdown ends an SSE loop through closed?
+ok   event/2: chunked head
+ok   event/2: chunked body
+ok   event/2: SSE wire format
+ok   event/2: HTTP/1.0 stream is close-delimited
+ok   event/2: HEAD sends the head only
+ok   event/2: pipelined reply waits for the stream
+ok   event/2: stream outlives request_timeout
+ok   event/2: a closed client ends the stream
+ok   event/2: a client that does not read is cut off
+ok   event/2: an error mid-stream aborts without a terminator
+ok   event/2: a broken stream does not send the next response
+ok   event/2: a mapped error does not execute the old stream
+ok   event/2: server still answers
+ok   event/2: shutdown ends an SSE loop through closed?
+ok   base: chunked head
+ok   base: chunked body
+ok   base: SSE wire format
+ok   base: HTTP/1.0 stream is close-delimited
+ok   base: HEAD sends the head only
+ok   base: pipelined reply waits for the stream
+ok   base: stream outlives request_timeout
+ok   base: a closed client ends the stream
+ok   base: a client that does not read is cut off
+ok   base: an error mid-stream aborts without a terminator
+ok   base: a broken stream does not send the next response
+ok   base: a mapped error does not execute the old stream
+ok   base: server still answers
+ok   base: shutdown ends an SSE loop through closed?
+ok   stream errors are logged
+done

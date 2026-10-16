@@ -1,0 +1,63 @@
+name: CI macOS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SPINEL_REF: 9922a2c74ee1128162abf48b645575f0c8cc254d
+  SPINEL_WORKERS: 1
+
+jobs:
+  macos:
+    name: macos/arm64
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native dependencies
+        run: brew install pkg-config libffi openssl@3 wrk
+
+      - name: Restore Spinel
+        id: spinel-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/spinel-install
+          key: spinel-${{ runner.os }}-${{ runner.arch }}-${{ env.SPINEL_REF }}
+
+      - name: Build Spinel
+        if: steps.spinel-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --filter=blob:none https://github.com/matz/spinel.git "$RUNNER_TEMP/spinel"
+          git -C "$RUNNER_TEMP/spinel" checkout "$SPINEL_REF"
+          make -C "$RUNNER_TEMP/spinel" deps
+          make -C "$RUNNER_TEMP/spinel" -j1
+          make -C "$RUNNER_TEMP/spinel" install PREFIX="$RUNNER_TEMP/spinel-install"
+
+      - name: Run CI natively
+        run: |
+          mkdir -p "$RUNNER_TEMP/kiln-ci"
+          SPINEL="$RUNNER_TEMP/spinel-install/bin/spinel" \
+          SPINEL_WORKERS=1 \
+          KILN_ARTIFACTS="$RUNNER_TEMP/kiln-ci" \
+          TEST_TIMEOUT=180 \
+            ci/run.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kiln-ci-macos-arm64
+          path: ${{ runner.temp }}/kiln-ci
+          if-no-files-found: ignore
+          retention-days: 7

@@ -190,9 +190,10 @@ check 'empty Host in HTTP/1.1 -> 400',
 check 'absolute-form: Host ignored per RFC 9112',
       codes(raw(pt, "GET http://example.com/health HTTP/1.1\r\nHost: \r\nConnection: close\r\n\r\n".b)) == ['200']
 slow = TCPSocket.new('127.0.0.1', pt)
+slow.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
 ["GET /health HTTP/1.1\r\nHost: x\r\nConnection: close", "\r", "\n\r", "\n"].each do |part|
   slow.write(part)
-  Kernel.sleep 0.03
+  Kernel.sleep 0.005
 end
 IO.select([slow], nil, nil, 2)
 slow_resp = begin

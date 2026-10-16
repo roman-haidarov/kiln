@@ -5,6 +5,30 @@ cd "$(dirname "$0")/.."
 cc_bin=${CC:-cc}
 flags="${KILN_EXT_CFLAGS:--O2} -DSP_THREADS"
 compiler_version=$("$cc_bin" --version | sed -n '1p')
+hdr_dir=${SPINEL_HDR_DIR:-}
+if [ -z "$hdr_dir" ]; then
+  spinel_path=$(command -v "${SPINEL:-spinel}" 2> /dev/null || true)
+  if [ -n "$spinel_path" ]; then
+    spinel_dir=$(cd "$(dirname "$spinel_path")" && pwd -P)
+    if [ -L "$spinel_path" ]; then
+      link=$(readlink "$spinel_path")
+      case "$link" in
+        /*) spinel_dir=$(cd "$(dirname "$link")" && pwd -P) ;;
+        *) spinel_dir=$(cd "$spinel_dir/$(dirname "$link")" && pwd -P) ;;
+      esac
+    fi
+    for candidate in "$spinel_dir/lib" "$spinel_dir/../lib" "$spinel_dir/../lib/spinel/lib"; do
+      if [ -f "$candidate/spinel_rt.h" ]; then
+        hdr_dir=$(cd "$candidate" && pwd -P)
+        break
+      fi
+    done
+  fi
+fi
+if [ -z "$hdr_dir" ] || [ ! -f "$hdr_dir/spinel/runtime.h" ]; then
+  printf 'kiln: Spinel runtime headers not found; set SPINEL or SPINEL_HDR_DIR\n' >&2
+  exit 1
+fi
 if command -v sha256sum > /dev/null 2>&1; then
   hash_tool="sha256sum"
 elif command -v shasum > /dev/null 2>&1; then
@@ -13,7 +37,8 @@ else
   hash_tool="cksum"
 fi
 content_key=$(find ext -type f \( -name '*.c' -o -name '*.h' \) -print | LC_ALL=C sort | xargs $hash_tool | $hash_tool)
-build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$cc_bin" "$compiler_version" "$flags" "$content_key")
+runtime_key=$(cd "$hdr_dir" && $hash_tool spinel/runtime.h spinel_rt.h sp_alloc.h sp_gc.h sp_types.h 2> /dev/null | $hash_tool)
+build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "$content_key" "$runtime_key")
 mkdir -p build/ext
 links=""
 rebuild=0
@@ -21,10 +46,14 @@ settings=build/ext/settings
 if [ ! -f "$settings" ] || [ "$(cat "$settings")" != "$build_key" ]; then
   rebuild=1
 fi
-for source in ext/picohttpparser/picohttpparser.c ext/kiln_http.c ext/kiln_uv.c ext/uvsrc/*.c; do
+for source in ext/picohttpparser/picohttpparser.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/uvsrc/*.c ext/zngsrc/*.c; do
   object=build/ext/$(basename "$source" .c).o
+  extra=""
+  case "$source" in
+    ext/kiln_json.c | ext/kiln_yyjson.c | ext/kiln_gzip.c) extra="-ftls-model=initial-exec -I$hdr_dir" ;;
+  esac
   if [ "$rebuild" -eq 1 ] || [ ! -f "$object" ]; then
-    "$cc_bin" $flags -c "$source" -o "$object"
+    "$cc_bin" $flags $extra -c "$source" -o "$object"
   fi
   links="$links --link $object"
 done

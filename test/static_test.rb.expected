@@ -1,0 +1,87 @@
+-- dates
+ok   IMF-fixdate
+ok   RFC 850
+ok   asctime
+ok   invalid dates are nil
+-- files
+ok   file body
+ok   content type by extension
+ok   validators
+ok   ranges advertised
+ok   cache control
+ok   unknown extension is octet-stream
+ok   nested file
+ok   root serves the index
+ok   directory without index is 404
+ok   missing file is 404
+ok   dotfile is 404
+ok   symlink to a dotfile is 404
+ok   symlink out of the root is 404
+ok   a path longer than the stack buffer is served
+ok   descriptor opener rejects final and intermediate symlinks
+ok   symlink inside the root is served
+ok   dot-dot never reaches a file
+ok   encoded slash never reaches a file
+ok   encoded NUL is refused
+ok   dotfiles: true serves dotfiles
+ok   missing root
+ok   root must be a directory
+-- conditional requests
+ok   If-None-Match match is 304 without body or type
+ok   weak If-None-Match matches
+ok   If-None-Match list and *
+ok   If-None-Match miss is 200
+ok   If-Modified-Since equal is 304
+ok   If-Modified-Since earlier is 200
+ok   invalid If-Modified-Since is ignored
+ok   If-None-Match wins over If-Modified-Since
+ok   If-Match miss is 412
+ok   If-Match is strong
+ok   If-Match hit is 200
+ok   If-Unmodified-Since earlier is 412
+ok   a comma inside an entity tag is parsed as content
+ok   same-size replacement changes the ETag
+-- ranges
+ok   first bytes
+ok   open range
+ok   suffix range
+ok   range end past the file is clamped
+ok   suffix longer than the file is the file
+ok   range past the end is 416
+ok   zero suffix is 416
+ok   reversed range is ignored
+ok   several ranges are ignored
+ok   other units are ignored
+ok   If-Range with the ETag keeps the range
+ok   If-Range with another ETag sends the file
+ok   If-Range with the date keeps the range
+ok   HEAD ignores Range
+-- large files
+ok   a large file is streamed with its length
+ok   a large range
+ok   a large stream keeps its original file after a path swap
+ok   a stream shorter than its length
+ok   a stream longer than its length
+ok   length is validated
+ok   event/0: large file has Content-Length, not chunked
+ok   event/0: HEAD of a large file
+ok   event/0: the connection stays open after a sized stream
+ok   event/0: range over the wire
+ok   event/0: HTTP/1.0 gets the length too
+ok   event/0: a stream that falls short is cut off
+ok   event/0: server still answers
+ok   event/2: large file has Content-Length, not chunked
+ok   event/2: HEAD of a large file
+ok   event/2: the connection stays open after a sized stream
+ok   event/2: range over the wire
+ok   event/2: HTTP/1.0 gets the length too
+ok   event/2: a stream that falls short is cut off
+ok   event/2: server still answers
+ok   base: large file has Content-Length, not chunked
+ok   base: HEAD of a large file
+ok   base: the connection stays open after a sized stream
+ok   base: range over the wire
+ok   base: HTTP/1.0 gets the length too
+ok   base: a stream that falls short is cut off
+ok   base: server still answers
+done

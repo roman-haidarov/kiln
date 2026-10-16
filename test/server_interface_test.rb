@@ -35,8 +35,8 @@ check('base backend is selectable', base.backend == :base)
 exposes(base, 'base exposes the server contract')
 cycles(base, 'base starts and shuts down through the facade')
 
-rejects('unsupported event option is rejected', 'write_timeout') do
-  Kiln::Server.new(nil, nil, log: log, port: 0, write_timeout: 1.0)
+rejects('unsupported event option is rejected', 'kill_grace') do
+  Kiln::Server.new(nil, nil, log: log, port: 0, kill_grace: 1.0)
 end
 rejects('unknown backend is rejected', 'backend') do
   Kiln::Server.new(nil, nil, log: log, port: 0, backend: :other)

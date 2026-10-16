@@ -14,12 +14,15 @@ module Kiln
     ffi_func :kiln_peer_closed_uses_rdhup, [], :long
     ffi_func :kiln_recv, %i[long long], :binstr
     ffi_func :kiln_recv_status, [], :long
+    ffi_func :kiln_socket_nonblock, [:long], :long
     ffi_func :kiln_sendv, %i[long str long str long long], :long
     ffi_func :kiln_ctl, %i[str long], :long
     ffi_func :kiln_digits, %i[str long], :long
     ffi_func :kiln_chunk_size, %i[str long long], :long
     ffi_func :kiln_host, %i[str long], :long
     ffi_func :kiln_http_scan_at, %i[str long long long int_array long], :long
+    ffi_func :kiln_http_open_beneath, %i[long str long], :long
+    ffi_func :kiln_http_accepts_gzip, %i[str long], :long
 
     class << self
       def scratch = Array.new(CAP, 0)

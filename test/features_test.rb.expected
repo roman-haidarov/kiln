@@ -1,0 +1,75 @@
+-- router: wildcard and order
+ok   static route before glob wins
+ok   glob takes the rest of the path
+ok   glob takes one segment
+ok   glob needs at least one segment
+ok   glob after a parameter
+ok   glob refuses ..
+ok   glob refuses encoded ..
+ok   glob refuses encoded slash
+ok   glob refuses .
+ok   HEAD falls back to GET on a glob
+ok   glob 405 lists its methods
+ok   static GET wins for GET
+ok   a parameter route serves a verb the static route lacks
+ok   an earlier glob keeps priority (registration order)
+-- router: sealed fast path
+ok   sealing does not change any answer
+ok   sealed router keeps registration order
+ok   sealed fast path respects an earlier parameter route
+-- router: trailing slash
+ok   strict: trailing slash is 404
+ok   redirect: GET gets 301 keeping the query
+ok   redirect: POST gets 308
+ok   redirect: unknown path stays 404
+ok   redirect: no redirect for a backslash path
+ok   trailing_slash is validated
+-- router: custom fallbacks, wraps, errors
+ok   custom 404
+ok   custom 405 sees Allow
+ok   scope wraps run outer to inner
+ok   a wrap covers only its scope
+ok   duplicate route
+ok   glob must be last
+ok   empty parameter name
+ok   percent-encoded static pattern matches
+-- testing helper
+ok   Testing.json
+ok   Testing.call installs the deadline
+ok   Testing.call maps BadRequest to 400
+ok   Kiln.pop honours the deadline (504)
+ok   unmapped errors reach the test
+ok   Kiln.pop without a deadline
+-- middleware
+ok   DefaultHeaders adds missing headers
+ok   DefaultHeaders keeps what the handler set
+ok   preflight allowed
+ok   preflight from another origin gets no grant
+ok   preflight with an unlisted header gets no grant
+ok   actual request is stamped
+ok   no Origin, no CORS headers
+ok   origins "*" answers *
+ok   CORS allows only configured preflight methods
+ok   CORS does not stamp an unlisted actual method
+ok   "*" with credentials
+-- tasks
+ok   token wait times out
+ok   token wait wakes on cancel
+ok   every ticks repeatedly
+ok   tasks are alive
+ok   shutdown cancels cooperative tasks
+ok   no task is left
+ok   spawn after shutdown
+ok   a stuck task is killed after grace
+ok   a finished task is forgotten
+-- run with signals
+ok   run served while waiting
+ok   SIGTERM ends run with nothing in flight
+ok   run stops tasks
+ok   listener is closed after run
+ok   run raises when the event server is already up
+ok   a failed run restores the previous trap
+ok   run restores the previous trap
+ok   task errors are logged
+ok   run logs the signal
+done

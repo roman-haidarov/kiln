@@ -38,6 +38,17 @@ module Kiln
       HttpNative.kiln_peer_closed(fd) == 1
     end
 
+    def pop(queue)
+      left = remaining
+      return queue.pop if left.nil?
+      raise DeadlineExceeded, 'deadline exceeded' unless left.positive?
+
+      value = queue.pop(timeout: left)
+      raise DeadlineExceeded, 'deadline exceeded' if value.nil? && Kiln.now >= deadline
+
+      value
+    end
+
     def check_client!
       raise ClientGone, 'client disconnected' if client_gone?
     end
@@ -52,6 +63,10 @@ module Kiln
         ["deadline exceeded\n", 504]
       in PoolTimeout
         ["busy\n", 503]
+      in BadRequest
+        ["#{err.message}\n", 400]
+      in UnsupportedMediaType
+        ["#{err.message}\n", 415]
       else
         nil
       end
@@ -61,7 +76,9 @@ module Kiln
       reply = timeout_reply(err)
       return fail_request(log, ctx, err) unless reply
 
-      ctx.res.text(reply[0], status: reply[1])
+      apply_reply(ctx, reply)
     end
+
+    def apply_reply(ctx, reply) = ctx.res.text(reply[0], status: reply[1])
   end
 end

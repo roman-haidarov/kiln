@@ -125,3 +125,11 @@ check 'lanes: during shutdown only the last response on a connection says Connec
       first_end && !replies.byteslice(
         0, first_end
       ).include?('Connection: close')
+
+late_app = ->(ctx) { ctx.res.text("ran\n") }
+expired = Kiln::Server::Event.new(late_app, nil, log:, port: 0, handlers: 1, request_timeout: 0.000001)
+expired.start
+late_replies = Array.new(20) { exchange(expired.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", 1.0) }
+expired.shutdown(grace: 0.5)
+late_ok = late_replies.all? { |reply| reply.start_with?('HTTP/1.1 504 ') && reply.end_with?("deadline exceeded\n") }
+check 'lanes: a job taken after its deadline is answered with 504, never with its untouched response', late_ok

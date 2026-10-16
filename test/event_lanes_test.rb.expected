@@ -7,3 +7,4 @@ ok   lanes: grace expired -> active and queued handlers are counted
 ok   lanes: a new server starts in the same process after a grace cutoff
 ok   lanes: shutdown returns in bounded time when the loop thread has died
 ok   lanes: during shutdown only the last response on a connection says Connection: close
+ok   lanes: a job taken after its deadline is answered with 504, never with its untouched response

@@ -1,0 +1,13 @@
+#ifndef KILN_ZNG_DEFINES_H
+#define KILN_ZNG_DEFINES_H
+#ifndef NDEBUG
+#define NDEBUG 1
+#endif
+#define WITH_ALL_FALLBACKS 1
+#define HAVE_VISIBILITY_HIDDEN 1
+#if !defined(__APPLE__)
+#define HAVE_VISIBILITY_INTERNAL 1
+#endif
+#define HAVE_ATTRIBUTE_ALIGNED 1
+#define HAVE_BUILTIN_ASSUME_ALIGNED 1
+#endif
