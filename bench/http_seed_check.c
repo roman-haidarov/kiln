@@ -148,6 +148,14 @@ static void check_chunks(void) {
     rc = kiln_uv_chunk_decode(
         &state, "0\r\nContent-Length: 1\r\n\r\n", 25, out, sizeof out, &consumed, &produced);
     expect(rc == KILN_UV_CHUNK_BAD, "chunks", "trailer", "a forbidden trailer is accepted");
+    kiln_uv_chunk_init(&state);
+    rc = kiln_uv_chunk_decode(
+        &state, "FFFFFFFFFFFFFFFFFFFF\r\n", 22, out, sizeof out, &consumed, &produced);
+    expect(rc == KILN_UV_CHUNK_HUGE, "chunks", "huge", "an oversized chunk size is not reported");
+    int64_t step[6] = {KILN_UV_CHUNK_SIZE, 0, 0, 0, 0, 0};
+    const char *piece = kiln_chunk_step(body, (long)sizeof body - 1, 0, 3, step);
+    expect(step[5] == KILN_UV_CHUNK_MORE && sp_ffi_bin_len == 3 && memcmp(piece, "hel", 3) == 0,
+        "chunks", "step", "the FFI step does not stop at its output limit");
 }
 
 int main(int argc, char **argv) {

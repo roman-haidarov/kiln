@@ -13,7 +13,6 @@ module Kiln
     }nx
     ABSOLUTE_FORM = %r{\Ahttps?://}in
     SINGLE = %w[content-length host transfer-encoding].freeze
-    FORBIDDEN_TRAILER = %w[content-length transfer-encoding host connection trailer te upgrade].freeze
     CTL = /[\x00-\x1f\x7f]/n
 
     ERRORS = {
@@ -28,7 +27,6 @@ module Kiln
     BAD_REQUEST = [400, 'bad request'].freeze
     MAX_HEADERS = 100
     MAX_LENGTH = 999_999_999_999_999_999
-    CHUNK_EXCESS = 16 * 1024
 
     class << self
       def parse_head(head)

@@ -1,2 +1,2 @@
 #include "zng_defines.h"
-#include "../zlib-ng/generic_adler32_c.c"
+#include "../zlib-ng/arch/generic/adler32_c.c"

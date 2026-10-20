@@ -91,6 +91,15 @@ raises('NaN', Kiln::JsonGenerateError, 'NaN') { Kiln::Json.generate([Float::NAN]
 raises('Infinity', Kiln::JsonGenerateError, 'Infinity') { Kiln::Json.generate({ 'x' => Float::INFINITY }) }
 raises('invalid UTF-8', Kiln::JsonGenerateError, 'UTF-8') { Kiln::Json.generate(["\xff".b]) }
 raises('arbitrary object', Kiln::JsonGenerateError, 'unsupported object') { Kiln::Json.generate([Object.new]) }
+raises('UTF-16 surrogate encoded as UTF-8', Kiln::JsonGenerateError, 'UTF-8') { Kiln::Json.generate(["\xED\xA0\x80".b]) }
+check 'control characters use upper-case hex', Kiln::Json.generate("\u001f\u000b") == '"\\u001F\\u000B"'
+mixed = "Заказ №7 — «доставлен» \u{1F680} \"ok\"\n\t東京"
+check 'Cyrillic, CJK, emoji and escapes in one string', Kiln::Json.parse(Kiln::Json.generate([mixed]))[0] == mixed
+many = Array.new(60_000) { |index| { 'id' => index, 'name' => "товар-#{index}" } }
+big = Kiln::Json.generate(many)
+check 'a document past the scratch pool is written whole', big.bytesize > 1_048_576 &&
+                                                         Kiln::Json.parse(big).size == 60_000
+check 'the scratch pool is reused after a large document', Kiln::Json.generate({ 'a' => 'б' }) == '{"a":"б"}'
 loop_list = []
 loop_list << loop_list
 raises('circular structure', Kiln::JsonGenerateError, 'nesting') { Kiln::Json.generate(loop_list) }

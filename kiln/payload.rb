@@ -37,6 +37,7 @@ module Kiln
       failure = @failure
       raise failure if failure
       raise PayloadTooLarge, 'payload too large' if too_large?
+      return (+'').b unless max.positive?
 
       chunk = @source ? pull(max) : slice(max)
       if chunk.nil?

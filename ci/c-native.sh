@@ -138,6 +138,7 @@ run_fuzz_target() {
   source=$2
   max_len=$3
   corpus="$corpus_root/$name"
+  mkdir -p "$corpus"
   binary="$run_dir/fuzz-$name"
   profile="$run_dir/$name-%p.profraw"
   log="$artifacts/$name-libfuzzer.log"
@@ -207,6 +208,23 @@ run_fuzz() {
   run_fuzz_target uv-chunk "$root/bench/uv_chunk_fuzz.c" 65536 \
     "$root/ext/kiln_uv_parse.c" "$root/ext/kiln_http.c" \
     "$root/ext/picohttpparser/picohttpparser.c"
+  sse_target=$(uname -m)
+  sse_features=
+  if [ "$(uname -s)" = Darwin ]; then
+    sse_features=$(sysctl -n machdep.cpu.features 2>/dev/null || true)
+  elif [ -r /proc/cpuinfo ]; then
+    sse_features=$(grep -im1 '^flags' /proc/cpuinfo || true)
+  fi
+  if [ "$sse_target" = x86_64 ] && printf '%s' "$sse_features" | grep -Eiq 'sse4[_\.]2'; then
+    write_seed "$corpus_root/http-sse-diff" get 'GET / HTTP/1.1\r\nHost: example.test\r\nAccept: */*\r\n\r\n'
+    write_seed "$corpus_root/http-sse-diff" post 'POST /items HTTP/1.1\r\nHost: example.test\r\nContent-Length: 4\r\n\r\ndata'
+    "$cc_bin" -std=c11 -O1 -g -msse4.2 -DKILN_OPTIMIZED -I "$root/ext" \
+      -fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer \
+      -fprofile-instr-generate -fcoverage-mapping \
+      -c "$root/ext/kiln_pico_sse42.c" -o "$run_dir/pico_sse42.o"
+    run_fuzz_target http-sse-diff "$root/bench/http_sse_diff_fuzz.c" 16384 \
+      "$root/ext/picohttpparser/picohttpparser.c" "$run_dir/pico_sse42.o"
+  fi
   set -- "$run_dir"/*.profraw
   "$profdata" merge -sparse "$@" -o "$run_dir/fuzz.profdata"
   objects=
@@ -237,6 +255,24 @@ run_tsan() {
     return 1
   fi
   cat "$log"
+  tls_binary="$run_dir/tls_tsan"
+  tls_dl_flags=
+  if [ "$(uname -s)" != Darwin ]; then
+    tls_dl_flags=-ldl
+  fi
+  "$cc_bin" -std=c11 -O1 -g -DSP_THREADS -I "$root/ext" \
+    -fsanitize=thread -fno-omit-frame-pointer -pthread \
+    "$root/bench/tls_tsan.c" "$root/ext/kiln_tls.c" $link_flags $tls_dl_flags -o "$tls_binary"
+  tls_log="$artifacts/tls-tsan.log"
+  if ! TSAN_OPTIONS=halt_on_error=1 "$tls_binary" > "$tls_log" 2>&1; then
+    cat "$tls_log" >&2
+    return 1
+  fi
+  cat "$tls_log"
+  tls_native="$run_dir/tls_lifecycle"
+  "$cc_bin" -std=c11 -O2 -DSP_THREADS -I "$root/ext" -pthread \
+    "$root/bench/tls_tsan.c" "$root/ext/kiln_tls.c" $link_flags $tls_dl_flags -o "$tls_native"
+  "$tls_native" "$root/test/fixtures/tls_cert.pem" "$root/test/fixtures/tls_key.pem"
 }
 
 mode=${1:-all}

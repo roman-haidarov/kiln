@@ -31,6 +31,8 @@ fi
 
 printf '== test suite, SPINEL_WORKERS=1\n'
 SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/workers-1" ./test-spinel.sh
+printf '== spin package install and build smoke\n'
+SPINEL="$spinel" ci/spin-build-smoke.sh
 
 if [ "$bench" = 1 ]; then
   printf '== benchmark smoke\n'

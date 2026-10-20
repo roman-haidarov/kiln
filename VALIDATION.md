@@ -6,7 +6,7 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
-Current tree: 21 test files, 864 checks. The transport-related files are
+Current tree: 21 test files, 898 expected checks. The transport-related files are
 `test/listen_test.rb`, `test/timeouts_test.rb`, `test/payload_test.rb`,
 `test/websocket_test.rb`, `test/tls_test.rb` and `test/sigpipe_test.rb`.
 `test/listen_test.rb` also checks invalid `reuse_port`, invalid `buffer_body`
@@ -19,7 +19,97 @@ checks. `test/sigpipe_test.rb` starts each backend in a child process with the
 default `SIGPIPE` disposition and resets connections mid-response; on Linux it
 passes with or without the SIGPIPE fix, so it guards the macOS behavior only.
 
-### Review fixes (current source tree, 2026-10-19)
+### Spin package installation and gzip follow-up (2026-10-20)
+
+- Added `ci/spin-build-smoke.sh` to run `spin new`, `spin add kiln --path`, `SPIN_NO_NATIVE_CACHE=1 spin build`, and execute a generated app that checks JSON generation. It is wired into `ci/run.sh`. Local macOS ARM64 run with Spinel `2026.09.12+7939` passed.
+- Independently compiled 87 vendored libuv, picohttpparser and zlib-ng translation units with only `-I` to the package root, matching carried-C include restrictions. SIMD source bodies remain disabled in this package path; the optimized `ext/build.sh` path was independently compiled with 46 optimized gzip/parser translation units and retains runtime CPU dispatch.
+- Rejected `Gzip.push` after `Z_FINISH` immediately, and reset the stream completion state when reusing pooled compressors. The full Spinel suite passed 21/21 with one and two workers on macOS ARM64; the gzip lifecycle regression checks passed in both runs.
+- On macOS ARM64, `ci/c-native.sh all` passed: Clang Static Analyzer, 10 libFuzzer targets, parser and TLS TSan, and TLS context lifecycle checks. The SSE4.2 target is skipped on ARM; an x86-64 SSE4.2 differential fuzz run under Rosetta completed 498,775 executions without a finding. `ci/libuv-embedding.sh` passed five native cycles.
+
+### 0.0.7 follow-up fixes (2026-10-20)
+
+- A failed `kiln_gz_push` formerly returned its still-owned stream to the pool before the
+  calling `GzipStream#release`; the pool could then contain duplicate handles. The
+  native failure is now terminal for that handle and close destroys it. Three
+  checks in `test/compress_test.rb` cover error, failed reuse and pool ownership.
+- A native ASan/UBSan reproducer with vendored zlib-ng failed before the fix
+  (two active handles shared one pointer), and passed after the fix.
+- `bench/http_sse_diff_fuzz.c` compares generic and SSE4.2 Pico parser outputs;
+  it asserts valid GET and POST seeds parse before fuzzing. Its corpus starts
+  with those requests. On x86 hosts supporting SSE4.2, `ci/c-native.sh fuzz`
+  includes this target. An earlier independent run of the differential target
+  made about 1.8 million executions without a finding.
+- TLS TSan continues to cover concurrent failed contexts. A separate uninstrumented
+  native test covers concurrent successful `SSL_CTX` and `SSL` creation/free.
+  Parallel successful OpenSSL initialization produced a report within system
+  `libcrypto.so.3` when tested under TSan, so it is not reported as TSan-clean.
+- On macOS ARM64 with Spinel `519280dc9`, the 21-file suite passed 21/21 at
+  `SPINEL_WORKERS=1`, `2` and `4`. Clang TSan passed the failed-context path;
+  the concurrent successful TLS context lifecycle stress also passed.
+- Clang Static Analyzer passed on macOS ARM64. A one-second native libFuzzer
+  batch passed all 10 generic targets; the SSE4.2 differential target was
+  skipped because this host is ARM64. An independent x86-64 SSE4.2 fuzz run
+  made about 1.8 million executions without a finding. GitHub macOS CI and a
+  full-duration fuzz batch were not run after these follow-up changes.
+
+### C library reuse (current source tree, 2026-10-20)
+
+The speed figures below come from the out-of-tree `kiln-c-reuse-bench`
+microbenchmarks and from manual `wrk` and Callgrind runs against
+`bench/regression_server.rb` with extra routes; the repository has no script
+that reproduces them, so treat them as one machine's observations.
+
+Linux x86-64 (Xeon 2.1 GHz, 2 vCPU, AVX-512 and VPCLMULQDQ available), GCC 13,
+Spinel `9922a2c`. arm64 was checked with `aarch64-linux-gnu-gcc` 13 and
+`qemu-aarch64`, not on Apple hardware.
+
+- Linux x86-64, Spinel `9922a2c`: `./test-spinel.sh` passed 21/21 with
+  `SPINEL_WORKERS=1` and `2` (890 checks) before the `Payload#read(0)` fix.
+- macOS arm64, Darwin 24.6, Apple clang 17, Spinel `519280dc9`:
+  `./test-spinel.sh` passed 21/21 with `SPINEL_WORKERS=1` after the fix
+  (893 checks). The generic build also passed 21/21 on this machine.
+- `test/json_test.rb` passes under `SPINEL_GC_STRESS=1` on Linux.
+- `ci/c-native.sh all` with `KILN_FUZZ_SECONDS=10`: analyzer, seed checks
+  (including an oversized chunk size and the `kiln_chunk_step` output limit),
+  all 10 libFuzzer targets and TSan pass. `uv-chunk` now also decodes through
+  `kiln_chunk_step` with the state round-tripped through its `int64_t` array
+  and compares it with the one-shot decode; a separate 60 s run made 2 million
+  executions without a finding. `ci/libuv-embedding.sh` passes.
+- zlib-ng (snapshot `1ab945a8`, now with its x86 and arm sources): 432 gzip
+  round trips (random, repetitive and text inputs from 0 to 3 MB, levels 1 to
+  9, one-shot and streamed with random `Z_SYNC_FLUSH`) inflate back with the
+  system zlib. The arm64 build makes 108 round trips under `qemu-aarch64`
+  with `-cpu max` (PMULL+EOR3 CRC) and `-cpu cortex-a53` (CRC32 only), checked
+  by Python's `gzip`. Release 2.3.3 was also measured and was 5 to 25 % slower
+  than the snapshot on the same inputs, so the snapshot stays.
+- Compression speed against the previous generic build, medians of four
+  rounds: 693 KiB JSON +24 % at level 1 and +68 % at level 2, 2.7 KiB text
+  +54 % and +37 %, a `Z_SYNC_FLUSH` of one SSE event 2.6 times faster at level
+  1. A 1.7 KiB JSON body is within noise: `deflateReset` clears a 128 KiB hash
+  table and costs 2.6 µs of its 4 to 8 µs either way.
+- `kiln_http_scan_at`, microbenchmark: a 703-byte browser head 572-717 ns
+  before, 368-468 ns with the new ASCII check and name hash, 275-334 ns with
+  the SSE4.2 parser; 1535 bytes 1.2-1.5 µs before, 0.55-0.67 µs after. `wrk`
+  with a 700-byte head shows no difference outside noise.
+- Callgrind, inline, one keep-alive connection, built with `-DKILN_GENERIC`
+  (Valgrind cannot run the SSE4.2 parser), instructions per request:
+  `/json` 140 500 to 120 300, the same 64 objects with Cyrillic names
+  256 000 to 144 000, `/text` 46 400 to 46 700.
+- `wrk -t1 -c16`, inline, server and client on separate cores, three
+  alternating rounds, mean requests/s, 0.0.6 as uploaded to this tree:
+  `/json` 47 687 to 49 404, Cyrillic JSON 30 774 to 46 665, `/text` 77 149 to
+  76 086; with `Accept-Encoding: gzip`, `/gzip` 48 658 to 50 894, 693 KiB JSON
+  400 to 539, `/gzip-stream` 15 869 to 18 453.
+- Base backend, chunked upload of 64 MiB read with `payload.each`: 1 KiB
+  chunks 157-170 MiB/s before, 553-795 MiB/s after; 64 KiB chunks 609-619 to
+  617-778 MiB/s.
+- clang-tidy and cppcheck report nothing new on the changed files beyond the
+  house braces style, the existing `memcpy` advisory, `misc-no-recursion` on
+  the value walker that replaced the old recursive one, and `unusedFunction`
+  on the new FFI export. lizard: `kiln_json.c` drops from three warnings to
+  one (`kiln_yy_value`).
+
+### Review fixes (2026-10-19)
 
 Linux x86-64, 2 vCPU, Spinel `9922a2c` built from source:
 

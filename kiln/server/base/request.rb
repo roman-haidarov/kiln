@@ -156,61 +156,28 @@ module Kiln
       end
 
       def pull_chunked(src, sock, buf, max, deadline)
+        return (+'').b unless max.positive?
+
+        state = src.chunk_state
         loop do
-          case src.state
-          when :size
-            return nil if chunk_size(src, sock, buf, deadline)
-          when :data
-            body_wait(sock, buf, deadline) if buf.empty?
-            take = buf.size
-            take = src.chunk_left if src.chunk_left < take
-            take = max if max < take
-            src.chunk_left -= take
-            src.state = :crlf if src.chunk_left.zero?
-            return buf.take(take)
-          else
-            chunk_end(src, sock, buf, deadline)
+          body_wait(sock, buf, deadline) if buf.empty?
+          data = buf.data
+          piece = HttpNative.kiln_chunk_step(data, data.bytesize, buf.pos, max, state)
+          used = state[4]
+          buf.skip(used) if used.positive?
+          status = state[5]
+          raise TrailersTooLarge, 'trailers too large' if status == CHUNK_TOO_BIG
+          raise PayloadTooLarge, 'payload too large' if status == CHUNK_HUGE
+          raise BadRequest, 'malformed chunked body' if status.negative?
+
+          if status == CHUNK_END
+            src.state = :done
+            return piece.empty? ? nil : piece
           end
+          return piece unless piece.empty?
+
+          body_wait(sock, buf, deadline) if used.zero?
         end
-      end
-
-      def chunk_size(src, sock, buf, deadline)
-        line, err = read_line(sock, buf, deadline, 4096)
-        raise_body(err) if err
-        size = HttpNative.kiln_chunk_size(line, line.bytesize, HttpSyntax::MAX_LENGTH)
-        raise BadRequest, 'malformed chunk size' if size == -1
-        raise PayloadTooLarge, 'payload too large' if size == -2
-
-        src.excess += line.bytesize + 2 - 16 - (2 * (size > HttpSyntax::CHUNK_EXCESS ? HttpSyntax::CHUNK_EXCESS : size))
-        src.excess = 0 if src.excess.negative?
-        raise BadRequest, 'chunk overhead too large' if src.excess > HttpSyntax::CHUNK_EXCESS
-
-        if size.zero?
-          err = read_trailers(sock, buf, deadline)
-          raise_body(err) if err
-          src.state = :done
-          return true
-        end
-        src.chunk_left = size
-        src.state = :data
-        false
-      end
-
-      def chunk_end(src, sock, buf, deadline)
-        err = read_exact(sock, buf, deadline, 2)
-        raise_body(err) if err
-        raise BadRequest, 'malformed chunk' unless buf.byte_at(0) == 13 && buf.byte_at(1) == 10
-
-        buf.skip(2)
-        src.state = :size
-      end
-
-      def raise_body(err)
-        raise RequestTimeout, 'request body timeout' if err == :timeout
-        raise PayloadTooLarge, 'payload too large' if err == :too_long
-        raise TrailersTooLarge, 'trailers too large' if err == :too_big
-
-        raise BadRequest, 'malformed request body'
       end
 
       def read_body(sock, buf, deadline, headers, len, version)
@@ -233,32 +200,6 @@ module Kiln
           raise IOError, 'pipelined responses could not be sent'
         end
         raise IOError, '100 Continue could not be sent' unless write_all(sock, CONTINUE, continue_deadline)
-      end
-
-      def read_trailers(sock, buf, deadline)
-        bytes = 0
-        loop do
-          trailer, err = read_line(sock, buf, deadline, MAX_HEADER)
-          return err if err
-          return nil if trailer.empty?
-
-          bytes += trailer.bytesize + 2
-          return :too_big if bytes > MAX_HEADER
-
-          name, sep, value = trailer.partition(':'.b)
-          return :bad if sep.empty? || name.empty? || !name.match?(HttpSyntax::TOKEN)
-          return :bad if HttpSyntax::FORBIDDEN_TRAILER.include?(name.downcase)
-          return :bad if HttpSyntax.ctl?(HttpSyntax.trim_ows(value))
-        end
-      end
-
-      def read_line(sock, buf, deadline, max)
-        len = find_marker(sock, buf, deadline, CRLF, max, :bad)
-        return [nil, len] if len.is_a?(Symbol)
-
-        line = buf.take(len)
-        buf.skip(CRLF.bytesize)
-        [line, nil]
       end
 
       def read_exact(sock, buf, deadline, len)
