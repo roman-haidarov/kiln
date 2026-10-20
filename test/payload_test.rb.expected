@@ -9,6 +9,8 @@ ok   event: a scope limit applies to its routes
 ok   event: 100 Continue is sent when the handler reads a streamed body
 ok   event: a handler that refuses an Expect body never sees 100 Continue
 ok   event: a malformed chunk size -> 400
+ok   event: reading zero bytes of a chunked body returns an empty string
+ok   event: a chunk size past every limit -> 413
 ok   event: a request pipelined after a chunked body is served in order
 ok   event lanes: a 4 MiB body is read in chunks
 ok   event lanes: a chunked 4 MiB body arrives intact
@@ -21,6 +23,8 @@ ok   event lanes: a scope limit applies to its routes
 ok   event lanes: 100 Continue is sent when the handler reads a streamed body
 ok   event lanes: a handler that refuses an Expect body never sees 100 Continue
 ok   event lanes: a malformed chunk size -> 400
+ok   event lanes: reading zero bytes of a chunked body returns an empty string
+ok   event lanes: a chunk size past every limit -> 413
 ok   event lanes: a request pipelined after a chunked body is served in order
 ok   base: a 4 MiB body is read in chunks
 ok   base: a chunked 4 MiB body arrives intact
@@ -33,6 +37,8 @@ ok   base: a scope limit applies to its routes
 ok   base: 100 Continue is sent when the handler reads a streamed body
 ok   base: a handler that refuses an Expect body never sees 100 Continue
 ok   base: a malformed chunk size -> 400
+ok   base: reading zero bytes of a chunked body returns an empty string
+ok   base: a chunk size past every limit -> 413
 ok   base: a request pipelined after a chunked body is served in order
 ok   event: a handler waiting on a stalled body /wait gets 504 at its deadline
 ok   event: the server keeps serving after /wait expired

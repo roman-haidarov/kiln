@@ -195,298 +195,171 @@ sp_RbVal kiln_json_parse(const char *src, sp_int max_depth) {
 }
 
 #define KILN_GEN_MAX_NESTING 100
-#define KILN_GEN_HINT_MAX    ((size_t)1 << 20)
-
-typedef struct {
-    char *p;
-    size_t len;
-    size_t cap;
-} kiln_out;
-
-typedef struct {
-    kiln_out out;
-    const char *error;
-} kiln_gen;
-
-static int kiln_reserve(kiln_gen *g, size_t extra) {
-    if (g->out.p && g->out.len + extra <= g->out.cap)
-        return 1;
-    size_t cap = g->out.cap ? g->out.cap : 256;
-    while (cap < g->out.len + extra)
-        cap *= 2;
-    char *next = realloc(g->out.p, cap);
-    if (!next) {
-        g->error = "out of memory";
-        return 0;
-    }
-    g->out.p = next;
-    g->out.cap = cap;
-    return 1;
-}
-
-static int kiln_put(kiln_gen *g, const char *s, size_t n) {
-    if (n == 0)
-        return 1;
-    if (!kiln_reserve(g, n))
-        return 0;
-    memcpy(g->out.p + g->out.len, s, n);
-    g->out.len += n;
-    return 1;
-}
-
-static int kiln_putc(kiln_gen *g, char c) {
-    if (g->out.len < g->out.cap) {
-        g->out.p[g->out.len++] = c;
-        return 1;
-    }
-    return kiln_put(g, &c, 1);
-}
-
-static size_t kiln_utf8_seq(const unsigned char *s, size_t left) {
-    unsigned char c = s[0];
-    if (c >= 0xC2 && c <= 0xDF)
-        return left >= 2 && (s[1] & 0xC0) == 0x80 ? 2 : 0;
-    if (c >= 0xE0 && c <= 0xEF) {
-        if (left < 3 || (s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80)
-            return 0;
-        if (c == 0xE0 && s[1] < 0xA0)
-            return 0;
-        if (c == 0xED && s[1] >= 0xA0)
-            return 0;
-        return 3;
-    }
-    if (c >= 0xF0 && c <= 0xF4) {
-        if (left < 4 || (s[1] & 0xC0) != 0x80 || (s[2] & 0xC0) != 0x80 || (s[3] & 0xC0) != 0x80)
-            return 0;
-        if (c == 0xF0 && s[1] < 0x90)
-            return 0;
-        if (c == 0xF4 && s[1] >= 0x90)
-            return 0;
-        return 4;
-    }
-    return 0;
-}
-
-static int kiln_put_str(kiln_gen *g, const char *src, size_t len) {
-    static const char hex[] = "0123456789abcdef";
-    static const uint64_t high = UINT64_C(0x8080808080808080);
-    static const uint64_t low32 = UINT64_C(0x2020202020202020);
-    static const uint64_t ones = UINT64_C(0x0101010101010101);
-    static const uint64_t quotes = UINT64_C(0x2222222222222222);
-    static const uint64_t slashes = UINT64_C(0x5c5c5c5c5c5c5c5c);
-    const unsigned char *s = (const unsigned char *)src;
-    if (!kiln_reserve(g, len + 2))
-        return 0;
-    g->out.p[g->out.len++] = '"';
-    size_t i = 0;
-    while (i < len) {
-        size_t run = i;
-        while (len - run >= sizeof(uint64_t)) {
-            uint64_t word;
-            memcpy(&word, s + run, sizeof(word));
-            uint64_t at_least_space = (word | high) - low32;
-            uint64_t quote_test = word ^ quotes;
-            uint64_t slash_test = word ^ slashes;
-            if ((word & high) || (at_least_space & high) != high ||
-                (((quote_test - ones) & ~quote_test & high) != 0) ||
-                (((slash_test - ones) & ~slash_test & high) != 0))
-                break;
-            run += sizeof(uint64_t);
-        }
-        while (run < len && s[run] >= 0x20 && s[run] < 0x80 && s[run] != '"' && s[run] != '\\')
-            run++;
-        if (run > i && !kiln_put(g, src + i, run - i))
-            return 0;
-        i = run;
-        if (i >= len)
-            break;
-        unsigned char c = s[i];
-        if (c >= 0x80) {
-            size_t n = kiln_utf8_seq(s + i, len - i);
-            if (!n) {
-                g->error = "invalid UTF-8 in string";
-                return 0;
-            }
-            if (!kiln_put(g, src + i, n))
-                return 0;
-            i += n;
-            continue;
-        }
-        char esc[6] = {'\\', 0, 0, 0, 0, 0};
-        size_t n = 2;
-        switch (c) {
-        case '"':
-            esc[1] = '"';
-            break;
-        case '\\':
-            esc[1] = '\\';
-            break;
-        case '\n':
-            esc[1] = 'n';
-            break;
-        case '\r':
-            esc[1] = 'r';
-            break;
-        case '\t':
-            esc[1] = 't';
-            break;
-        case '\b':
-            esc[1] = 'b';
-            break;
-        case '\f':
-            esc[1] = 'f';
-            break;
-        default:
-            esc[1] = 'u';
-            esc[2] = '0';
-            esc[3] = '0';
-            esc[4] = hex[c >> 4];
-            esc[5] = hex[c & 15];
-            n = 6;
-        }
-        if (!kiln_put(g, esc, n))
-            return 0;
-        i++;
-    }
-    return kiln_putc(g, '"');
-}
-
-static int kiln_put_num(kiln_gen *g, yyjson_subtype sub, int64_t i, double f) {
-    yyjson_val num;
-    num.tag = (uint64_t)YYJSON_TYPE_NUM | (uint64_t)sub;
-    if (sub == YYJSON_SUBTYPE_REAL)
-        num.uni.f64 = f;
-    else
-        num.uni.i64 = i;
-    if (!kiln_reserve(g, 48))
-        return 0;
-    char *end = yyjson_write_number(&num, g->out.p + g->out.len);
-    if (!end) {
-        g->error = "number not representable in JSON";
-        return 0;
-    }
-    g->out.len = (size_t)(end - g->out.p);
-    return 1;
-}
-
-static int kiln_put_sym(kiln_gen *g, sp_RbVal v) {
-    const char *name = sp_sym_name_fn ? sp_sym_name_fn((sp_sym)v.v.i) : "";
-    return kiln_put_str(g, name, strlen(name));
-}
 
 static int kiln_strbuf(sp_RbVal v) {
     return v.tag == SP_TAG_OBJ && v.cls_id == SP_BUILTIN_STRBUF && v.v.p;
 }
 
-static int kiln_put_strbuf(kiln_gen *g, sp_RbVal v) {
-    const sp_String *str = (const sp_String *)v.v.p;
-    return kiln_put_str(g, str->data ? str->data : "", str->data ? (size_t)str->len : 0);
-}
-
-static int kiln_put_key(kiln_gen *g, sp_RbVal k) {
-    if (kiln_strbuf(k))
-        return kiln_put_strbuf(g, k);
+static yyjson_mut_val *kiln_yy_key(yyjson_mut_doc *d, sp_RbVal k, const char **err) {
+    if (kiln_strbuf(k)) {
+        const sp_String *str = (const sp_String *)k.v.p;
+        return yyjson_mut_strn(d, str->data ? str->data : "", str->data ? (size_t)str->len : 0);
+    }
     switch (k.tag) {
     case SP_TAG_STR:
-        return kiln_put_str(g, k.v.s, sp_str_byte_len(k.v.s));
-    case SP_TAG_SYM:
-        return kiln_put_sym(g, k);
+        return yyjson_mut_strn(d, k.v.s, sp_str_byte_len(k.v.s));
+    case SP_TAG_SYM: {
+        const char *name = sp_sym_name_fn ? sp_sym_name_fn((sp_sym)k.v.i) : "";
+        return yyjson_mut_strn(d, name, strlen(name));
+    }
     case SP_TAG_INT: {
         char digits[24];
         int n = snprintf(digits, sizeof digits, "%lld", (long long)k.v.i);
-        return kiln_put_str(g, digits, (size_t)n);
+        return yyjson_mut_strncpy(d, digits, (size_t)n);
     }
     case SP_TAG_BIGINT: {
         const char *digits = sp_bigint_to_s((sp_Bigint *)k.v.p);
-        return kiln_put_str(g, digits, sp_str_byte_len(digits));
+        return yyjson_mut_strncpy(d, digits, sp_str_byte_len(digits));
     }
     default:
-        g->error = "unsupported Hash key type";
-        return 0;
+        *err = "unsupported Hash key type";
+        return NULL;
     }
 }
 
-static int kiln_gen_value(kiln_gen *g, sp_RbVal v, int depth) {
+static yyjson_mut_val *kiln_yy_value(yyjson_mut_doc *d, sp_RbVal v, int depth, const char **err) {
     switch (v.tag) {
     case SP_TAG_NIL:
-        return kiln_put(g, "null", 4);
+        return yyjson_mut_null(d);
     case SP_TAG_BOOL:
-        return v.v.b ? kiln_put(g, "true", 4) : kiln_put(g, "false", 5);
+        return yyjson_mut_bool(d, v.v.b);
     case SP_TAG_INT:
-        return kiln_put_num(g, YYJSON_SUBTYPE_SINT, (int64_t)v.v.i, 0.0);
+        return yyjson_mut_sint(d, (int64_t)v.v.i);
     case SP_TAG_FLT:
         if (isnan(v.v.f) || isinf(v.v.f)) {
-            g->error = "NaN and Infinity are not allowed in JSON";
-            return 0;
+            *err = "NaN and Infinity are not allowed in JSON";
+            return NULL;
         }
-        return kiln_put_num(g, YYJSON_SUBTYPE_REAL, 0, v.v.f);
+        return yyjson_mut_real(d, v.v.f);
     case SP_TAG_BIGINT: {
         const char *digits = sp_bigint_to_s((sp_Bigint *)v.v.p);
-        return kiln_put(g, digits, sp_str_byte_len(digits));
+        return yyjson_mut_rawncpy(d, digits, sp_str_byte_len(digits));
     }
     case SP_TAG_STR:
-        return kiln_put_str(g, v.v.s, sp_str_byte_len(v.v.s));
-    case SP_TAG_SYM:
-        return kiln_put_sym(g, v);
+        return yyjson_mut_strn(d, v.v.s, sp_str_byte_len(v.v.s));
+    case SP_TAG_SYM: {
+        const char *name = sp_sym_name_fn ? sp_sym_name_fn((sp_sym)v.v.i) : "";
+        return yyjson_mut_strn(d, name, strlen(name));
+    }
     case SP_TAG_OBJ:
         break;
     default:
-        g->error = "unsupported value type";
-        return 0;
+        *err = "unsupported value type";
+        return NULL;
     }
-    if (kiln_strbuf(v))
-        return kiln_put_strbuf(g, v);
+    if (kiln_strbuf(v)) {
+        const sp_String *str = (const sp_String *)v.v.p;
+        return yyjson_mut_strn(d, str->data ? str->data : "", str->data ? (size_t)str->len : 0);
+    }
     int kind = sp_json_kind_fn ? sp_json_kind_fn(v) : 0;
     if (kind != 1 && kind != 2) {
-        g->error = "unsupported object type (convert it to a Hash first)";
-        return 0;
+        *err = "unsupported object type (convert it to a Hash first)";
+        return NULL;
     }
     if (depth >= KILN_GEN_MAX_NESTING) {
-        g->error = "nesting too deep (circular reference?)";
-        return 0;
+        *err = "nesting too deep (circular reference?)";
+        return NULL;
     }
     sp_int n = sp_json_len_fn(v);
     if (kind == 1) {
-        if (!kiln_putc(g, '['))
-            return 0;
+        yyjson_mut_val *arr = yyjson_mut_arr(d);
         for (sp_int i = 0; i < n; i++) {
-            if (i && !kiln_putc(g, ','))
-                return 0;
-            if (!kiln_gen_value(g, sp_json_aref_fn(v, i), depth + 1))
-                return 0;
+            yyjson_mut_val *item = kiln_yy_value(d, sp_json_aref_fn(v, i), depth + 1, err);
+            if (!item || !yyjson_mut_arr_append(arr, item))
+                return NULL;
         }
-        return kiln_putc(g, ']');
+        return arr;
     }
-    if (!kiln_putc(g, '{'))
-        return 0;
+    yyjson_mut_val *obj = yyjson_mut_obj(d);
     for (sp_int i = 0; i < n; i++) {
         sp_RbVal k;
         sp_RbVal val;
         sp_json_hpair_fn(v, i, &k, &val);
-        if (i && !kiln_putc(g, ','))
-            return 0;
-        if (!kiln_put_key(g, k) || !kiln_putc(g, ':') || !kiln_gen_value(g, val, depth + 1))
-            return 0;
+        yyjson_mut_val *key = kiln_yy_key(d, k, err);
+        yyjson_mut_val *item = key ? kiln_yy_value(d, val, depth + 1, err) : NULL;
+        if (!item || !yyjson_mut_obj_add(obj, key, item))
+            return NULL;
     }
-    return kiln_putc(g, '}');
+    return obj;
 }
 
-static __thread size_t kiln_gen_hint;
+#define KILN_GEN_POOL_MIN ((size_t)16 << 10)
+#define KILN_GEN_POOL_MAX ((size_t)1 << 20)
+
+static __thread char *kiln_gen_pool;
+static __thread size_t kiln_gen_pool_cap;
+static __thread int kiln_gen_pool_busy;
+
+static char *kiln_gen_write(sp_RbVal v, const yyjson_alc *alc, size_t *len, const char **err) {
+    yyjson_mut_doc *d = yyjson_mut_doc_new(alc);
+    if (!d)
+        return NULL;
+    yyjson_mut_val *root = kiln_yy_value(d, v, 0, err);
+    char *text = NULL;
+    if (root) {
+        yyjson_write_err werr;
+        yyjson_mut_doc_set_root(d, root);
+        text = yyjson_mut_write_opts(d, 0, alc, len, &werr);
+        if (!text && werr.code != YYJSON_WRITE_ERROR_MEMORY_ALLOCATION)
+            *err = werr.code == YYJSON_WRITE_ERROR_INVALID_STRING ? "invalid UTF-8 in string"
+                                                                  : werr.msg;
+    }
+    yyjson_mut_doc_free(d);
+    return text;
+}
+
+static int kiln_gen_grow(size_t cap) {
+    char *next = malloc(cap);
+    if (!next)
+        return 0;
+    free(kiln_gen_pool);
+    kiln_gen_pool = next;
+    kiln_gen_pool_cap = cap;
+    return 1;
+}
 
 const char *kiln_json_generate(sp_RbVal v) {
     SP_GC_ROOT_RBVAL(v);
-    kiln_gen g = {{NULL, 0, 0}, NULL};
-    if (kiln_gen_hint && !kiln_reserve(&g, kiln_gen_hint))
-        kiln_raise(KILN_JSON_GEN_ERROR, kiln_gc_str("out of memory", 13));
-    if (!kiln_gen_value(&g, v, 0)) {
-        const char *msg = g.error ? g.error : "cannot generate JSON";
-        free(g.out.p);
-        kiln_raise(KILN_JSON_GEN_ERROR, kiln_gc_str(msg, strlen(msg)));
+    const char *err = NULL;
+    size_t len = 0;
+    char *text = NULL;
+    if (!kiln_gen_pool_busy && (kiln_gen_pool || kiln_gen_grow(KILN_GEN_POOL_MIN))) {
+        kiln_gen_pool_busy = 1;
+        for (;;) {
+            yyjson_alc alc;
+            yyjson_alc_pool_init(&alc, kiln_gen_pool, kiln_gen_pool_cap);
+            text = kiln_gen_write(v, &alc, &len, &err);
+            if (text || err || kiln_gen_pool_cap >= KILN_GEN_POOL_MAX ||
+                !kiln_gen_grow(kiln_gen_pool_cap * 4))
+                break;
+        }
+        char *out = text ? sp_str_alloc(len) : NULL;
+        if (out)
+            memcpy(out, text, len);
+        kiln_gen_pool_busy = 0;
+        if (out)
+            return out;
     }
-    kiln_gen_hint = g.out.len < KILN_GEN_HINT_MAX ? g.out.len + 64 : KILN_GEN_HINT_MAX;
-    char *out = sp_str_alloc(g.out.len);
-    if (g.out.len)
-        memcpy(out, g.out.p, g.out.len);
-    free(g.out.p);
-    return out;
+    if (!err) {
+        text = kiln_gen_write(v, NULL, &len, &err);
+        if (text) {
+            char *out = sp_str_alloc(len);
+            memcpy(out, text, len);
+            free(text);
+            return out;
+        }
+    }
+    const char *msg = err ? err : "out of memory";
+    kiln_raise(KILN_JSON_GEN_ERROR, kiln_gc_str(msg, strlen(msg)));
+    return "";
 }

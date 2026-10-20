@@ -13,11 +13,20 @@
 #define KUV_EXPECT            24
 #define KUV_CHUNK_LINE_MAX    4096
 #define KUV_CHUNK_EXCESS      (16L * 1024)
+#define KUV_STEP_MAX          65536L
 
 long kiln_scan_request_head(const char *buf, long len, int64_t *out, long cap);
 long kiln_chunk_size(const char *s, long len, long max);
 long kiln_token(const char *s, long len);
 long kiln_ctl(const char *s, long len);
+
+#ifdef SP_THREADS
+extern __thread int sp_ffi_bin_len;
+static __thread char kuv_step_out[KUV_STEP_MAX];
+#else
+extern int sp_ffi_bin_len;
+static char kuv_step_out[KUV_STEP_MAX];
+#endif
 
 static int kuv_has_token(const char *s, long len, const char *token) {
     long n = (long)strlen(token);
@@ -228,7 +237,7 @@ static int kuv_chunk_line(const char *in, size_t in_len, size_t *line_len) {
 static int kuv_chunk_size_line(kiln_uv_chunk_state *state, const char *in, size_t line_len) {
     long size = kiln_chunk_size(in, (long)line_len, LONG_MAX / 4);
     if (size < 0) {
-        return KILN_UV_CHUNK_BAD;
+        return size == -2 ? KILN_UV_CHUNK_HUGE : KILN_UV_CHUNK_BAD;
     }
     state->excess +=
         (long)line_len + 2 - 16 - (size > KUV_CHUNK_EXCESS ? KUV_CHUNK_EXCESS : size) * 2;
@@ -326,4 +335,32 @@ int kiln_uv_chunk_decode(kiln_uv_chunk_state *state, const char *in, size_t in_l
     *consumed = pos;
     *produced = made;
     return status;
+}
+
+const char *kiln_chunk_step(const char *data, long total, long start, long max, int64_t *state) {
+    sp_ffi_bin_len = 0;
+    if (!state) {
+        return "";
+    }
+    state[4] = 0;
+    state[5] = KILN_UV_CHUNK_BAD;
+    if (!data || total < 0 || start < 0 || start > total || max <= 0 ||
+        state[0] < KILN_UV_CHUNK_SIZE || state[0] > KILN_UV_CHUNK_DONE || state[1] < 0 ||
+        state[2] < 0 || state[3] < 0) {
+        return "";
+    }
+    kiln_uv_chunk_state chunk = {(int)state[0], (long)state[1], (long)state[2], (long)state[3]};
+    size_t cap = max < KUV_STEP_MAX ? (size_t)max : KUV_STEP_MAX;
+    size_t consumed = 0;
+    size_t produced = 0;
+    int status = kiln_uv_chunk_decode(
+        &chunk, data + start, (size_t)(total - start), kuv_step_out, cap, &consumed, &produced);
+    state[0] = chunk.phase;
+    state[1] = chunk.left;
+    state[2] = chunk.excess;
+    state[3] = chunk.trailer;
+    state[4] = (int64_t)consumed;
+    state[5] = status;
+    sp_ffi_bin_len = (int)produced;
+    return kuv_step_out;
 }

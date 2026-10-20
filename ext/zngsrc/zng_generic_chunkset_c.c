@@ -1,2 +1,2 @@
 #include "zng_defines.h"
-#include "../zlib-ng/generic_chunkset_c.c"
+#include "../zlib-ng/arch/generic/chunkset_c.c"

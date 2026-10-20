@@ -15,6 +15,11 @@ ok   q accepts three decimal places
 ok   q rejects more than three decimal places
 ok   the last valid q parameter wins
 ok   levels are validated
+ok   a completed gzip stream cannot be written again
+ok   a failed gzip stream cannot resume
+ok   a failed gzip stream cannot enter the pool twice
+ok   a pooled finished gzip stream resets before reuse
+ok   an empty gzip write and flush do not fail
 -- bodies
 ok   text is gzipped
 ok   gzip round-trips through another inflater

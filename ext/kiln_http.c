@@ -14,6 +14,10 @@
 #include "kiln_ascii.h"
 #include "kiln_http_scan.h"
 #include "picohttpparser/picohttpparser.h"
+#if defined(KILN_PICO_SSE42) && !defined(KILN_GENERIC) && defined(__x86_64__)
+#include <cpuid.h>
+#define KILN_PICO_DISPATCH 1
+#endif
 
 #define KILN_RECV_MAX 16384
 
@@ -234,47 +238,46 @@ static const char *const kiln_common[] = {"host", "user-agent", "accept", "accep
 static const uint8_t kiln_common_lengths[] = {4, 10, 6, 15, 15, 10, 14, 12, 6, 7, 13, 25, 14, 14,
     14, 14, 9, 16, 18, 6, 13, 13, 17, 17, 6, 15, 12, 6, 8, 2, 5, 3};
 
-static const uint8_t kiln_common_slots[256] = {[20] = 1,
-    [1] = 2,
-    [154] = 3,
-    [192] = 4,
-    [235] = 5,
-    [78] = 6,
-    [142] = 7,
-    [10] = 8,
-    [216] = 9,
-    [215] = 10,
-    [48] = 11,
-    [68] = 12,
-    [74] = 13,
-    [174] = 14,
-    [190] = 15,
-    [185] = 16,
-    [38] = 17,
-    [3] = 18,
-    [150] = 19,
-    [236] = 20,
-    [163] = 21,
-    [238] = 22,
-    [0] = 23,
-    [113] = 24,
-    [223] = 25,
-    [253] = 26,
-    [148] = 27,
-    [42] = 28,
-    [126] = 29,
-    [45] = 30,
-    [247] = 31,
-    [232] = 32};
+static const uint8_t kiln_common_slots[256] = {[31] = 1,
+    [254] = 2,
+    [236] = 3,
+    [206] = 4,
+    [113] = 5,
+    [225] = 6,
+    [32] = 7,
+    [231] = 8,
+    [134] = 9,
+    [126] = 10,
+    [226] = 11,
+    [90] = 12,
+    [61] = 13,
+    [109] = 14,
+    [135] = 15,
+    [63] = 16,
+    [65] = 17,
+    [215] = 18,
+    [47] = 19,
+    [167] = 20,
+    [224] = 21,
+    [78] = 22,
+    [79] = 23,
+    [246] = 24,
+    [75] = 25,
+    [20] = 26,
+    [181] = 27,
+    [208] = 28,
+    [69] = 29,
+    [51] = 30,
+    [137] = 31,
+    [213] = 32};
 
 static long kiln_common_index(const char *name, size_t len) {
     if (len < 2 || len > 25) {
         return -1;
     }
-    uint32_t hash = 10;
-    for (size_t i = 0; i < len; i++) {
-        hash = (hash ^ ((unsigned char)name[i] | 32U)) * 16777619U;
-    }
+    const unsigned char *bytes = (const unsigned char *)name;
+    uint32_t hash = (uint32_t)len + (2U * (bytes[0] | 32U)) + (bytes[len - 1] | 32U) +
+                    (13U * (bytes[len - 2] | 32U));
     uint8_t slot = kiln_common_slots[hash & 255U];
     if (!slot) {
         return -1;
@@ -290,11 +293,18 @@ static int kiln_clean_value(const char *value, size_t len) {
 }
 
 static int kiln_ascii(const char *s, long len) {
-    unsigned char acc = 0;
-    for (long i = 0; i < len; i++) {
-        acc |= (unsigned char)s[i];
+    uint64_t wide = 0;
+    long i = 0;
+    for (; i + 8 <= len; i += 8) {
+        uint64_t word;
+        memcpy(&word, s + i, sizeof word);
+        wide |= word;
     }
-    return acc < 0x80;
+    unsigned char tail = 0;
+    for (; i < len; i++) {
+        tail |= (unsigned char)s[i];
+    }
+    return (wide & UINT64_C(0x8080808080808080)) == 0 && tail < 0x80;
 }
 
 static int kiln_crlf_only(const char *head, long len) {
@@ -306,6 +316,29 @@ static int kiln_crlf_only(const char *head, long len) {
     }
     return 1;
 }
+
+typedef int (*kiln_parse_fn)(const char *, size_t, const char **, size_t *, const char **, size_t *,
+    int *, struct phr_header *, size_t *, size_t);
+
+#ifdef KILN_PICO_DISPATCH
+int kiln_phr_parse_request_sse42(const char *buf, size_t len, const char **method,
+    size_t *method_len, const char **path, size_t *path_len, int *minor_version,
+    struct phr_header *headers, size_t *num_headers, size_t last_len);
+
+static kiln_parse_fn kiln_parse_request = phr_parse_request;
+
+__attribute__((constructor)) static void kiln_pick_parser(void) {
+    unsigned int eax = 0;
+    unsigned int ebx = 0;
+    unsigned int ecx = 0;
+    unsigned int edx = 0;
+    if (__get_cpuid(1, &eax, &ebx, &ecx, &edx) && (ecx & bit_SSE4_2)) {
+        kiln_parse_request = kiln_phr_parse_request_sse42;
+    }
+}
+#else
+static const kiln_parse_fn kiln_parse_request = phr_parse_request;
+#endif
 
 static long kiln_scan_terminated(const char *buf, long len, int64_t *out, long cap, long base) {
     struct phr_header headers[KILN_HTTP_MAX_HEADERS];
@@ -322,7 +355,7 @@ static long kiln_scan_terminated(const char *buf, long len, int64_t *out, long c
     if (buf[0] == '\r' || buf[0] == '\n' || !kiln_crlf_only(buf, len)) {
         return -1;
     }
-    int used = phr_parse_request(
+    int used = kiln_parse_request(
         buf, (size_t)len + 4, &method, &method_len, &path, &path_len, &minor, headers, &num, 0);
     if (used != len + 4) {
         return -1;

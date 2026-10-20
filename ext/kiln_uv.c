@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include <arpa/inet.h>
+#include <limits.h>
 #include <signal.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -390,11 +391,19 @@ static void kuv_queue_flush(kuv_conn *c) {
 }
 
 static int kuv_reserve(char **buf, size_t len, size_t *cap, size_t n) {
-    if (len + n <= *cap) {
+    if (n > UINT_MAX || len > UINT_MAX - n) {
+        return -1;
+    }
+    size_t required = len + n;
+    if (required <= *cap) {
         return 0;
     }
     size_t want = *cap ? *cap : 4096;
-    while (want < len + n) {
+    while (want < required) {
+        if (want > UINT_MAX / 2U) {
+            want = required;
+            break;
+        }
         want *= 2;
     }
     char *grown = realloc(*buf, want);
@@ -417,7 +426,11 @@ static int kuv_append(char **buf, size_t *len, size_t *cap, const char *data, si
 
 static int kuv_append_pair(
     kuv_conn *c, const char *head, size_t head_len, const char *body, size_t body_len) {
-    if (kuv_reserve(&c->out, c->out_len, &c->out_cap, head_len + body_len) < 0) {
+    if (head_len > UINT_MAX || body_len > UINT_MAX - head_len) {
+        return -1;
+    }
+    size_t pair_len = head_len + body_len;
+    if (kuv_reserve(&c->out, c->out_len, &c->out_cap, pair_len) < 0) {
         return -1;
     }
     memcpy(c->out + c->out_len, head, head_len);
@@ -541,8 +554,14 @@ static void kuv_body_chunked(kuv_conn *c, size_t *used) {
         if (!c->body_discard) {
             c->body_len += produced;
         }
-        if (rc == KILN_UV_CHUNK_BAD || rc == KILN_UV_CHUNK_TOO_BIG) {
-            c->body_error = rc == KILN_UV_CHUNK_TOO_BIG ? 431 : 400;
+        if (rc < KILN_UV_CHUNK_MORE) {
+            c->body_error = 400;
+            if (rc == KILN_UV_CHUNK_TOO_BIG) {
+                c->body_error = 431;
+            }
+            if (rc == KILN_UV_CHUNK_HUGE) {
+                c->body_error = 413;
+            }
             return;
         }
         if (rc == KILN_UV_CHUNK_END) {
@@ -1264,6 +1283,10 @@ static void kuv_after_write(uv_write_t *req, int status) {
 }
 
 static int kuv_queue_write(kuv_conn *c, char *owned, char *from, size_t len) {
+    if (len > UINT_MAX) {
+        free(owned);
+        return -1;
+    }
     kuv_write *w = malloc(sizeof(*w));
     if (!w) {
         free(owned);
@@ -1290,6 +1313,10 @@ static int kuv_queue_write(kuv_conn *c, char *owned, char *from, size_t len) {
 }
 
 static int kuv_raw_owned(kuv_conn *c, char *data, size_t len) {
+    if (len > UINT_MAX) {
+        free(data);
+        return -1;
+    }
     size_t done = 0;
     if (c->writes == 0) {
         uv_buf_t b = uv_buf_init(data, (unsigned int)len);
@@ -1337,6 +1364,9 @@ static char *kuv_unsent(const char *head, size_t head_len, const char *body, siz
 
 static int kuv_writev_now(
     kuv_conn *c, const char *head, size_t head_len, const char *body, size_t body_len) {
+    if (head_len > UINT_MAX || body_len > UINT_MAX - head_len) {
+        return -1;
+    }
     uv_buf_t bufs[2];
     unsigned int nbufs = 0;
     if (head_len > 0) {

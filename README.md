@@ -13,6 +13,24 @@ compilation. It opened a path to native web applications written in a familiar,
 Ruby-like language, with C handling performance-sensitive networking and
 protocol work.
 
+## What Kiln is
+
+- [Spinel](https://github.com/matz/spinel) is the foundation: an ahead-of-time
+  compiled, Ruby-like language and runtime. Kiln uses it for application code,
+  memory management, scheduling, and calls between Ruby-like code and C.
+- Kiln is a web framework and HTTP runtime for building native Spinel
+  applications.
+- [libuv](https://github.com/libuv/libuv) provides the cross-platform event loop
+  and asynchronous network I/O used by Kiln's event server.
+- [picohttpparser](https://github.com/h2o/picohttpparser) parses HTTP request
+  headers with a small, focused C implementation.
+- [yyjson](https://github.com/ibireme/yyjson) handles JSON parsing and
+  generation through a fast C library.
+- [zlib-ng](https://github.com/zlib-ng/zlib-ng) provides gzip compression with
+  architecture-specific optimizations where available.
+- [OpenSSL](https://github.com/openssl/openssl) provides TLS. Kiln loads the
+  system OpenSSL library at runtime rather than bundling it.
+
 ## Ideas behind it
 
 | Project | What inspired Kiln |

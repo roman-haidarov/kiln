@@ -45,6 +45,11 @@ ok   NaN
 ok   Infinity
 ok   invalid UTF-8
 ok   arbitrary object
+ok   UTF-16 surrogate encoded as UTF-8
+ok   control characters use upper-case hex
+ok   Cyrillic, CJK, emoji and escapes in one string
+ok   a document past the scratch pool is written whole
+ok   the scratch pool is reused after a large document
 ok   circular structure
 -- media types
 ok   application/json

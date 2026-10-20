@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.0.7
+
+### Changed
+
+- JSON generation uses the vendored yyjson writer.
+- Vendored zlib-ng includes its x86-64 and arm64 SIMD code, selected at run time.
+- Pinned picohttpparser to v1.4 and added an SSE4.2 build selected at run time on x86-64.
+- The base backend decodes chunked bodies with the shared C decoder.
+- Oversized chunk sizes are answered with 413 on both backends.
+- Added `-DKILN_GENERIC` to build portable C only.
+
+### Fixed
+
+- Fixed `Payload#read(0)` on chunked bodies to return an empty string.
+- Made concurrent TLS context failures and error messages thread-safe.
+- Reject gzip and libuv buffers that exceed their supported length limits.
+- Keep failed gzip streams owned by their caller until close; destroy instead of pooling them.
+- Exercise TLS successful context lifecycles and compare generic/SSE4.2 Pico parsers in native CI.
+- Restore out-of-the-box `spin build` using portable native headers and generic fallbacks without trusted native build scripts; `ext/build.sh` retains SIMD compilation and runtime dispatch.
+- Reject writes after a finished gzip stream without repeatedly allocating output buffers, and reset finished state when a pooled compressor is reused.
+- Instrument the SSE4.2 parser in libFuzzer and add an end-to-end `spin new`/`spin add`/`spin build` CI smoke test.
+
 ## 0.0.6
 
 ### Added

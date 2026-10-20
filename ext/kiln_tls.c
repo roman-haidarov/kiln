@@ -103,7 +103,8 @@ static int ktls_loaded;
 static pthread_once_t ktls_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t ktls_lock = PTHREAD_MUTEX_INITIALIZER;
 static ktls_context ktls_contexts[KILN_TLS_MAX_CONTEXTS];
-static char ktls_error[512];
+static char ktls_load_error[512];
+static __thread char ktls_error[512];
 
 static const char *const ktls_ssl_names[] = {"libssl.so.3", "libssl.so.1.1", "libssl.so",
     "libssl.3.dylib", "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib",
@@ -145,7 +146,7 @@ static void ktls_bind(void *slot, void *ssl, void *crypto, const char *name, int
 static void ktls_load(void) {
     void *ssl = ktls_open("KILN_LIBSSL", ktls_ssl_names);
     if (!ssl) {
-        snprintf(ktls_error, sizeof ktls_error, "libssl not found (set KILN_LIBSSL)");
+        snprintf(ktls_load_error, sizeof ktls_load_error, "libssl not found (set KILN_LIBSSL)");
         return;
     }
     void *crypto = ktls_open("KILN_LIBCRYPTO", ktls_crypto_names);
@@ -188,7 +189,7 @@ static void ktls_load(void) {
     KTLS_BIND(err_string, "ERR_error_string_n");
     KTLS_BIND(err_clear, "ERR_clear_error");
     if (missing) {
-        snprintf(ktls_error, sizeof ktls_error, "libssl lacks OpenSSL 1.1.1 symbols");
+        snprintf(ktls_load_error, sizeof ktls_load_error, "libssl lacks OpenSSL 1.1.1 symbols");
         return;
     }
     ktls_loaded = 1;
@@ -196,7 +197,16 @@ static void ktls_load(void) {
 
 static int ktls_ready(void) {
     pthread_once(&ktls_once, ktls_load);
+    if (!ktls_loaded) {
+        snprintf(ktls_error, sizeof ktls_error, "%s", ktls_load_error);
+    }
     return ktls_loaded;
+}
+
+static void ktls_context_release_slot(ktls_context *context) {
+    pthread_mutex_lock(&ktls_lock);
+    context->in_use = 0;
+    pthread_mutex_unlock(&ktls_lock);
 }
 
 static long ktls_fail(const char *what) {
@@ -282,6 +292,9 @@ long kiln_tls_available(void) {
 }
 
 const char *kiln_tls_error_text(void) {
+    if (!ktls_error[0]) {
+        ktls_ready();
+    }
     sp_ffi_bin_len = (int)strlen(ktls_error);
     return ktls_error;
 }
@@ -308,28 +321,32 @@ long kiln_tls_context_new(const char *cert, const char *key, const char *ca, lon
     context->in_use = 1;
     pthread_mutex_unlock(&ktls_lock);
     if (ktls_alpn_wire(context, alpn) < 0) {
-        context->in_use = 0;
+        ktls_context_release_slot(context);
         snprintf(ktls_error, sizeof ktls_error, "invalid ALPN protocol list");
         return -1;
     }
     context->ctx = ktls.ctx_new(ktls.server_method());
     if (!context->ctx) {
-        context->in_use = 0;
+        ktls_context_release_slot(context);
         return ktls_fail("cannot create TLS context");
     }
     if (ktls_configure(context, cert, key, ca, verify, ciphers, suites, min_version) < 0) {
         ktls.ctx_free(context->ctx);
         context->ctx = NULL;
-        context->in_use = 0;
+        ktls_context_release_slot(context);
         return -1;
     }
     return index;
 }
 
 long kiln_tls_context_free(long index) {
-    if (index < 0 || index >= KILN_TLS_MAX_CONTEXTS || !ktls_contexts[index].in_use)
+    if (index < 0 || index >= KILN_TLS_MAX_CONTEXTS)
         return -1;
     pthread_mutex_lock(&ktls_lock);
+    if (!ktls_contexts[index].in_use) {
+        pthread_mutex_unlock(&ktls_lock);
+        return -1;
+    }
     ktls.ctx_free(ktls_contexts[index].ctx);
     ktls_contexts[index].ctx = NULL;
     ktls_contexts[index].in_use = 0;
@@ -338,13 +355,19 @@ long kiln_tls_context_free(long index) {
 }
 
 kiln_tls_conn *kiln_tls_conn_new(long context) {
-    if (!ktls_loaded || context < 0 || context >= KILN_TLS_MAX_CONTEXTS ||
-        !ktls_contexts[context].ctx)
+    if (context < 0 || context >= KILN_TLS_MAX_CONTEXTS)
         return NULL;
     kiln_tls_conn *conn = calloc(1, sizeof *conn);
     if (!conn)
         return NULL;
+    pthread_mutex_lock(&ktls_lock);
+    if (!ktls_contexts[context].in_use || !ktls_contexts[context].ctx) {
+        pthread_mutex_unlock(&ktls_lock);
+        free(conn);
+        return NULL;
+    }
     conn->ssl = ktls.ssl_new(ktls_contexts[context].ctx);
+    pthread_mutex_unlock(&ktls_lock);
     conn->rbio = ktls.bio_new(ktls.bio_mem());
     conn->wbio = ktls.bio_new(ktls.bio_mem());
     if (!conn->ssl || !conn->rbio || !conn->wbio) {

@@ -23,24 +23,37 @@ static int kiln_gz_level(sp_int level) {
     return (int)level;
 }
 
+typedef struct {
+    zng_stream z;
+    int level;
+    int failed;
+    int finished;
+} kiln_gz_stream;
+
 static zng_stream *kiln_gz_new(sp_int level) {
-    zng_stream *z = calloc(1, sizeof *z);
-    if (!z)
+    kiln_gz_stream *s = calloc(1, sizeof *s);
+    if (!s)
         return NULL;
-    if (zng_deflateInit2(z, kiln_gz_level(level), Z_DEFLATED, KILN_GZIP_WINDOW, KILN_GZIP_MEMORY,
+    s->level = kiln_gz_level(level);
+    if (zng_deflateInit2(&s->z, s->level, Z_DEFLATED, KILN_GZIP_WINDOW, KILN_GZIP_MEMORY,
             Z_DEFAULT_STRATEGY) != Z_OK) {
-        free(z);
+        free(s);
         return NULL;
     }
-    return z;
+    return &s->z;
 }
 
 static int kiln_gz_grow(kiln_gz_out *out, size_t want) {
     if (out->cap >= want)
         return 1;
     size_t cap = out->cap ? out->cap : 256;
-    while (cap < want)
+    while (cap < want) {
+        if (cap > UINT32_MAX / 2U) {
+            cap = want;
+            break;
+        }
         cap *= 2;
+    }
     char *next = realloc(out->p, cap);
     if (!next)
         return 0;
@@ -50,22 +63,36 @@ static int kiln_gz_grow(kiln_gz_out *out, size_t want) {
 }
 
 static int kiln_gz_run(zng_stream *z, const char *data, size_t len, int flush, kiln_gz_out *out) {
+    if (len > UINT32_MAX)
+        return 0;
+    unsigned long bound = zng_deflateBound(z, (unsigned long)len);
+    if (bound > UINT32_MAX - 64U)
+        return 0;
     z->next_in = (const uint8_t *)data;
     z->avail_in = (uint32_t)len;
-    if (!kiln_gz_grow(out, zng_deflateBound(z, (unsigned long)len) + 64))
+    if (!kiln_gz_grow(out, (size_t)bound + 64))
         return 0;
     for (;;) {
         z->next_out = (uint8_t *)out->p + out->len;
         z->avail_out = (uint32_t)(out->cap - out->len);
+        uint32_t before_in = z->avail_in;
+        uint32_t before_out = z->avail_out;
         int rc = zng_deflate(z, flush);
         out->len = out->cap - z->avail_out;
         if (rc == Z_STREAM_END)
             return 1;
         if (rc != Z_OK && rc != Z_BUF_ERROR)
             return 0;
+        if (rc == Z_BUF_ERROR && z->avail_out != 0)
+            return z->avail_in == 0 && flush != Z_FINISH;
         if (z->avail_in == 0 && z->avail_out != 0)
-            return 1;
-        if (!kiln_gz_grow(out, out->cap * 2))
+            return flush != Z_FINISH;
+        if (before_in == z->avail_in && before_out == z->avail_out && z->avail_out != 0)
+            return 0;
+        if (out->cap >= UINT32_MAX)
+            return 0;
+        size_t next = out->cap > UINT32_MAX / 2U ? UINT32_MAX : out->cap * 2;
+        if (!kiln_gz_grow(out, next))
             return 0;
     }
 }
@@ -91,8 +118,11 @@ static zng_stream *kiln_gz_take(sp_int level) {
     if (kiln_gz_idle_count[index] > 0)
         z = kiln_gz_idle[index][--kiln_gz_idle_count[index]];
     pthread_mutex_unlock(&kiln_gz_lock);
-    if (z && zng_deflateReset(z) == Z_OK)
+    if (z && zng_deflateReset(z) == Z_OK) {
+        ((kiln_gz_stream *)z)->finished = 0;
+        ((kiln_gz_stream *)z)->failed = 0;
         return z;
+    }
     if (z) {
         zng_deflateEnd(z);
         free(z);
@@ -101,6 +131,11 @@ static zng_stream *kiln_gz_take(sp_int level) {
 }
 
 static void kiln_gz_give(sp_int level, zng_stream *z) {
+    if (((kiln_gz_stream *)z)->failed) {
+        zng_deflateEnd(z);
+        free(z);
+        return;
+    }
     int index = kiln_gz_level(level);
     pthread_mutex_lock(&kiln_gz_lock);
     if (kiln_gz_idle_count[index] < KILN_GZIP_POOL) {
@@ -144,7 +179,15 @@ const char *kiln_gz_once(const char *src, sp_int level) {
     zng_stream *z = kiln_gz_take(level);
     if (!z)
         sp_raise_cls(KILN_GZIP_ERROR, "cannot start gzip");
+    if (len > UINT32_MAX) {
+        kiln_gz_give(level, z);
+        sp_raise_cls(KILN_GZIP_ERROR, "gzip input too large");
+    }
     size_t bound = (size_t)zng_deflateBound(z, (unsigned long)len);
+    if (bound > UINT32_MAX) {
+        kiln_gz_give(level, z);
+        sp_raise_cls(KILN_GZIP_ERROR, "gzip output too large");
+    }
     char *room = kiln_gz_room(bound);
     if (!room) {
         kiln_gz_give(level, z);
@@ -156,6 +199,8 @@ const char *kiln_gz_once(const char *src, sp_int level) {
     z->avail_out = (uint32_t)bound;
     int rc = zng_deflate(z, Z_FINISH);
     size_t produced = bound - z->avail_out;
+    if (rc != Z_STREAM_END)
+        ((kiln_gz_stream *)z)->failed = 1;
     kiln_gz_give(level, z);
     if (rc != Z_STREAM_END) {
         kiln_gz_trim();
@@ -177,7 +222,7 @@ static int kiln_gz_flush(sp_int mode) {
 }
 
 sp_int kiln_gz_open(sp_int level) {
-    return (sp_int)(intptr_t)kiln_gz_new(level);
+    return (sp_int)(intptr_t)kiln_gz_take(level);
 }
 
 const char *kiln_gz_push(sp_int handle, const char *src, sp_int mode) {
@@ -185,13 +230,22 @@ const char *kiln_gz_push(sp_int handle, const char *src, sp_int mode) {
     zng_stream *z = (zng_stream *)(intptr_t)handle;
     if (!z)
         sp_raise_cls(KILN_GZIP_ERROR, "gzip stream is closed");
+    if (((kiln_gz_stream *)z)->failed)
+        sp_raise_cls(KILN_GZIP_ERROR, "gzip stream failed");
+    if (((kiln_gz_stream *)z)->finished) {
+        ((kiln_gz_stream *)z)->failed = 1;
+        sp_raise_cls(KILN_GZIP_ERROR, "gzip stream finished");
+    }
     int flush = kiln_gz_flush(mode);
     size_t len = src ? sp_str_byte_len(src) : 0;
     kiln_gz_out out = {NULL, 0, 0};
     if (!kiln_gz_run(z, src ? src : "", len, flush, &out)) {
         free(out.p);
+        ((kiln_gz_stream *)z)->failed = 1;
         sp_raise_cls(KILN_GZIP_ERROR, "gzip failed");
     }
+    if (flush == Z_FINISH)
+        ((kiln_gz_stream *)z)->finished = 1;
     return kiln_gz_result(&out);
 }
 
@@ -199,7 +253,6 @@ sp_int kiln_gz_close(sp_int handle) {
     zng_stream *z = (zng_stream *)(intptr_t)handle;
     if (!z)
         return 0;
-    zng_deflateEnd(z);
-    free(z);
+    kiln_gz_give(((kiln_gz_stream *)z)->level, z);
     return 1;
 }

@@ -20,6 +20,9 @@ module Kiln
       CRLF = HttpSyntax::CRLF
       HEADER_END = "\r\n\r\n".b.freeze
       CONTINUE = "HTTP/1.1 100 Continue\r\n\r\n".b.freeze
+      CHUNK_END = 1
+      CHUNK_TOO_BIG = -2
+      CHUNK_HUGE = -3
 
       Slot = Struct.new(:thread, :sock, :deadline, :state, :done, :flying, :hidx, :outbox, :shard)
 

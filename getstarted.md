@@ -10,7 +10,9 @@ overview, see [README.md](README.md).
 spin add kiln --path ../kiln
 ```
 
-`spin build` compiles `ext/` with the C compiler from the environment.
+`spin build` compiles a portable native build without an additional trust step.
+The optimized manual build (`ext/build.sh`) retains runtime-dispatched SIMD for
+zlib-ng and picohttpparser. Both build paths are checked separately in CI.
 
 ## Server
 
@@ -119,6 +121,8 @@ app/
   main.rb
   controllers/users.rb
   routers/users.rb
+  controllers/posts.rb
+  routers/posts.rb
 ```
 
 `app/controllers/users.rb`:
@@ -160,9 +164,11 @@ end
 ```ruby
 require "kiln"
 require "routers/users"
+require "routers/posts"
 
 router = Kiln::Router.new
 router.configure(Routers::Users)
+router.configure(Routers::Posts)
 router.seal!
 log = Kiln::Log.new($stdout)
 server = Kiln::Server.new(router, nil, log: log, host: "127.0.0.1", port: 8080)
@@ -184,6 +190,24 @@ spinel -I app app/main.rb -o app_server
 `resources` accepts `index`, `show`, `create`, `update` (PUT and PATCH), and
 `destroy`. The router module maps each action to a handler. `configure` lets
 `main.rb` compose router modules without containing their route definitions.
+For a larger application, put each API area in its own router file. Require each
+module in `main.rb`, configure all of them on the same `Kiln::Router`, then call
+`seal!` once after the last module. Each module adds its routes to that shared
+router; the application still starts one server with the composed router.
+
+For example, `app/routers/posts.rb` can follow the same pattern:
+
+```ruby
+require "controllers/posts"
+
+module Routers
+  module Posts
+    def self.configure(router)
+      router.get("/posts", ->(ctx) { Controllers::Posts.new(ctx).index })
+    end
+  end
+end
+```
 
 ## Controllers
 
@@ -282,7 +306,8 @@ handler is behind, so a slow handler holds at most a few hundred KiB per
 connection. `limit:` on a route or a scope replaces `max_body` for its routes:
 a declared `Content-Length` over the limit gets 413 before the handler runs,
 and a chunked body that grows past it raises `Kiln::PayloadTooLarge` (413)
-when it is read. `ctx.req.limit_body(n)` lowers it inside a handler. A body
+when it is read. A chunk size too large to represent gets 413 as well, on both
+backends. `ctx.req.limit_body(n)` lowers it inside a handler. A body
 that stalls for `read_timeout` raises `Kiln::RequestTimeout` (408).
 `Expect: 100-continue` is answered when the handler first reads the body; a
 handler that answers without reading never sends it. An unread body up to 256
@@ -368,7 +393,12 @@ once, so SSE is not held back. Compressed streams use chunked framing and do
 not keep a declared `Content-Length`. It sets `Vary: Accept-Encoding`, weakens
 a strong `ETag` and drops `Accept-Ranges`, and leaves 204, 206, 304, responses
 that already have a `Content-Encoding`, and `Cache-Control: no-transform`
-alone. Compression uses a vendored zlib-ng.
+alone. Compression uses a vendored zlib-ng; on x86-64 (SSE2 to AVX2,
+PCLMULQDQ) and arm64 (NEON, CRC32, PMULL with EOR3) it picks the fastest
+routines the CPU supports at run time. Building the extension with
+`KILN_EXT_CFLAGS="-O2 -DKILN_GENERIC"` keeps the portable C routines only, for
+compression and for request parsing; Valgrind needs that build, because it
+does not implement the SSE4.2 string instructions picohttpparser uses.
 
 Do not compress responses that combine secrets with reflected user input over
 HTTPS. Set `Cache-Control: no-transform` on a response to disable this

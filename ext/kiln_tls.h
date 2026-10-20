@@ -5,11 +5,22 @@
 
 #define KILN_TLS_MAX_CONTEXTS 16
 
-enum { KILN_TLS_WANT = 0, KILN_TLS_DONE = 1, KILN_TLS_FAIL = -1, KILN_TLS_CLOSED = -2,
-       KILN_TLS_WANT_WRITE = 2, KILN_TLS_WANT_READ = 3 };
+enum {
+    KILN_TLS_WANT = 0,
+    KILN_TLS_DONE = 1,
+    KILN_TLS_FAIL = -1,
+    KILN_TLS_CLOSED = -2,
+    KILN_TLS_WANT_WRITE = 2,
+    KILN_TLS_WANT_READ = 3
+};
 
 typedef struct kiln_tls_conn kiln_tls_conn;
 
+long kiln_tls_available(void);
+const char *kiln_tls_error_text(void);
+long kiln_tls_context_new(const char *cert, const char *key, const char *ca, long verify,
+    const char *ciphers, const char *suites, long min_version, const char *alpn);
+long kiln_tls_context_free(long index);
 kiln_tls_conn *kiln_tls_conn_new(long context);
 void kiln_tls_conn_free(kiln_tls_conn *conn);
 int kiln_tls_feed(kiln_tls_conn *conn, const char *data, size_t len);

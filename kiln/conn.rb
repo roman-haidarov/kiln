@@ -3,6 +3,7 @@ module Kiln
     EMPTY = ''.b.freeze
     BAD_BODY = -400
     BIG_TRAILERS = -431
+    TOO_LARGE = -413
 
     attr_reader :slot, :gen, :want
 
@@ -116,6 +117,7 @@ module Kiln
       return nil if @eof
       raise BadRequest, 'malformed request body' if @error == BAD_BODY
       raise TrailersTooLarge, 'trailers too large' if @error == BIG_TRAILERS
+      raise PayloadTooLarge, 'payload too large' if @error == TOO_LARGE
       raise ClientGone, 'client went away' if @error != 0 || @halted
 
       EMPTY

@@ -120,6 +120,32 @@ check 'q rejects more than three decimal places', !Kiln::Compress.accepts_gzip?(
 check 'the last valid q parameter wins', Kiln::Compress.accepts_gzip?('gzip;q=0;q=1')
 raises('levels are validated', ArgumentError, 'levels') { Kiln::Compress.new(->(_ctx) {}, level: 0) }
 
+failed_handle = Kiln::Gzip.open_handle(1)
+Kiln::Gzip.push(failed_handle, 'finished', 2)
+raises('a completed gzip stream cannot be written again', Kiln::CompressError, 'gzip stream finished') do
+  Kiln::Gzip.push(failed_handle, 'unexpected', 0)
+end
+raises('a failed gzip stream cannot resume', Kiln::CompressError, 'gzip stream failed') do
+  Kiln::Gzip.push(failed_handle, 'unexpected', 0)
+end
+Kiln::Gzip.close_handle(failed_handle)
+first_handle = Kiln::Gzip.open_handle(1)
+second_handle = Kiln::Gzip.open_handle(1)
+check 'a failed gzip stream cannot enter the pool twice', first_handle != second_handle
+Kiln::Gzip.close_handle(first_handle)
+Kiln::Gzip.close_handle(second_handle)
+reused_handle = Kiln::Gzip.open_handle(1)
+reused = Kiln::Gzip.push(reused_handle, 'pool reuse', 2)
+check 'a pooled finished gzip stream resets before reuse', Zlib.gunzip(reused) == 'pool reuse'
+Kiln::Gzip.close_handle(reused_handle)
+empty_handle = Kiln::Gzip.open_handle(1)
+empty_start = Kiln::Gzip.push(empty_handle, '', 0)
+empty_flush = Kiln::Gzip.push(empty_handle, '', 1)
+empty_end = Kiln::Gzip.push(empty_handle, 'after flush', 2)
+check 'an empty gzip write and flush do not fail',
+      Zlib.gunzip(empty_start + empty_flush + empty_end) == 'after flush'
+Kiln::Gzip.close_handle(empty_handle)
+
 puts '-- bodies'
 app = build_app
 packed = gz(app, '/text')

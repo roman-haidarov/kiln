@@ -56,6 +56,11 @@ router.post('/same', ->(ctx) { ctx.res.text(ctx.req.body == UPLOAD ? 'same' : "d
             limit: 8 << 20)
 router.post('/small', ->(ctx) { ctx.res.text(ctx.req.body == SMALL ? 'small' : 'other') })
 router.post('/default', ->(ctx) { ctx.res.text("len=#{ctx.req.body.bytesize}") })
+router.post('/zero', lambda { |ctx|
+  payload = ctx.req.payload
+  first = payload.read(0)
+  ctx.res.text("zero=#{first.bytesize} len=#{payload.read_all.bytesize}")
+})
 router.post('/tiny', ->(ctx) { ctx.res.text('tiny') }, limit: 16)
 router.post('/reject', ->(ctx) { ctx.res.text('denied', status: 401) })
 router.post('/slow', lambda { |ctx|
@@ -133,6 +138,15 @@ router.seal!
                          "Connection: close\r\n\r\n" \
                          "zz\r\nab\r\n0\r\n\r\n")
   check "#{label}: a malformed chunk size -> 400", reply.start_with?('HTTP/1.1 400 ')
+
+  reply = exchange(port, "POST /zero HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" \
+                         "3\r\nabc\r\n0\r\n\r\n")
+  check "#{label}: reading zero bytes of a chunked body returns an empty string", reply.end_with?('zero=0 len=3')
+
+  reply = exchange(port, "POST /default HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n" \
+                         "Connection: close\r\n\r\n" \
+                         "FFFFFFFFFFFFFFFFFFFFFFFF\r\n")
+  check "#{label}: a chunk size past every limit -> 413", reply.start_with?('HTTP/1.1 413 ')
 
   pipelined = exchange(port, "POST /default HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" \
                              "3\r\nabc\r\n0\r\n\r\nGET /nothing HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")

@@ -39,7 +39,8 @@ enum {
     KILN_UV_CHUNK_MORE = 0,
     KILN_UV_CHUNK_END = 1,
     KILN_UV_CHUNK_BAD = -1,
-    KILN_UV_CHUNK_TOO_BIG = -2
+    KILN_UV_CHUNK_TOO_BIG = -2,
+    KILN_UV_CHUNK_HUGE = -3
 };
 
 typedef struct {
@@ -52,6 +53,8 @@ typedef struct {
 void kiln_uv_chunk_init(kiln_uv_chunk_state *state);
 int kiln_uv_chunk_decode(kiln_uv_chunk_state *state, const char *in, size_t in_len, char *out,
     size_t out_cap, size_t *consumed, size_t *produced);
+
+const char *kiln_chunk_step(const char *data, long total, long start, long max, int64_t *state);
 
 int kiln_uv_parse_request(const char *data, size_t len, long max_body, int64_t *scan, long cap,
     kiln_uv_parse_result *result);
