@@ -38,6 +38,7 @@ client = lambda do |port, deadline|
       end
       header = buffer.slice!(0, boundary + 4)
       raise "unexpected response: #{header.lines.first}" unless header.start_with?('HTTP/1.1 200')
+
       length = Integer(header[/^content-length:\s*(\d+)/i, 1])
       buffer << socket.readpartial(65_536) while buffer.bytesize < length
       buffer.slice!(0, length)
@@ -69,12 +70,23 @@ run = lambda do |binary|
   input.close
   stderr = input.read
   raise stderr unless $?.success?
-  { requests: counts.sum, seconds: elapsed, rps: counts.sum / elapsed, cpu_us: cpu / counts.sum * 1_000_000, shutdown: shutdown }
+
+  {
+    requests: counts.sum,
+    seconds: elapsed,
+    rps: counts.sum / elapsed,
+    cpu_us: cpu / counts.sum * 1_000_000,
+    shutdown: shutdown
+  }
 end
 
 rows = []
 runs.times do |index|
-  pairs = index.even? ? [['baseline', baseline], ['candidate', candidate]] : [['candidate', candidate], ['baseline', baseline]]
+  pairs = if index.even?
+            [['baseline', baseline], ['candidate', candidate]]
+          else
+            [['candidate', candidate], ['baseline', baseline]]
+          end
   pairs.each do |name, binary|
     row = run.call(binary).merge(name: name, run: index)
     rows << row
@@ -87,7 +99,11 @@ median = lambda do |values|
   sorted.length.odd? ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2.0
 end
 summary = %w[rps cpu_us].to_h do |key|
-  [key, %w[baseline candidate].to_h { |name| [name, median.call(rows.filter_map { |row| row[key] if row[:name] == name })] }]
+  values = %w[baseline candidate].to_h do |name|
+    selected = rows.filter_map { |row| row[key] if row[:name] == name }
+    [name, median.call(selected)]
+  end
+  [key, values]
 end
 FileUtils.mkdir_p(File.dirname(output))
 File.write(output, JSON.pretty_generate(workers: ENV['SPINEL_WORKERS'], rows: rows, summary: summary) + "\n")

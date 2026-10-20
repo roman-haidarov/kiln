@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG SPINEL_REF=9922a2c74ee1128162abf48b645575f0c8cc254d
+ARG SPINEL_REF=519280dc9edd136186c0b0767fb73766b6e45aba
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \

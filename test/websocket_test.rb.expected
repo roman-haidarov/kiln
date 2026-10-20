@@ -1,0 +1,47 @@
+ok   event: the handshake answers 101 with the RFC 6455 accept key
+ok   event: close validates code and UTF-8 and truncates on a character boundary
+ok   event: a text message is echoed
+ok   event: a binary message is echoed
+ok   event: a ping inside a fragmented message is answered first
+ok   event: fragments are joined into one message
+ok   event: a close frame is answered with the same code
+ok   event: the handler sees the client's close code
+ok   event: client-only close code 1010 is acknowledged as 1000
+ok   event: the handler retains the peer's original close code 1010
+ok   event: an unmasked client frame closes with 1002
+ok   event: invalid UTF-8 text closes with 1007
+ok   event: a close reason that is not UTF-8 is answered with 1007
+ok   event: a message over max_message closes with 1009
+ok   event: a frame sent with the handshake is not lost
+ok   event: ping_interval sends pings
+ok   event: a client that never answers pings is dropped
+ok   event: mismatched PONG does not satisfy heartbeat
+ok   event: a plain GET to a websocket route gets 426
+ok   event: a malformed key gets 400
+ok   event: a custom upgrade hands the connection to the handler
+ok   event: hijack writes the raw response
+ok   event: shutdown closes open websockets
+ok   base: the handshake answers 101 with the RFC 6455 accept key
+ok   base: close validates code and UTF-8 and truncates on a character boundary
+ok   base: a text message is echoed
+ok   base: a binary message is echoed
+ok   base: a ping inside a fragmented message is answered first
+ok   base: fragments are joined into one message
+ok   base: a close frame is answered with the same code
+ok   base: the handler sees the client's close code
+ok   base: client-only close code 1010 is acknowledged as 1000
+ok   base: the handler retains the peer's original close code 1010
+ok   base: an unmasked client frame closes with 1002
+ok   base: invalid UTF-8 text closes with 1007
+ok   base: a close reason that is not UTF-8 is answered with 1007
+ok   base: a message over max_message closes with 1009
+ok   base: a frame sent with the handshake is not lost
+ok   base: ping_interval sends pings
+ok   base: a client that never answers pings is dropped
+ok   base: mismatched PONG does not satisfy heartbeat
+ok   base: a plain GET to a websocket route gets 426
+ok   base: a malformed key gets 400
+ok   base: a custom upgrade hands the connection to the handler
+ok   base: hijack writes the raw response
+ok   base: shutdown closes open websockets
+ok   Testing.call reports the 101 of a websocket route

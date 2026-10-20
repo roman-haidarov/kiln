@@ -27,7 +27,7 @@ rescue Kiln::WorkerLost
   :lost
 end
 wait_for { retry_pool.alive_workers == 1 && retry_pool.spawn_failures == 2 && retry_pool.respawned == 1 }
-check 'spawn failure retries and restores worker', r == :lost && retry_pool.respawned == 1 && (retry_pool.run { 42 })
+check 'spawn failure retries and restores worker', r == :lost && retry_pool.respawned == 1 && retry_pool.run { 42 }
 retry_pool.shutdown(grace: 0.1)
 
 class GatedSpawn < Kiln::CpuPool

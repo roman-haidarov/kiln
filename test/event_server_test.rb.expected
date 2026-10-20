@@ -1,4 +1,9 @@
+ok   a streamed request can be claimed only once across threads
 ok   event server preserves the process SIGPIPE handler
+ok   absolute-form target is routed and supplies its authority as Host
+ok   OPTIONS * is accepted by the event backend
+ok   non-OPTIONS asterisk target is rejected
+ok   CONNECT receives 501 on the event backend
 ok   inline: 200 with body and close
 ok   inline: 16 pipelined requests -> 16 responses
 ok   inline: Content-Length body reaches the handler
@@ -7,7 +12,8 @@ ok   inline: HEAD keeps Content-Length and sends no body
 ok   inline: two large pipelined responses arrive whole and in order
 ok   inline: malformed request -> 400
 ok   inline: missing Host on HTTP/1.1 -> 400
-ok   inline: Transfer-Encoding -> 501
+ok   inline: chunked request body reaches the handler
+ok   inline: a transfer coding other than chunked -> 501
 ok   inline: handler error -> 500
 ok   inline: unknown route -> 404
 ok   inline: request after Connection: close is not executed

@@ -15,6 +15,20 @@ PAUSED = Queue.new
 SHUTDOWN_CALLS = Queue.new
 HANG_STARTED = Queue.new
 log = Kiln::Log.new(StringIO.new)
+claim_job = Kiln::Server::Event::Job.new(nil, 0, 0, nil, false, Mutex.new)
+claim_gate = Queue.new
+claim_results = Queue.new
+claim_threads = Array.new(2) do
+  Thread.new do
+    claim_gate.pop
+    claim_results << claim_job.claim!
+  end
+end
+2.times { claim_gate << true }
+claim_values = Array.new(2) { claim_results.pop }
+claim_threads.each(&:join)
+check 'a streamed request can be claimed only once across threads', claim_values.count(true) == 1
+
 router = Kiln::Router.new
                      .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
                      .post('/echo', ->(ctx) { ctx.res.text("len=#{ctx.req.body.bytesize}") })
@@ -50,6 +64,7 @@ router = Kiln::Router.new
                                      Kernel.sleep 1.5
                                      ctx.res.text("late\n")
                                    })
+                     .get('/absolute', ->(ctx) { ctx.res.text("#{ctx.req.path}|#{ctx.req.headers['host']}") })
                      .get('/noncooperative', lambda do |ctx|
                        Kernel.sleep 0.3
                        ctx.res.headers['Content-Encoding'] = 'gzip'
@@ -72,6 +87,16 @@ check 'event server preserves the process SIGPIPE handler',
 inline = Kiln::Server::Event.new(router, nil, log: log, port: 0, request_timeout: 0.2)
 inline.start
 ip = inline.port
+absolute = exchange(ip, "GET http://example.test/absolute HTTP/1.1\r\nHost: ignored.test\r\nConnection: close\r\n\r\n")
+check 'absolute-form target is routed and supplies its authority as Host',
+      absolute.end_with?('/absolute|example.test')
+star = exchange(ip, "OPTIONS * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+check 'OPTIONS * is accepted by the event backend', star.start_with?('HTTP/1.1 204 ')
+check 'non-OPTIONS asterisk target is rejected',
+      exchange(ip, "GET * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").start_with?('HTTP/1.1 400 ')
+check 'CONNECT receives 501 on the event backend',
+      exchange(ip, "CONNECT example.test:443 HTTP/1.1\r\nHost: example.test\r\nConnection: close\r\n\r\n")
+        .start_with?('HTTP/1.1 501 ')
 o = exchange(ip, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 check 'inline: 200 with body and close',
       o.start_with?('HTTP/1.1 200 ') && o.end_with?("Hello, World!\n") && o.include?('Connection: close')
@@ -96,10 +121,14 @@ check 'inline: two large pipelined responses arrive whole and in order',
 check 'inline: malformed request -> 400', exchange(ip, "GARBAGE\r\n\r\n").start_with?('HTTP/1.1 400 ')
 check 'inline: missing Host on HTTP/1.1 -> 400',
       exchange(ip, "GET / HTTP/1.1\r\nConnection: close\r\n\r\n").start_with?('HTTP/1.1 400 ')
-check 'inline: Transfer-Encoding -> 501',
+check 'inline: chunked request body reaches the handler',
+      exchange(ip,
+               "POST /echo HTTP/1.1\r\nHost: x\r\nConnection: close\r\n" \
+               "Transfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n3;x=1\r\nabc\r\n0\r\n\r\n").end_with?('len=8')
+check 'inline: a transfer coding other than chunked -> 501',
       exchange(ip,
                "POST /echo HTTP/1.1\r\nHost: x\r\n" \
-               "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n").start_with?('HTTP/1.1 501 ')
+               "Transfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n").start_with?('HTTP/1.1 501 ')
 check 'inline: handler error -> 500',
       exchange(ip, "GET /boom HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").start_with?('HTTP/1.1 500 ')
 check 'inline: unknown route -> 404',

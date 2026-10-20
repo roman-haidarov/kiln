@@ -1,4 +1,4 @@
 #include "uv_defines.h"
 #if defined(__linux__) || defined(__APPLE__)
-#include "../libuv/dl.c"
+#include "../libuv/src/unix/dl.c"
 #endif

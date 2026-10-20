@@ -15,7 +15,8 @@ module Kiln
     GET = 'GET'.freeze
     UNSET = 1 << 62
 
-    Route = Struct.new(:verb, :names, :handler, :dynamic, :glob, :seq)
+    Route = Struct.new(:verb, :names, :handler, :dynamic, :glob, :seq, :limit)
+    NO_LIMIT = -1
 
     class Node
       attr_reader :static, :param, :glob, :routes, :first
@@ -61,6 +62,7 @@ module Kiln
       @verbs = [GET].drop(1)
       @scope = [GET].drop(1)
       @wraps = [->(nxt) { nxt }].drop(1)
+      @limits = [NO_LIMIT].drop(1)
       @sealed = false
       @redirect_slash = trailing_slash == :redirect
       @not_found = nil
@@ -77,19 +79,23 @@ module Kiln
       self
     end
 
-    def namespace(prefix, wrap: nil, &blk) = scope(prefix, wrap:, &blk)
+    def namespace(prefix, wrap: nil, limit: nil, &blk) = scope(prefix, wrap:, limit:, &blk)
 
-    def scope(prefix, wrap: nil)
+    def scope(prefix, wrap: nil, limit: nil)
       demand_open
+      check_limit(limit)
       depth = @scope.size
       wraps = @wraps.size
+      limits = @limits.size
       @scope.concat(PathSyntax.compile(prefix))
       @wraps << wrap if wrap
+      @limits << limit if limit
       yield self
       self
     ensure
       @scope.slice!(depth, @scope.size - depth) if depth
       @wraps.slice!(wraps, @wraps.size - wraps) if wraps
+      @limits.slice!(limits, @limits.size - limits) if limits
     end
 
     def resources(path, handlers, only: nil)
@@ -108,17 +114,17 @@ module Kiln
         next unless actions.include?(action)
 
         route_path = member ? "#{path}/:id" : path
-        add(verb, route_path, handlers[action])
+        add(verb, route_path, handlers[action], nil)
       end
       self
     end
 
-    def get(path, handler) = add('GET', path, handler)
-    def post(path, handler) = add('POST', path, handler)
-    def put(path, handler) = add('PUT', path, handler)
-    def patch(path, handler) = add('PATCH', path, handler)
-    def delete(path, handler) = add('DELETE', path, handler)
-    def options(path, handler) = add('OPTIONS', path, handler)
+    def get(path, handler, limit: nil) = add('GET', path, handler, limit)
+    def post(path, handler, limit: nil) = add('POST', path, handler, limit)
+    def put(path, handler, limit: nil) = add('PUT', path, handler, limit)
+    def patch(path, handler, limit: nil) = add('PATCH', path, handler, limit)
+    def delete(path, handler, limit: nil) = add('DELETE', path, handler, limit)
+    def options(path, handler, limit: nil) = add('OPTIONS', path, handler, limit)
 
     def not_found(handler)
       demand_open
@@ -149,7 +155,7 @@ module Kiln
       known = @fast[path]
       if known
         route = known[verb]
-        return route.handler.call(ctx) if route
+        return enter(route, ctx) if route
       end
 
       segs = PathSyntax.segments(path)
@@ -259,7 +265,24 @@ module Kiln
 
     def invoke(route, ctx, segs)
       ctx.req.params = params(route, segs) if route.dynamic
+      enter(route, ctx)
+    end
+
+    def enter(route, ctx)
+      limit = route.limit
+      return route.handler.call(ctx) if limit == NO_LIMIT
+
+      req = ctx.req
+      return ctx.res.text("payload too large\n", status: 413) if (req.content_length || 0) > limit
+
+      req.limit_body(limit)
       route.handler.call(ctx)
+    end
+
+    def check_limit(limit)
+      return if limit.nil? || (limit.is_a?(Integer) && limit >= 0)
+
+      raise ArgumentError, 'limit must be a non-negative Integer'
     end
 
     def params(route, segs)
@@ -349,14 +372,16 @@ module Kiln
       raise FrozenError, 'router is sealed' if @sealed
     end
 
-    def add(verb, path, handler)
+    def add(verb, path, handler, limit = nil)
       demand_open
+      check_limit(limit)
+      limit = @limits.last if limit.nil? && !@limits.empty?
       segments = @scope + PathSyntax.compile(path)
       seq = @seq
       node, names, glob = insert(segments, seq)
       refuse_duplicate(node, verb, path)
       dynamic = variable_route?(names, glob)
-      node.add(Route.new(verb, names, wrap(handler), dynamic, glob, seq))
+      node.add(Route.new(verb, names, wrap(handler), dynamic, glob, seq, limit.nil? ? NO_LIMIT : limit))
       @seq = seq + 1
       index_route(verb, segments, names, glob)
       self

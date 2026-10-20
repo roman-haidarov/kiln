@@ -1,0 +1,9 @@
+ok   event: a server started without SIGPIPE ignored is listening
+ok   event: clients that reset mid-response do not kill the process
+ok   event: the process was still alive until it was told to stop
+ok   lanes: a server started without SIGPIPE ignored is listening
+ok   lanes: clients that reset mid-response do not kill the process
+ok   lanes: the process was still alive until it was told to stop
+ok   base: a server started without SIGPIPE ignored is listening
+ok   base: clients that reset mid-response do not kill the process
+ok   base: the process was still alive until it was told to stop

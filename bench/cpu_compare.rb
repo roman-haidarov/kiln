@@ -3,7 +3,8 @@ require 'json'
 require 'open3'
 
 baseline, candidate = ARGV.shift(2)
-abort('usage: cpu_compare.rb BASELINE CANDIDATE [--runs N] [--iterations N] [--output PATH]') unless baseline && candidate
+abort('usage: cpu_compare.rb BASELINE CANDIDATE [--runs N] [--iterations N] [--output PATH]') \
+  unless baseline && candidate
 runs = 3
 iterations = 300_000
 output = File.join(ENV.fetch('KILN_VALIDATION_DIR', '/tmp/kiln-validation'), 'cpu-compare.json')
@@ -27,7 +28,12 @@ runs.times do |index|
     stdout, stderr, status = Open3.capture3(binary, iterations.to_s)
     abort(stderr) unless status.success?
     values = stdout.split.to_h { |field| field.split('=', 2) }
-    row = { name: name, run: index, iterations: Integer(values.fetch('iterations')), seconds: Float(values.fetch('seconds')) }
+    row = {
+      name: name,
+      run: index,
+      iterations: Integer(values.fetch('iterations')),
+      seconds: Float(values.fetch('seconds'))
+    }
     rows << row
     puts JSON.generate(row)
   end

@@ -1,4 +1,4 @@
 #include "uv_defines.h"
 #if defined(__linux__) || defined(__APPLE__)
-#include "../libuv/threadpool.c"
+#include "../libuv/src/threadpool.c"
 #endif

@@ -1,4 +1,4 @@
 #include "uv_defines.h"
 #if defined(__APPLE__)
-#include "../libuv/darwin.c"
+#include "../libuv/src/unix/darwin.c"
 #endif

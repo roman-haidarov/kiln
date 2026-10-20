@@ -25,6 +25,8 @@ if [ "${CI_NATIVE_C:-0}" = 1 ]; then
   printf '== native C analysis, fuzzing, TSan and coverage\n'
   KILN_NATIVE_CC="$native_compiler" KILN_C_ARTIFACTS="$artifacts/c-native" \
     ci/c-native.sh all
+  printf '== libuv 1.53 embedding and lifecycle smoke\n'
+  KILN_NATIVE_CC="$native_compiler" ci/libuv-embedding.sh
 fi
 
 printf '== test suite, SPINEL_WORKERS=1\n'

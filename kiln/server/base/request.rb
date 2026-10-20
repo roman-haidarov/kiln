@@ -3,14 +3,16 @@ module Kiln
     class Base
       private
 
-      def read_request(sock, buf, scan)
+      def read_request(sock, buf, scan, first)
+        deadline = Kiln.now + @header_timeout
         if buf.empty?
           return nil if @draining
 
-          status = wait_io(sock, buf, Kiln.now + @read_timeout)
+          status = wait_io(sock, buf, first ? deadline : Kiln.now + @keep_alive_timeout)
           return nil unless status == :ok
+
+          deadline = Kiln.now + @header_timeout unless first
         end
-        deadline = Kiln.now + @request_timeout
 
         len = find_marker(sock, buf, deadline, HEADER_END, MAX_HEADER, :too_big)
         return HttpSyntax.error_tuple(len) if len.is_a?(Symbol)
@@ -23,14 +25,39 @@ module Kiln
         target = check_head(version, verb, target, headers)
         return target if target.is_a?(Array)
 
-        length = HttpSyntax.content_length(headers, @max_body)
+        length = HttpSyntax.content_length(headers, HttpSyntax::MAX_LENGTH)
         return HttpSyntax.error_tuple(length, version: version) if length.is_a?(Symbol)
 
-        body, err = read_body(sock, buf, deadline, headers, length, version)
-        return HttpSyntax.error_tuple(err, version: version) if err
-        return HttpSyntax.error_tuple(:timeout, version: version) if Kiln.now > deadline
+        streamed = stream_source(sock, buf, headers, length, version)
+        return HttpSyntax.error_tuple(streamed, version: version) if streamed.is_a?(Symbol)
 
-        [:req, Request.new(verb, target, headers, body, http_version: version), deadline]
+        if streamed
+          payload = Payload.new(streamed, length, @max_body)
+          req = Request.new(verb, target, headers, EMPTY_BODY, http_version: version, payload: payload)
+          return [:req, req, Kiln.now + @request_timeout]
+        end
+        body, err = read_body(sock, buf, Kiln.now + @read_timeout, headers, length, version)
+        return HttpSyntax.error_tuple(err, version: version) if err
+
+        [:req, Request.new(verb, target, headers, body, http_version: version), Kiln.now + @request_timeout]
+      end
+
+      def stream_source(sock, buf, headers, length, version)
+        coding = headers['transfer-encoding']
+        if coding
+          codings = coding.split(',', -1).map { |item| item.strip.downcase }
+          return :bad if codings.any?(&:empty?) || codings.last != 'chunked' || codings.count('chunked') > 1
+          return :unsupported_te if codings.size > 1
+
+          return BodySource.new(self, sock, buf, nil, continue?(headers, version))
+        end
+        return nil if length.nil? || length <= @buffer_body
+
+        BodySource.new(self, sock, buf, length, continue?(headers, version))
+      end
+
+      def continue?(headers, version)
+        version == '1.1' && headers['expect'].to_s.split(',').any? { |part| part.strip.casecmp?('100-continue') }
       end
 
       def check_head(version, verb, target, headers)
@@ -47,7 +74,8 @@ module Kiln
         host = headers['host']
         missing_host = host.nil?
         empty_host = !missing_host && host.empty?
-        return HttpSyntax.error_tuple(:bad, version: version) if version == '1.1' && (missing_host || (!absolute && empty_host))
+        invalid_host = missing_host || (!absolute && empty_host)
+        return HttpSyntax.error_tuple(:bad, version: version) if version == '1.1' && invalid_host
         return HttpSyntax.error_tuple(:bad, version: version) if host && !empty_host && !HttpNative.host?(host)
 
         if absolute
@@ -56,7 +84,9 @@ module Kiln
 
           headers['host'] = authority
         end
-        return HttpSyntax.error_tuple(:bad, version: version) if headers.key?('transfer-encoding') && (version == '1.0' || headers.key?('content-length'))
+        invalid_framing = headers.key?('transfer-encoding') &&
+                          (version == '1.0' || headers.key?('content-length'))
+        return HttpSyntax.error_tuple(:bad, version: version) if invalid_framing
 
         expect = headers['expect']
         if expect && !expect.empty? && expect.strip.downcase != '100-continue'
@@ -66,15 +96,124 @@ module Kiln
         target
       end
 
-      def read_body(sock, buf, deadline, headers, len, version)
-        if headers.key?('transfer-encoding')
-          codings = headers['transfer-encoding'].split(',', -1).map { |coding| coding.strip.downcase }
-          return [nil, :bad] if codings.any?(&:empty?) || codings.last != 'chunked' || codings.count('chunked') > 1
-          return [nil, :unsupported_te] if codings.size > 1
+      public
 
-          maybe_continue(sock, headers, buf.empty?, version, buf)
-          return read_chunked(sock, buf, deadline)
+      def body_pull(src, max)
+        return nil if src.state == :done
+
+        sock = src.sock
+        buf = src.buf
+        send_continue(sock, buf) if src.expect
+        src.expect = false
+        deadline = pull_deadline
+        return pull_length(src, sock, buf, max, deadline) if src.length
+
+        pull_chunked(src, sock, buf, max, deadline)
+      end
+
+      private
+
+      def pull_deadline
+        limit = Kiln.now + @read_timeout
+        request = Kiln.deadline
+        return limit unless request.positive?
+        raise DeadlineExceeded, 'deadline exceeded' if request <= Kiln.now
+
+        request < limit ? request : limit
+      end
+
+      def send_continue(sock, buf)
+        outbox = buf.outbox
+        limit = Kiln.now + 1.0
+        raise ClientGone, 'pipelined responses could not be sent' if outbox && !flush_outbox(sock, outbox, limit)
+        raise ClientGone, '100 Continue could not be sent' unless write_all(sock, CONTINUE, limit)
+      end
+
+      def body_wait(sock, buf, deadline)
+        status = wait_io(sock, buf, deadline)
+        return if status == :ok
+
+        request_expired = Kiln.deadline.positive? && Kiln.now >= Kiln.deadline
+        raise DeadlineExceeded, 'deadline exceeded' if status == :timeout && request_expired
+        raise RequestTimeout, 'request body timeout' if status == :timeout
+
+        raise ClientGone, 'client went away while sending the body'
+      end
+
+      def pull_length(src, sock, buf, max, deadline)
+        left = src.remaining
+        if left.zero?
+          src.state = :done
+          return nil
         end
+        body_wait(sock, buf, deadline) if buf.empty?
+        take = buf.size
+        take = left if left < take
+        take = max if max < take
+        src.remaining = left - take
+        src.state = :done if src.remaining.zero?
+        buf.take(take)
+      end
+
+      def pull_chunked(src, sock, buf, max, deadline)
+        loop do
+          case src.state
+          when :size
+            return nil if chunk_size(src, sock, buf, deadline)
+          when :data
+            body_wait(sock, buf, deadline) if buf.empty?
+            take = buf.size
+            take = src.chunk_left if src.chunk_left < take
+            take = max if max < take
+            src.chunk_left -= take
+            src.state = :crlf if src.chunk_left.zero?
+            return buf.take(take)
+          else
+            chunk_end(src, sock, buf, deadline)
+          end
+        end
+      end
+
+      def chunk_size(src, sock, buf, deadline)
+        line, err = read_line(sock, buf, deadline, 4096)
+        raise_body(err) if err
+        size = HttpNative.kiln_chunk_size(line, line.bytesize, HttpSyntax::MAX_LENGTH)
+        raise BadRequest, 'malformed chunk size' if size == -1
+        raise PayloadTooLarge, 'payload too large' if size == -2
+
+        src.excess += line.bytesize + 2 - 16 - (2 * (size > HttpSyntax::CHUNK_EXCESS ? HttpSyntax::CHUNK_EXCESS : size))
+        src.excess = 0 if src.excess.negative?
+        raise BadRequest, 'chunk overhead too large' if src.excess > HttpSyntax::CHUNK_EXCESS
+
+        if size.zero?
+          err = read_trailers(sock, buf, deadline)
+          raise_body(err) if err
+          src.state = :done
+          return true
+        end
+        src.chunk_left = size
+        src.state = :data
+        false
+      end
+
+      def chunk_end(src, sock, buf, deadline)
+        err = read_exact(sock, buf, deadline, 2)
+        raise_body(err) if err
+        raise BadRequest, 'malformed chunk' unless buf.byte_at(0) == 13 && buf.byte_at(1) == 10
+
+        buf.skip(2)
+        src.state = :size
+      end
+
+      def raise_body(err)
+        raise RequestTimeout, 'request body timeout' if err == :timeout
+        raise PayloadTooLarge, 'payload too large' if err == :too_long
+        raise TrailersTooLarge, 'trailers too large' if err == :too_big
+
+        raise BadRequest, 'malformed request body'
+      end
+
+      def read_body(sock, buf, deadline, headers, len, version)
         len ||= 0
         return [EMPTY_BODY, nil] if len.zero?
 
@@ -86,10 +225,7 @@ module Kiln
       end
 
       def maybe_continue(sock, headers, pending, version, buf)
-        return unless pending && version == '1.1'
-
-        tokens = headers['expect'].to_s.split(',').map { |part| part.strip.downcase }
-        return unless tokens.include?('100-continue')
+        return unless pending && continue?(headers, version)
 
         outbox = buf.outbox
         continue_deadline = Kiln.now + 1.0
@@ -97,37 +233,6 @@ module Kiln
           raise IOError, 'pipelined responses could not be sent'
         end
         raise IOError, '100 Continue could not be sent' unless write_all(sock, CONTINUE, continue_deadline)
-      end
-
-      def read_chunked(sock, buf, deadline)
-        body = (+'').b
-        excess = 0
-        loop do
-          line, err = read_line(sock, buf, deadline, 4096)
-          return [nil, err] if err
-
-          line_size = line.bytesize
-          body_size = body.bytesize
-          size = HttpNative.kiln_chunk_size(line, line_size, @max_body - body_size)
-          return [nil, :bad] if size == -1
-          return [nil, :too_long] if size == -2
-
-          excess += line_size + 2 - 16 - (2 * size)
-          excess = 0 if excess.negative?
-          return [nil, :bad] if excess > HttpSyntax::CHUNK_EXCESS
-          return [nil, :too_long] if size > @max_body || body_size + size > @max_body
-
-          if size.zero?
-            err = read_trailers(sock, buf, deadline)
-            return err ? [nil, err] : [body, nil]
-          end
-          err = read_exact(sock, buf, deadline, size + 2)
-          return [nil, err] if err
-          return [nil, :bad] unless buf.byte_at(size) == 13 && buf.byte_at(size + 1) == 10
-
-          body << buf.take(size)
-          buf.skip(2)
-        end
       end
 
       def read_trailers(sock, buf, deadline)

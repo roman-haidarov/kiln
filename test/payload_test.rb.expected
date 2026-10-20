@@ -1,0 +1,51 @@
+ok   event: a 4 MiB body is read in chunks
+ok   event: a chunked 4 MiB body arrives intact
+ok   event: a slow reader gets the whole body
+ok   event: a body above buffer_body still reads as req.body
+ok   event: a route without a limit keeps max_body
+ok   event: a chunked body past max_body is refused while it is read
+ok   event: a route limit refuses a buffered body before the handler
+ok   event: a scope limit applies to its routes
+ok   event: 100 Continue is sent when the handler reads a streamed body
+ok   event: a handler that refuses an Expect body never sees 100 Continue
+ok   event: a malformed chunk size -> 400
+ok   event: a request pipelined after a chunked body is served in order
+ok   event lanes: a 4 MiB body is read in chunks
+ok   event lanes: a chunked 4 MiB body arrives intact
+ok   event lanes: a slow reader gets the whole body
+ok   event lanes: a body above buffer_body still reads as req.body
+ok   event lanes: a route without a limit keeps max_body
+ok   event lanes: a chunked body past max_body is refused while it is read
+ok   event lanes: a route limit refuses a buffered body before the handler
+ok   event lanes: a scope limit applies to its routes
+ok   event lanes: 100 Continue is sent when the handler reads a streamed body
+ok   event lanes: a handler that refuses an Expect body never sees 100 Continue
+ok   event lanes: a malformed chunk size -> 400
+ok   event lanes: a request pipelined after a chunked body is served in order
+ok   base: a 4 MiB body is read in chunks
+ok   base: a chunked 4 MiB body arrives intact
+ok   base: a slow reader gets the whole body
+ok   base: a body above buffer_body still reads as req.body
+ok   base: a route without a limit keeps max_body
+ok   base: a chunked body past max_body is refused while it is read
+ok   base: a route limit refuses a buffered body before the handler
+ok   base: a scope limit applies to its routes
+ok   base: 100 Continue is sent when the handler reads a streamed body
+ok   base: a handler that refuses an Expect body never sees 100 Continue
+ok   base: a malformed chunk size -> 400
+ok   base: a request pipelined after a chunked body is served in order
+ok   event: a handler waiting on a stalled body /wait gets 504 at its deadline
+ok   event: the server keeps serving after /wait expired
+ok   event: a handler waiting on a stalled body /deaf gets 504 at its deadline
+ok   event: the server keeps serving after /deaf expired
+ok   event lanes: a handler waiting on a stalled body /wait gets 504 at its deadline
+ok   event lanes: the server keeps serving after /wait expired
+ok   event lanes: a handler waiting on a stalled body /deaf gets 504 at its deadline
+ok   event lanes: the server keeps serving after /deaf expired
+ok   base: a handler waiting on a stalled body /wait gets 504 at its deadline
+ok   base: the server keeps serving after /wait expired
+ok   base: a handler waiting on a stalled body /deaf gets 504 at its deadline
+ok   base: the server keeps serving after /deaf expired
+ok   a buffered payload reads in pieces
+ok   a buffered payload enforces its limit
+ok   Testing.call serves payload routes

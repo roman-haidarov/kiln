@@ -2,15 +2,21 @@ module Kiln
   module Uv
     ffi_lib 'dl'
     ffi_lib 'pthread'
-    ffi_func :kiln_uv_listen, %i[str long long long long long], :long
+    ffi_func :kiln_uv_configure, %i[int_array long], :long
+    ffi_func :kiln_uv_adopt, %i[long long], :long
+    ffi_func :kiln_uv_start, [], :long
+    ffi_func :kiln_uv_abandon, [], :long
     ffi_func :kiln_uv_error_text, [:long], :binstr
     ffi_func :kiln_uv_running, [], :long
-    ffi_func :kiln_uv_port, [], :long
+    ffi_func :kiln_uv_port, [:long], :long
     ffi_func :kiln_uv_fd, [], :long
     ffi_func :kiln_uv_poll, [], :long
+    ffi_func :kiln_uv_settle, [], :long
+    ffi_func :kiln_uv_timeout, [], :long
     ffi_func :kiln_uv_next, %i[int_array long int_array], :binstr
     ffi_func :kiln_uv_send, %i[long long str long str long long], :long
     ffi_func :kiln_uv_abort, %i[long long], :long
+    ffi_func :kiln_uv_end, %i[long long], :long
     ffi_func :kiln_uv_part, %i[long long str long], :long
     ffi_func :kiln_uv_backlog, %i[long long], :long
     ffi_func :kiln_uv_flush, [], :long
@@ -20,7 +26,12 @@ module Kiln
     ffi_func :kiln_uv_drain, [], :long
     ffi_func :kiln_uv_busy, [], :long
     ffi_func :kiln_uv_aborted, [], :long
+    ffi_func :kiln_uv_handshakes, [], :long
     ffi_func :kiln_uv_closes_after, %i[long long long], :long
+    ffi_func :kiln_uv_body_take, %i[long long long int_array], :binstr
+    ffi_func :kiln_uv_body_finish, %i[long long long], :long
+    ffi_func :kiln_uv_tunnel, %i[long long str long], :long
+    ffi_func :kiln_uv_tls_alpn, %i[long long], :binstr
     ffi_func :kiln_uv_sigpipe_enter, [], :long
     ffi_func :kiln_uv_sigpipe_leave, [], :long
   end
@@ -32,9 +43,25 @@ module Kiln
       EMPTY_BODY = ''.b.freeze
       LIVENESS_EVERY = 1.0
       HEAD = 'HEAD'.freeze
+      META = 8
+      STREAMED = 1
+      TLS_FLAG = 8
+      TAKE_DATA = 1
+      TAKE_EOF = 2
+      TAKE_WAIT = 0
       BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\nContent-Length: 12\r\nConnection: close\r\n\r\nbad request\n".b.freeze
 
-      attr_reader :port, :killed
+      Job = Struct.new(:ctx, :slot, :gen, :thread, :claimed, :claim_lock) do
+        def claim!
+          claim_lock.synchronize do
+            return false if claimed
+
+            self.claimed = true
+          end
+        end
+      end
+
+      attr_reader :port, :killed, :ports
 
       def initialize(config, app = nil, **options)
         unless config.is_a?(EventOptions)
@@ -50,16 +77,27 @@ module Kiln
         @inline_busy = false
         @pump_stopping = false
         @uv_closed = false
-        @host = config.host
+        @listen = Listen.resolve(config.listen, config.host, config.port, config.tls)
         @port = config.port
+        @ports = []
+        @owned_paths = []
+        @reuse_port = config.reuse_port
         @max_conns = config.max_conns
         @max_streams = config.max_streams
         @max_body = config.max_body
-        @idle_ms = (config.read_timeout * 1000).to_i
-        @write_ms = (config.write_timeout * 1000).to_i
-        @write_ms = 1 if @write_ms < 1
+        @buffer_body = config.buffer_body.nil? ? config.max_body : config.buffer_body
+        @read_timeout = config.read_timeout
+        @settings = [config.max_conns, @buffer_body, millis(config.header_timeout || config.read_timeout),
+                     millis(config.keep_alive_timeout || config.read_timeout), millis(config.read_timeout),
+                     millis(config.write_timeout), millis(config.client_disconnect_timeout),
+                     config.tcp_nodelay ? 1 : 0, config.max_connection_rate, config.backlog]
+        @keep_alive = (config.keep_alive_timeout || config.read_timeout).positive?
         @write_timeout = config.write_timeout
         @outlets = {}
+        @inlets = {}
+        @thirsty = {}
+        @wants = Queue.new
+        @take_state = [0]
         @backlogged = {}
         @ready = Queue.new
         @liveness_at = 0.0
@@ -68,9 +106,10 @@ module Kiln
         @lanes = []
         @workers = []
         @worker_lock = Mutex.new
-        @retired = []
+        @retired = [Thread.current].drop(1)
         @active = Array.new(@handlers)
         @active_locks = Array.new(@handlers) { Mutex.new }
+        @uploads = {}
         @done = Queue.new
         @seq = 0
         @inflight = 0
@@ -89,10 +128,8 @@ module Kiln
       def start
         raise IOError, 'another Kiln::Server::Event is already running in this process' if Uv.kiln_uv_running == 1
 
-        rc = Uv.kiln_uv_listen(@host, @port, @max_conns, @max_body, @idle_ms, @write_ms)
-        raise IOError, "kiln event server listen failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
-
-        @port = Uv.kiln_uv_port
+        Sock.kiln_sock_ignore_sigpipe
+        open_listeners
         @poller = IO.for_fd(Uv.kiln_uv_fd, autoclose: false)
         @handlers.times do |index|
           @lanes << Queue.new
@@ -140,11 +177,17 @@ module Kiln
         stop_threads(threads, Kiln.now + pause)
         wake_pump
         stop_pump(Kiln.now + pause)
+        release_listeners
         left + @aborted_taken + @aborted_count
       end
 
       def stream_ready(outlet)
         @ready << outlet
+        nudge_pump
+      end
+
+      def inlet_wanted(inlet)
+        @wants << inlet
         nudge_pump
       end
 
@@ -155,21 +198,62 @@ module Kiln
       def late = 0
       def free_slots = @max_conns - connections
       def handling = @inflight
+      def handshakes = Uv.kiln_uv_handshakes
 
       private
 
+      def millis(seconds) = (seconds * 1000).to_i
+
+      def open_listeners
+        rc = Uv.kiln_uv_configure(@settings, @settings.size)
+        raise IOError, "kiln event server setup failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
+
+        begin
+          @listen.each { |spec| adopt(spec) }
+          rc = Uv.kiln_uv_start
+          raise IOError, "kiln event server listen failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
+        rescue Exception
+          Uv.kiln_uv_abandon
+          release_listeners
+          raise
+        end
+        @ports = Array.new(@listen.size) { |index| Uv.kiln_uv_port(index) }
+        @port = Kiln.first_port(@ports)
+      end
+
+      def adopt(spec)
+        fd = spec.open(@settings[9], @reuse_port)
+        @owned_paths << Sock.own_path(spec.path) if spec.owns_path?
+        tls = spec.tls
+        context = tls.nil? ? -1 : tls.context
+        index = Uv.kiln_uv_adopt(fd, context)
+        if index.negative?
+          Sock.kiln_sock_close(fd) if spec.kind != :fd
+          raise IOError, "kiln event server cannot use #{spec}: #{Uv.kiln_uv_error_text(index)} (#{index})"
+        end
+      end
+
+      def release_listeners
+        @owned_paths.each { |record| Sock.unlink_owned(record) }
+        @owned_paths.clear
+        @listen.each { |spec| spec.tls&.release }
+      end
+
       def pump
         scan = Array.new(HttpNative::CAP, 0)
-        meta = Array.new(5, 0)
+        meta = Array.new(META, 0)
         drained = false
         until @stop && workers_stopped?
           begin
             if @draining && !drained
               Uv.kiln_uv_drain
+              @inlets.each_value(&:nudge)
               drained = true
             end
             Uv.kiln_uv_poll
             handled = drain_done + pump_streams + expire_handlers
+            handled += pump_inlets unless @inlets.empty?
+            handled += expire_uploads unless @uploads.empty?
             loop do
               src = Uv.kiln_uv_next(scan, HttpNative::CAP, meta)
               break if src.empty?
@@ -185,7 +269,7 @@ module Kiln
             @dispatch_ready = true if @cutoff
             Uv.kiln_uv_flush
             @quiet = drained && @inflight.zero? && Uv.kiln_uv_busy.zero?
-            park(drained ? 0.01 : handler_wait) if handled.zero?
+            park(drained ? 0.01 : handler_wait) if handled.zero? && Uv.kiln_uv_settle.zero?
           rescue DeadlineExceeded
             nil
           end
@@ -196,6 +280,8 @@ module Kiln
       ensure
         begin
           @outlets.each_value(&:halt)
+          @inlets.each_value(&:halt)
+          @uploads.each_value { |job| job.thread&.kill }
           @wake_lock.synchronize { @pump_stopping = true }
           @lanes.each(&:close)
           @workers.each(&:kill)
@@ -210,6 +296,12 @@ module Kiln
             end
           end
         end
+      end
+
+      def living(threads)
+        kept = [Thread.current].drop(1)
+        threads.each { |thread| kept << thread if thread.alive? }
+        kept
       end
 
       def workers_stopped?
@@ -237,6 +329,14 @@ module Kiln
           end
           index += 1
         end
+        return wait if @uploads.empty?
+
+        @uploads.each_value do |upload|
+          left = upload.ctx.deadline - now
+          return 0 if left <= 0
+
+          wait = left if left < wait
+        end
         wait
       end
 
@@ -256,20 +356,39 @@ module Kiln
             @worker_lock.synchronize do
               worker = @workers[index]
               worker.kill if worker.alive?
+              @retired = living(@retired)
               @retired << worker
-              @retired.select!(&:alive?)
               @workers[index] = start_worker(index) unless @stop
             end
             ctx, slot, gen = job
-            timed = Context.new(ctx.req, Response.new, ctx.app, ctx.id, ctx.deadline)
-            timed.res.text("deadline exceeded\n", status: 504)
-            @done << [timed, slot, gen]
+            @done << [timed_out(ctx), slot, gen]
             @killed += 1
             expired += 1
           end
           index += 1
         end
         expired
+      end
+
+      def expire_uploads
+        now = Kiln.now
+        expired = 0
+        @uploads.values.each do |job|
+          next unless job.ctx.deadline <= now && job.claim!
+
+          job.thread&.kill
+          @uploads.delete(job.slot)
+          @done << [timed_out(job.ctx), job.slot, job.gen]
+          @killed += 1
+          expired += 1
+        end
+        expired
+      end
+
+      def timed_out(ctx)
+        timed = Context.new(ctx.req, Response.new, ctx.app, ctx.id, ctx.deadline)
+        timed.res.text("deadline exceeded\n", status: 504)
+        timed
       end
 
       def wake_pump
@@ -288,11 +407,14 @@ module Kiln
       def wakeable? = !@uv_closed && !@pump_stopping && @pump&.alive? == true
 
       def park(timeout)
+        uv_timeout = Uv.kiln_uv_timeout
+        libuv_wait = uv_timeout * 0.001
+        timeout = libuv_wait if uv_timeout >= 0 && libuv_wait < timeout
         @wake_lock.synchronize do
           @parked = true
           @wake_at = Kiln.now + timeout
         end
-        IO.select([@poller], nil, nil, timeout) if @done.empty? && @ready.empty?
+        IO.select([@poller], nil, nil, timeout) if @done.empty? && @ready.empty? && (@inlets.empty? || @wants.empty?)
       ensure
         @wake_lock.synchronize { @parked = false }
       end
@@ -344,29 +466,25 @@ module Kiln
         parsed = HttpNative.build(src, meta[0], scan)
         slot = meta[3]
         gen = meta[4]
-        bad = parsed.nil?
-        unless bad
-          version, verb, target, headers = parsed
-          host = headers['host']
-          missing_host = host.nil?
-          empty_host = !missing_host && host.empty?
-          bad = (version == '1.1' && (missing_host || empty_host)) ||
-                (host && !empty_host && !HttpNative.host?(host)) ||
-                !target.start_with?('/')
-        end
-        return reply_bad(meta) if bad
+        return reply_bad(meta) if parsed.nil?
 
-        length = meta[2]
-        body = length.positive? ? src.byteslice(meta[1], length) : EMPTY_BODY
-        req = Request.new(verb, target, headers, body, http_version: version)
+        version, verb, target, headers = parsed
+        target, status = check_event_head(version, verb, target, headers)
+        return reply_bad(meta) if status == 400
+        return reply_error(meta, status, version) if status.positive?
+
+        flags = meta[5]
+        streamed = flags.anybits?(STREAMED)
+        req = build_request(src, meta, flags, version, verb, target, headers)
         @seq += 1
         ctx = Context.new(req, Response.new, @app, @seq, Kiln.now + @request_timeout)
+        @inflight += 1
         if @handlers.positive?
-          @inflight += 1
           @lanes[slot % @handlers] << [ctx, slot, gen]
           return 0
         end
-        @inflight += 1
+        return spawn_upload(ctx, slot, gen) if streamed
+
         begin
           @wake_lock.synchronize { @inline_busy = true }
           begin
@@ -382,6 +500,75 @@ module Kiln
         ensure
           @inflight -= 1
         end
+      end
+
+      def check_event_head(version, verb, target, headers)
+        return [nil, 501] if verb == 'CONNECT'
+
+        absolute = target.match?(HttpSyntax::ABSOLUTE_FORM)
+        if target == '*'
+          return [nil, 400] unless verb == 'OPTIONS'
+        elsif !target.start_with?('/') && !absolute
+          return [nil, 400]
+        end
+        host = headers['host']
+        missing_host = host.nil?
+        empty_host = !missing_host && host.empty?
+        return [nil, 400] if version == '1.1' && (missing_host || (!absolute && empty_host))
+        return [nil, 400] if host && !empty_host && !HttpNative.host?(host)
+
+        if absolute
+          target, authority = HttpSyntax.absolute_target(target)
+          return [nil, 400] unless target
+
+          headers['host'] = authority
+        end
+        [target, 0]
+      end
+
+      def reply_error(meta, status, version)
+        _code, message = HttpSyntax::ERRORS.fetch(:not_implemented)
+        body = "#{message}\n".b
+        response = Response.new
+        response.text(body, status: status)
+        head = Response.build_head(status, response.headers, body.bytesize, false, version: version)
+        Uv.kiln_uv_send(meta[3], meta[4], head, head.bytesize, body, body.bytesize, 1)
+      end
+
+      def build_request(src, meta, flags, version, verb, target, headers)
+        slot = meta[3]
+        gen = meta[4]
+        scheme = Request::HTTP
+        alpn = Request::NO_PROTOCOL
+        if flags.anybits?(TLS_FLAG)
+          scheme = Request::HTTPS
+          alpn = Uv.kiln_uv_tls_alpn(slot, gen)
+        end
+        unless flags.anybits?(STREAMED)
+          length = meta[2]
+          body = length.positive? ? src.byteslice(meta[1], length) : EMPTY_BODY
+          return Request.new(verb, target, headers, body, http_version: version, scheme:, alpn:)
+        end
+
+        inlet = Inlet.new(self, slot, gen, @read_timeout)
+        @inlets[slot] = inlet
+        declared = meta[6]
+        payload = Payload.new(inlet, declared.negative? ? nil : declared, @max_body)
+        Request.new(verb, target, headers, EMPTY_BODY, http_version: version, payload: payload, scheme:, alpn:)
+      end
+
+      def spawn_upload(ctx, slot, gen)
+        job = Job.new(ctx, slot, gen, nil, false, Mutex.new)
+        @uploads[slot] = job
+        job.thread = Thread.new do
+          Thread.current.report_on_exception = false
+          run(ctx) if Kiln.now < ctx.deadline
+          if job.claim!
+            @done << [Kiln.now >= ctx.deadline ? fallback_context(ctx, 504, "deadline exceeded\n") : ctx, slot, gen]
+            nudge_pump
+          end
+        end
+        0
       end
 
       def work(lane, index)
@@ -410,11 +597,17 @@ module Kiln
         count = 0
         until @done.empty?
           ctx, slot, gen = @done.pop
+          forget_upload(slot, gen) unless @uploads.empty?
           deliver(ctx, slot, gen)
           @inflight -= 1
           count += 1
         end
         count
+      end
+
+      def forget_upload(slot, gen)
+        upload = @uploads[slot]
+        @uploads.delete(slot) if upload && upload.gen == gen
       end
 
       def run(ctx)
@@ -429,16 +622,35 @@ module Kiln
         end
       end
 
+      def settle_body(ctx, slot, gen)
+        return 0 if @inlets.empty?
+
+        inlet = @inlets[slot]
+        if inlet && inlet.gen == gen
+          @inlets.delete(slot)
+          @thirsty.delete(slot)
+          inlet.halt
+        end
+        req = ctx.req
+        return 0 unless req.streamed?
+
+        Uv.kiln_uv_body_finish(slot, gen, req.payload.failed? ? 1 : 0)
+      end
+
       def deliver(ctx, slot, gen)
         outlet = @outlets[slot]
         return outlet.hold_back(ctx) if outlet && outlet.gen == gen
+
+        unread = settle_body(ctx, slot, gen)
         return Uv.kiln_uv_send(slot, gen, EMPTY_BODY, 0, EMPTY_BODY, 0, 1) if ctx.gone
 
         req = ctx.req
-        version = req.http_version
-        keep = HttpSyntax.persistent?(version, req.headers['connection']) &&
-               Uv.kiln_uv_closes_after(slot, gen, @draining ? 1 : 0).zero?
         res = ctx.res
+        return open_tunnel(ctx, slot, gen) if Response.tunnels?(res)
+
+        version = req.http_version
+        keep = unread.zero? && HttpSyntax.persistent?(version, req.headers['connection']) &&
+               Uv.kiln_uv_closes_after(slot, gen, @draining ? 1 : 0).zero?
         return open_stream(ctx, slot, gen, keep) if Response.streams?(res)
 
         raw_status = res.status
@@ -447,6 +659,41 @@ module Kiln
         head = Response.build_head(raw_status, res.headers, payload.bytesize, keep, version: version)
         payload = EMPTY_BODY if req.verb == HEAD || Response.no_body?(status)
         Uv.kiln_uv_send(slot, gen, head, head.bytesize, payload, payload.bytesize, keep ? 0 : 1)
+      end
+
+      def open_tunnel(ctx, slot, gen)
+        return deliver(fallback_context(ctx, 503, "too many streams\n"), slot, gen) if @outlets.size >= @max_streams
+        return deliver(fallback_context(ctx, 503, "shutting down\n"), slot, gen) if @draining
+
+        res = ctx.res
+        head = res.upgrade_head
+        return Uv.kiln_uv_abort(slot, gen) if Uv.kiln_uv_tunnel(slot, gen, head, head.bytesize).negative?
+
+        outlet = Outlet.new(self, slot, gen, false, false)
+        outlet.tunnel = true
+        inlet = Inlet.new(self, slot, gen, @read_timeout)
+        @inlets[slot] = inlet
+        @outlets[slot] = outlet
+        @inflight += 1
+        body = res.tunnel_body
+        id = ctx.id
+        outlet.thread = Thread.new { run_tunnel(outlet, inlet, body, id) }
+        0
+      end
+
+      def run_tunnel(outlet, inlet, body, id)
+        Thread.current[:request_id] = id
+        failed = true
+        body.call(Tunnel.new(inlet, outlet, @write_timeout))
+        failed = false
+      rescue ClientGone
+        nil
+      rescue Exception => err
+        raise err if Kiln.unwind?(err)
+
+        @log.error("upgrade #{err.class}: #{err.message}")
+      ensure
+        outlet.complete(failed)
       end
 
       def open_stream(ctx, slot, gen, keep)
@@ -500,6 +747,33 @@ module Kiln
                    outlet.chunked, length)
       end
 
+      def pump_inlets
+        until @wants.empty?
+          inlet = @wants.pop
+          current = @inlets[inlet.slot]
+          @thirsty[inlet.slot] = inlet if current.equal?(inlet)
+        end
+        return 0 if @thirsty.empty?
+
+        count = 0
+        @thirsty.values.each do |inlet|
+          data = Uv.kiln_uv_body_take(inlet.slot, inlet.gen, inlet.want, @take_state)
+          state = @take_state[0]
+          next if state == TAKE_WAIT
+
+          @thirsty.delete(inlet.slot)
+          if state == TAKE_DATA
+            inlet.offer(data)
+          elsif state == TAKE_EOF
+            inlet.finish
+          else
+            inlet.fail_with(state)
+          end
+          count += 1
+        end
+        count
+      end
+
       def pump_streams
         count = 0
         until @ready.empty?
@@ -548,6 +822,15 @@ module Kiln
         @outlets.delete(slot)
         @backlogged.delete(slot)
         @inflight -= 1
+        if outlet.tunnel
+          inlet = @inlets[slot]
+          if inlet && inlet.gen == gen
+            @inlets.delete(slot)
+            @thirsty.delete(slot)
+            inlet.halt
+          end
+          return Uv.kiln_uv_end(slot, gen)
+        end
         broken = failed || outlet.gone?
         send_ending(outlet, broken)
         outlet.deferred&.each { |ctx| deliver(ctx, slot, gen) } unless broken
@@ -586,7 +869,7 @@ module Kiln
       HIGH_WATER = 256 * 1024
 
       attr_reader :slot, :gen, :keep, :chunked, :deferred
-      attr_accessor :thread, :ending
+      attr_accessor :thread, :ending, :tunnel
 
       def initialize(server, slot, gen, keep, chunked)
         @server = server
@@ -605,6 +888,7 @@ module Kiln
         @flagged = false
         @deferred = nil
         @thread = nil
+        @tunnel = false
         @ending = Stream::TERMINATOR
       end
 

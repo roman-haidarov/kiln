@@ -1,12 +1,12 @@
-require "open3"
+require 'open3'
 
 source = DATA.read
 path = File.join(__dir__, ".differential-#{Process.pid}.mjs")
-wasm = ENV["LLHTTP_WASM"]
-ENV["LLHTTP_WASM"] = File.expand_path(wasm) if wasm && !wasm.start_with?("/")
+wasm = ENV['LLHTTP_WASM']
+ENV['LLHTTP_WASM'] = File.expand_path(wasm) if wasm && !wasm.start_with?('/')
 File.write(path, source)
 begin
-  stdout, stderr, status = Open3.capture3("node", path, *ARGV)
+  stdout, stderr, status = Open3.capture3('node', path, *ARGV)
   $stdout.write(stdout)
   $stderr.write(stderr)
   exit(status.exitstatus)

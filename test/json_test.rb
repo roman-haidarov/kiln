@@ -28,8 +28,8 @@ end
 puts '-- parse'
 doc = Kiln::Json.parse('{"s":"x\u00e9\n","i":-3,"f":2.5,"t":true,"n":null,"a":[1,[2,{}]],"o":{"k":"v"}}')
 check 'object with every value type', doc['s'] == "x\u00e9\n" && doc['i'] == -3 && doc['f'] == 2.5 &&
-                                       doc['t'] == true && doc['n'].nil? && doc['a'] == [1, [2, {}]] &&
-                                       doc['o'] == { 'k' => 'v' }
+                                      doc['t'] == true && doc['n'].nil? && doc['a'] == [1, [2, {}]] &&
+                                      doc['o'] == { 'k' => 'v' }
 check 'keys are strings', doc.keys.first == 's'
 check 'top-level scalar', Kiln::Json.parse('42') == 42 && Kiln::Json.parse('"x"') == 'x'
 check 'integer past int64 is a Bignum', Kiln::Json.parse('123456789012345678901234') == 123_456_789_012_345_678_901_234
@@ -61,7 +61,7 @@ puts '-- generate'
 check 'scalars', Kiln::Json.generate(nil) == 'null' && Kiln::Json.generate(true) == 'true' &&
                  Kiln::Json.generate(-7) == '-7' && Kiln::Json.generate('x') == '"x"'
 check 'float formatting', Kiln::Json.generate([0.1, 2.5, 1.0, -0.0, 1e20, 1.5e-7, 1e22]) ==
-                         '[0.1,2.5,1.0,-0.0,100000000000000000000.0,1.5e-7,1e22]'
+                          '[0.1,2.5,1.0,-0.0,100000000000000000000.0,1.5e-7,1e22]'
 floats = [0.1, 1.0 / 3, 123_456.789, 2.2250738585072014e-308, 1.7976931348623157e308]
 check 'floats parse back exactly', Kiln::Json.parse(Kiln::Json.generate(floats)) == floats
 check 'Bignum', Kiln::Json.generate(2**70) == '1180591620717411303424'
@@ -84,7 +84,7 @@ headers_box = Kiln::Headers.new
 headers_box['Allow'] = 'GET'
 check 'header value in a Hash literal', Kiln::Json.generate({ 'allow' => headers_box['Allow'] }) == '{"allow":"GET"}'
 check 'empty containers', Kiln::Json.generate({ 'a' => [], 'b' => {} }) == '{"a":[],"b":{}}'
-sample = { 'users' => [{ 'id' => 1, 'name' => "Ann \"A\"", 'tags' => %w[a б], 'score' => 9.75, 'admin' => false,
+sample = { 'users' => [{ 'id' => 1, 'name' => 'Ann "A"', 'tags' => %w[a б], 'score' => 9.75, 'admin' => false,
                          'boss' => nil }], 'total' => 1 }
 check 'round trip', Kiln::Json.parse(Kiln::Json.generate(sample)) == sample
 raises('NaN', Kiln::JsonGenerateError, 'NaN') { Kiln::Json.generate([Float::NAN]) }

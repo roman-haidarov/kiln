@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SPINEL_REF: 9922a2c74ee1128162abf48b645575f0c8cc254d
+  SPINEL_REF: 519280dc9edd136186c0b0767fb73766b6e45aba
   SPINEL_WORKERS: 1
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
       - name: Restore Homebrew downloads
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/homebrew-cache
+          path: ${{ runner.temp }}/homebrew-cache/downloads
           key: homebrew-llvm-${{ runner.os }}-${{ runner.arch }}-${{ steps.llvm-cache.outputs.fingerprint }}
           restore-keys: |
             homebrew-llvm-${{ runner.os }}-${{ runner.arch }}-
@@ -72,6 +72,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/kiln-ci"
           SPINEL="$RUNNER_TEMP/spinel-install/bin/spinel" \
+          SPINEL_CC="cc -Wno-nullability-completeness" \
           SPINEL_WORKERS=1 \
           CI_NATIVE_C=1 \
           KILN_NATIVE_CC="$(brew --prefix llvm)/bin/clang" \

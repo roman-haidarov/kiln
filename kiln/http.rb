@@ -24,10 +24,14 @@ module Kiln
   class Request
     EMPTY_PARAMS = {}.freeze
 
-    attr_reader :verb, :path, :query, :headers, :body, :http_version
+    HTTPS = 'https'.freeze
+    HTTP = 'http'.freeze
+    NO_PROTOCOL = ''.freeze
+
+    attr_reader :verb, :path, :query, :headers, :http_version
     attr_accessor :params
 
-    def initialize(verb, target, headers, body, http_version: '1.1')
+    def initialize(verb, target, headers, body, http_version: '1.1', payload: nil, scheme: HTTP, alpn: NO_PROTOCOL)
       @verb = verb
       text = target.to_s
       cut = text.byteindex('?')
@@ -35,8 +39,45 @@ module Kiln
       @query = cut ? text.byteslice(cut + 1, text.bytesize - cut - 1) : ''
       @headers = headers
       @body = body
+      @payload = payload
       @http_version = http_version == '1.0' ? '1.0' : '1.1'
       @params = EMPTY_PARAMS
+      @alpn = scheme == HTTPS ? alpn : nil
+      @json_nesting = -1
+    end
+
+    def body
+      payload = @payload
+      return @body if payload.nil? || !payload.streamed? || payload.complete?
+
+      @body = payload.read_all
+    end
+
+    def payload = @payload ||= Payload.buffered(@body.to_s, nil)
+
+    def content_length
+      payload = @payload
+      return payload.length if payload&.streamed?
+
+      @body.to_s.bytesize
+    end
+
+    def limit_body(limit)
+      raise PayloadTooLarge, 'payload too large' if (content_length || 0) > limit
+
+      @payload.limit = limit if streamed?
+      self
+    end
+    def streamed? = !@payload.nil? && @payload.streamed?
+    def tls? = !@alpn.nil?
+    def scheme = @alpn.nil? ? HTTP : HTTPS
+    def alpn = @alpn || NO_PROTOCOL
+
+    def upgrade?
+      upgrade = header('upgrade')
+      return false if upgrade.nil? || upgrade.empty?
+
+      HttpSyntax.token_list?(header('connection'), 'upgrade')
     end
 
     def header(name) = @headers[name] || @headers[name.downcase]
@@ -50,20 +91,20 @@ module Kiln
         raise UnsupportedMediaType, 'expected application/x-www-form-urlencoded'
       end
 
-      @form = Form.decode(@body.to_s)
+      @form = Form.decode(body.to_s)
     end
 
     def json(max_nesting: Json::MAX_NESTING)
-      return @json if @json_ready && max_nesting >= @json_nesting
+      parsed = @json_nesting
+      return @json if parsed >= 0 && max_nesting >= parsed
 
       raise UnsupportedMediaType, 'expected application/json' unless Media.json?(header('content-type'))
 
       begin
-        @json = Json.parse(@body.to_s, max_nesting: max_nesting)
+        @json = Json.parse(body.to_s, max_nesting: max_nesting)
       rescue JsonError => e
         raise BadRequest, "invalid JSON: #{e.message}"
       end
-      @json_ready = true
       @json_nesting = max_nesting
       @json
     end
@@ -168,13 +209,13 @@ module Kiln
       return if HOP.include?(key)
       return if HttpNative.ctl?(value)
 
-      @items.push(owned_name(name))
+      stored_name = owned_name(name)
+      @items.push(stored_name)
       @items.push(key)
-      @items.push(owned(value))
+      stored_value = value.frozen? ? value : value.dup
+      @items.push(stored_value)
       @date = true if key == 'date'
     end
-
-    def owned(text) = text.frozen? ? text : text.dup
 
     def owned_name(text)
       return text if text.frozen?
@@ -240,8 +281,22 @@ module Kiln
     end
     STATUS_11.freeze
     STATUS_10.freeze
+    SWITCHING = 101
+    UPGRADE_LINE = "HTTP/1.1 101 Switching Protocols\r\n".b.freeze
+    CONNECTION_UPGRADE = "Connection: Upgrade\r\n".b.freeze
+    UPGRADE_PREFIX = 'Upgrade: '.b.freeze
+
     attr_accessor :status, :body
     attr_reader :headers, :stream_body, :stream_length, :noted_length, :noted_type
+
+    class Upgrade
+      attr_reader :tunnel_protocol, :tunnel_proc
+
+      def initialize(protocol, body)
+        @tunnel_protocol = protocol
+        @tunnel_proc = body
+      end
+    end
 
     def initialize
       @status = 200
@@ -251,6 +306,55 @@ module Kiln
       @stream_length = nil
       @noted_length = nil
       @noted_type = nil
+      @tunnel = nil
+    end
+
+    def upgrade(protocol, &body)
+      raise ArgumentError, 'upgrade needs a block' unless body
+      raise ArgumentError, 'upgrade protocol must be a token' unless HttpNative.token?(protocol.to_s)
+
+      @status = SWITCHING
+      @body = ''
+      @stream_body = nil
+      @tunnel = Upgrade.new(protocol.to_s, body)
+    end
+
+    def hijack(&body)
+      raise ArgumentError, 'hijack needs a block' unless body
+
+      @status = SWITCHING
+      @body = ''
+      @stream_body = nil
+      @tunnel = Upgrade.new('', body)
+    end
+
+    def websocket(ctx, protocols: [], max_message: WebSocket::MAX_MESSAGE, ping_interval: nil, &body)
+      raise ArgumentError, 'websocket needs a block' unless body
+
+      WebSocket.accept(ctx, protocols, max_message, ping_interval, body)
+    end
+
+    def tunnel? = !@tunnel.nil?
+    def hijack? = tunnel? && protocol.empty?
+
+    def tunnel_body
+      tunnel = @tunnel
+      tunnel&.tunnel_proc
+    end
+
+    def protocol
+      tunnel = @tunnel
+      tunnel ? tunnel.tunnel_protocol : ''
+    end
+
+    def upgrade_head
+      name = protocol
+      return ''.b if name.empty?
+
+      out = UPGRADE_LINE.dup
+      out << UPGRADE_PREFIX << name << CRLF << CONNECTION_UPGRADE
+      @headers.append_to(out)
+      out << CRLF
     end
 
     def note_representation(size, type)
@@ -261,6 +365,7 @@ module Kiln
     def unstream
       @stream_body = nil
       @stream_length = nil
+      @tunnel = nil
     end
 
     def stream(status: 200, type: nil, length: nil, &body)
@@ -274,6 +379,7 @@ module Kiln
       @body = ''
       @stream_length = length
       @stream_body = body
+      @tunnel = nil
     end
 
     def sse(status: 200, &body)
@@ -291,6 +397,7 @@ module Kiln
       @headers.plain
       @body = body
       @stream_body = nil
+      @tunnel = nil
     end
 
     def json(body, status: 200)
@@ -298,6 +405,7 @@ module Kiln
       @headers.json_type
       @body = body
       @stream_body = nil
+      @tunnel = nil
     end
 
     def json_value(value, status: 200) = json(Json.generate(value), status: status)
@@ -375,6 +483,8 @@ module Kiln
         chunked = length.nil? && version != HTTP_10
         [chunked, keep && (chunked || !length.nil?)]
       end
+
+      def tunnels?(res) = res.status == SWITCHING && res.tunnel?
 
       def streams?(res)
         return false unless res.streaming?

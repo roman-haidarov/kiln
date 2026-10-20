@@ -34,7 +34,10 @@ module Kiln
         return false unless go == :write
         return false if ctx.gone
 
-        write_response(sock, req, ctx.res, box)
+        settled = settle_body(req)
+        kept = write_response(sock, req, ctx.res, box, box.buffer, settled)
+        linger(sock) unless settled
+        kept
       ensure
         current[:request_id] = nil
         current[:kiln_deadline] = nil
@@ -65,10 +68,28 @@ module Kiln
         end
       end
 
-      def write_response(sock, req, res, box)
+      def settle_body(req)
+        return true unless req.streamed?
+
+        payload = req.payload
+        return true if payload.complete?
+        return false if payload.failed? || payload.source.expect
+
+        left = payload.remaining
+        return false if left.nil? || left > DRAIN_MAX
+
+        payload.discard
+        true
+      rescue StandardError
+        false
+      end
+
+      def write_response(sock, req, res, box, buf, settled)
         version = req.http_version
         raw_status = res.status
-        keep = HttpSyntax.persistent?(version, req.headers['connection']) && !@draining
+        return write_tunnel(sock, res, box, buf) if Response.tunnels?(res)
+
+        keep = settled && @keep_alive && HttpSyntax.persistent?(version, req.headers['connection']) && !@draining
         return write_stream(sock, req, res, box, keep) if Response.streams?(res)
 
         body = Response.payload(raw_status, res.body)
@@ -98,6 +119,27 @@ module Kiln
         return keep if req.verb == 'HEAD'
 
         stream_body(sock, res, chunked) && keep
+      end
+
+      def write_tunnel(sock, res, box, buf)
+        limit = Kiln.now + @write_timeout
+        return false unless flush_outbox(sock, box, limit)
+
+        head = res.upgrade_head
+        return false unless head.empty? || write_all(sock, head, limit)
+
+        Thread.current[:kiln_deadline] = nil
+        timeout = @write_timeout
+        conn = SocketConn.new(sock, buf, ->(bytes) { write_all(sock, bytes, Kiln.now + timeout) }, -> { @draining })
+        res.tunnel_body.call(conn)
+        false
+      rescue ClientGone
+        false
+      rescue Exception => err
+        raise err if Kiln.unwind?(err)
+
+        @log.error("upgrade #{err.class}: #{err.message}")
+        false
       end
 
       def stream_body(sock, res, chunked)

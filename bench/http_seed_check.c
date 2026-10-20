@@ -102,8 +102,14 @@ static void check_event_details(void) {
             "uv-parse", "request", "parsed fields differ");
     if (parse_event("expect", 1024 * 1024, &result) == KILN_UV_PARSE_INCOMPLETE)
         expect(result.expect_continue == 1, "uv-parse", "expect", "100-continue not reported");
-    if (parse_event("request", 3, &result) != -2)
-        expect(result.error_status == 413, "uv-parse", "request", "max_body 3 does not give 413");
+    if (parse_event("request", 3, &result) == KILN_UV_PARSE_COMPLETE)
+        expect(result.streamed && result.total_len == result.head_len + 4, "uv-parse", "request",
+            "a body over max_body 3 is not streamed");
+    if (parse_event("chunked", 1024 * 1024, &result) == KILN_UV_PARSE_COMPLETE)
+        expect(result.streamed && result.chunked && result.body_len == -1, "uv-parse", "chunked",
+            "a chunked body is not streamed");
+    if (parse_event("upgrade", 1024 * 1024, &result) == KILN_UV_PARSE_COMPLETE)
+        expect(result.upgrade == 1, "uv-parse", "upgrade", "Upgrade is not reported");
 }
 
 static void check_limits(void) {
@@ -121,6 +127,27 @@ static void check_limits(void) {
         "limits", "scan", "kiln_http.c accepts a scan buffer below KILN_UV_SCAN_CAP");
     expect(kiln_scan_request_head(head, KILN_UV_HEAD_MAX, scan, KILN_UV_SCAN_CAP) == 2, "limits",
         "scan", "kiln_http.c rejects a scan buffer of KILN_UV_SCAN_CAP");
+}
+
+static void check_chunks(void) {
+    static const char body[] = "5\r\nhello\r\n3;ext=1\r\nabc\r\n0\r\nX-Sum: 8\r\n\r\n";
+    char out[64];
+    size_t consumed = 0;
+    size_t produced = 0;
+    kiln_uv_chunk_state state;
+    kiln_uv_chunk_init(&state);
+    int rc =
+        kiln_uv_chunk_decode(&state, body, sizeof body - 1, out, sizeof out, &consumed, &produced);
+    expect(rc == KILN_UV_CHUNK_END && consumed == sizeof body - 1 && produced == 8 &&
+               memcmp(out, "helloabc", 8) == 0,
+        "chunks", "decode", "a chunked body does not decode");
+    kiln_uv_chunk_init(&state);
+    rc = kiln_uv_chunk_decode(&state, "zz\r\n", 4, out, sizeof out, &consumed, &produced);
+    expect(rc == KILN_UV_CHUNK_BAD, "chunks", "size", "a bad chunk size is accepted");
+    kiln_uv_chunk_init(&state);
+    rc = kiln_uv_chunk_decode(
+        &state, "0\r\nContent-Length: 1\r\n\r\n", 25, out, sizeof out, &consumed, &produced);
+    expect(rc == KILN_UV_CHUNK_BAD, "chunks", "trailer", "a forbidden trailer is accepted");
 }
 
 int main(int argc, char **argv) {
@@ -142,7 +169,10 @@ int main(int argc, char **argv) {
     check_event("bad_expect", KILN_UV_PARSE_ERROR, 417);
     check_event("unsupported", KILN_UV_PARSE_ERROR, 501);
     check_event("invalid_length", KILN_UV_PARSE_ERROR, 400);
-    check_event("oversized", KILN_UV_PARSE_ERROR, 413);
+    check_event("oversized", KILN_UV_PARSE_COMPLETE, 0);
+    check_event("chunked", KILN_UV_PARSE_COMPLETE, 0);
+    check_event("upgrade", KILN_UV_PARSE_COMPLETE, 0);
+    check_chunks();
     check_event("oversized-head", KILN_UV_PARSE_ERROR, 431);
     check_event_details();
     check_limits();
