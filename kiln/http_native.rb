@@ -43,8 +43,10 @@ module Kiln
       def build(src, count, out)
         flags = out[4]
         ascii = flags.anybits?(2)
-        verb = owned(src.byteslice(out[0], out[1]), ascii)
-        target = owned(src.byteslice(out[2], out[3]), ascii)
+        verb = src.byteslice(out[0], out[1])
+        own!(verb, ascii)
+        target = src.byteslice(out[2], out[3])
+        own!(target, ascii)
         version = flags.allbits?(1) ? '1.1' : '1.0'
         headers = {}
         index = 0
@@ -58,14 +60,16 @@ module Kiln
             key.downcase!
             key.force_encoding(Encoding::UTF_8)
           end
-          value = owned(src.byteslice(out[offset + 2], out[offset + 3]), ascii)
+          value = src.byteslice(out[offset + 2], out[offset + 3])
+          own!(value, ascii)
           if headers.key?(key)
             return nil if HttpSyntax::SINGLE.include?(key)
 
             joined = headers[key].b
             joined << ', '.b
             joined << value.b
-            headers[key] = owned(joined, ascii)
+            own!(joined, ascii)
+            headers[key] = joined
           else
             headers[key] = value
           end
@@ -82,11 +86,11 @@ module Kiln
 
       private
 
-      def owned(text, ascii)
+      def own!(text, ascii)
         text.force_encoding(Encoding::UTF_8)
-        return text if ascii
+        text.force_encoding(Encoding::ASCII_8BIT) unless ascii || text.valid_encoding?
 
-        text.valid_encoding? ? text : text.force_encoding(Encoding::ASCII_8BIT)
+        nil
       end
     end
   end

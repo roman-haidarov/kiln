@@ -27,7 +27,12 @@ proc_stats = lambda do |pid|
   status = File.readlines("/proc/#{pid}/status")
   rss = Integer(status.find { |line| line.start_with?('VmRSS:') }.split[1])
   targets = Dir.children("/proc/#{pid}/fd").sort.map { |fd| File.readlink("/proc/#{pid}/fd/#{fd}") }
-  { cpu: (Integer(fields[13]) + Integer(fields[14])).fdiv(ticks), rss_kib: rss, fds: targets.length, fd_targets: targets }
+  {
+    cpu: (Integer(fields[13]) + Integer(fields[14])).fdiv(ticks),
+    rss_kib: rss,
+    fds: targets.length,
+    fd_targets: targets
+  }
 end
 
 server_class = Class.new do
@@ -48,7 +53,11 @@ server_class = Class.new do
     result = JSON.parse(@output.gets)
     status = @wait.value
     raise @output.read unless status.success?
-    raise result.inspect unless result['connections'].zero? && result['handling'].zero? && result['in_flight'].zero? && result['pool_consistent'] && result['cpu_alive'].zero?
+
+    drained = result['connections'].zero? && result['handling'].zero? && result['in_flight'].zero? &&
+              result['pool_consistent'] && result['cpu_alive'].zero?
+    raise result.inspect unless drained
+
     result
   end
 end
@@ -68,6 +77,7 @@ exchange = lambda do |port, path = '/health', partial = nil, read_response = tru
   body << socket.readpartial(65_536) while body.bytesize < length
   code = Integer(header.split(' ', 3)[1])
   raise "body length mismatch #{body.bytesize} != #{length}" unless body.bytesize == length
+
   [code, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started]
 ensure
   socket&.close
@@ -77,8 +87,10 @@ result = { workers: ENV.fetch('SPINEL_WORKERS', Etc.nprocessors.to_s) }
 server = server_class.new(binary, 'MAX_CONNS' => idle.to_s)
 warm = 32.times.map { Thread.new { exchange.call(server.port) } }.map(&:value)
 raise warm.inspect unless warm.all? { |code, _| code == 200 }
+
 100.times do
   break if server.stats['connections'].zero?
+
   sleep 0.01
 end
 base_resources = proc_stats.call(server.pid)
@@ -89,10 +101,12 @@ clients = []
 end
 200.times do
   break if server.stats['connections'] == idle
+
   sleep 0.01
 end
 before = server.stats
 raise before.inspect unless before['connections'] == idle
+
 first = proc_stats.call(server.pid)
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 sleep seconds
@@ -102,13 +116,16 @@ result[:idle] = { clients: idle, seconds: elapsed, cpu_percent_core: 100 * (last
                   rss_kib: last[:rss_kib], fds: last[:fds], stats: server.stats }
 overflow = exchange.call(server.port)
 raise overflow.inspect unless overflow[0] == 503
+
 more = 64.times.map { Thread.new { exchange.call(server.port) } }.map(&:value)
 raise more.inspect unless more.all? { |code, _| code == 503 }
+
 result[:idle][:overflow_requests] = 65
 result[:idle][:overflow_status] = overflow[0]
 clients.each(&:close)
 300.times do
   break if server.stats['connections'].zero?
+
   sleep 0.01
 end
 result[:idle][:after_disconnect] = server.stats
@@ -120,15 +137,20 @@ removed = before_targets.dup
 after_targets.each { |target, count| removed[target] = [removed.fetch(target, 0) - count, 0].max }
 removed.reject! { |_, count| count.zero? }
 raise removed.inspect unless removed.empty?
+
 added = after_targets.dup
 before_targets.each { |target, count| added[target] = [added.fetch(target, 0) - count, 0].max }
 added.reject! { |_, count| count.zero? }
 pollers = added.delete('anon_inode:[eventpoll]') || 0
 raise added.inspect unless added.all? { |target, count| target.start_with?('pipe:[') && count == 2 }
 raise added.inspect unless added.length == pollers
-raise after_targets.inspect unless after_targets.fetch('anon_inode:[eventpoll]', 0) <= Integer(ENV.fetch('SPINEL_WORKERS', Etc.nprocessors.to_s)) + 1
+
+poller_limit = Integer(ENV.fetch('SPINEL_WORKERS', Etc.nprocessors.to_s)) + 1
+raise after_targets.inspect unless after_targets.fetch('anon_inode:[eventpoll]', 0) <= poller_limit
+
 result[:idle][:lazy_runtime_fds] = { pollers: pollers, wake_pipe_pairs: added.length }
 raise result[:idle][:after_disconnect].inspect unless result[:idle][:after_disconnect]['free'] == idle
+
 result[:idle][:shutdown] = server.stop
 
 server = server_class.new(binary, 'MAX_CONNS' => '512')
@@ -136,17 +158,29 @@ slow = 256.times.map do
   Thread.new { exchange.call(server.port, '/health', "GET /health HTTP/1.1\r\nHost: x\r\nX: ") }
 end.map(&:value)
 raise slow.first(5).inspect unless slow.all? { |code, _| code == 408 }
-result[:slow_headers] = { clients: slow.length, codes: { '408' => slow.length }, max_seconds: slow.map(&:last).max, stats: server.stats }
+
+result[:slow_headers] = {
+  clients: slow.length,
+  codes: { '408' => slow.length },
+  max_seconds: slow.map(&:last).max,
+  stats: server.stats
+}
 sleep 0.6
-work = 300.times.map { Thread.new { exchange.call(server.port) } } + 16.times.map { Thread.new { exchange.call(server.port, '/hang') } } +
-       48.times.map { Thread.new { exchange.call(server.port, '/cpu') } } + 8.times.map { Thread.new { exchange.call(server.port, '/big', nil, false) } }
+work = 300.times.map { Thread.new { exchange.call(server.port) } }
+work.concat(16.times.map { Thread.new { exchange.call(server.port, '/hang') } })
+work.concat(48.times.map { Thread.new { exchange.call(server.port, '/cpu') } })
+work.concat(8.times.map { Thread.new { exchange.call(server.port, '/big', nil, false) } })
 mixed = work.map(&:value)
 health = mixed.first(300).map(&:last)
 raise mixed.first(300).inspect unless mixed.first(300).all? { |code, _| code == 200 }
 raise mixed[300, 16].inspect unless mixed[300, 16].all? { |code, _| code == 504 }
+
 sleep 0.6
 stats = server.stats
-raise stats.inspect unless stats['connections'].zero? && stats['handling'].zero? && stats['in_flight'].zero? && stats['pool_consistent'] && stats['pool_out'].zero? && stats['pool_available'] == 16
+drained = stats['connections'].zero? && stats['handling'].zero? && stats['in_flight'].zero? &&
+          stats['pool_consistent'] && stats['pool_out'].zero? && stats['pool_available'] == 16
+raise stats.inspect unless drained
+
 sorted_health = health.sort
 result[:mixed] = { requests: work.length, codes: mixed.map(&:first).tally.transform_keys(&:to_s),
                    health_p50_ms: sorted_health[sorted_health.length / 2] * 1000,
@@ -156,6 +190,7 @@ sleep 0.05
 result[:mixed][:shutdown] = server.stop
 pending.each { |thread| thread.join(1) }
 raise result[:mixed][:shutdown].inspect unless result[:mixed][:shutdown]['free'] == 512
+
 FileUtils.mkdir_p(File.dirname(output))
 File.write(output, JSON.pretty_generate(result) + "\n")
 puts JSON.pretty_generate(result)

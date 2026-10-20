@@ -1,0 +1,17 @@
+ok   event: a head that never ends gets 408 after header_timeout
+ok   event: a connection that sends nothing is closed after header_timeout
+ok   event: an idle keep-alive connection is closed after keep_alive_timeout
+ok   event: a request within keep_alive_timeout reuses the connection
+ok   event: a streamed body that stalls gets 408 after read_timeout
+ok   event: a 413 reaches a client that is still sending its body
+ok   event: an unread small body is discarded and the connection kept
+ok   event: keep_alive_timeout 0 closes after every response
+ok   base: a head that never ends gets 408 after header_timeout
+ok   base: a connection that sends nothing is closed after header_timeout
+ok   base: an idle keep-alive connection is closed after keep_alive_timeout
+ok   base: a request within keep_alive_timeout reuses the connection
+ok   base: a streamed body that stalls gets 408 after read_timeout
+ok   base: a 413 reaches a client that is still sending its body
+ok   base: an unread small body is discarded and the connection kept
+ok   base: keep_alive_timeout 0 closes after every response
+ok   event header timeout wakes the pump before its handler wait expires

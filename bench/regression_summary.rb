@@ -8,9 +8,9 @@ metadata = File.readlines(File.join(root, 'meta.txt'), chomp: true).filter_map d
 end.to_h
 window_seconds = Float(metadata.fetch('duration').delete_suffix('s'))
 patterns = {
-  'wrk' => /^Requests\/sec:\s+([\d.]+)/,
-  'k6' => /^\s*http_reqs[^:]*:\s+\S+\s+([\d.]+)\/s/,
-  'oha' => /^  Requests\/sec:\s+([\d.]+)/
+  'wrk' => %r{^Requests/sec:\s+([\d.]+)},
+  'k6' => %r{^\s*http_reqs[^:]*:\s+\S+\s+([\d.]+)/s},
+  'oha' => %r{^  Requests/sec:\s+([\d.]+)}
 }
 durations = { 'ns' => 0.000001, 'us' => 0.001, 'µs' => 0.001, 'ms' => 1.0, 's' => 1000.0 }
 
@@ -25,6 +25,7 @@ end
 measurements = lambda do |client, text|
   rps = patterns.fetch(client).match(text)
   raise "no requests per second found for #{client}" unless rps
+
   requests = nil
   total = nil
 
@@ -102,7 +103,10 @@ write_tsv.call(File.join(root, 'median.tsv'),
 
 gc_stats = lambda do |path|
   line = File.file?(path) ? File.read(path).strip : ''
-  match = /^\[gc\] (\d+) collections \((\d+) full\) in ([\d.]+)s of ([\d.]+)s wall \(([\d.]+)%\), ([\d.]+)ms avg; live ([\d.]+) MB obj \+ ([\d.]+) MB str;/.match(line)
+  match = %r{
+    ^\[gc\]\s(\d+)\scollections\s\((\d+)\sfull\)\sin\s([\d.]+)s\sof\s
+    ([\d.]+)s\swall\s\(([\d.]+)%\),\s([\d.]+)ms\savg;\slive\s([\d.]+)\sMB\sobj\s\+\s([\d.]+)\sMB\sstr;
+  }x.match(line)
   [line, match && match.captures.map { |value| Float(value) }]
 end
 
@@ -134,7 +138,8 @@ rows.each do |row|
 end
 
 write_tsv.call(File.join(root, 'gc.tsv'),
-               %w[mode feature client round gc_snapshot_updated collections_delta full_collections_delta gc_seconds_delta gc_time_percent_of_window latest_live_object_mb latest_live_string_mb],
+               %w[mode feature client round gc_snapshot_updated collections_delta full_collections_delta
+                  gc_seconds_delta gc_time_percent_of_window latest_live_object_mb latest_live_string_mb],
                gc_rows)
 if memory
   write_tsv.call(File.join(root, 'resident.tsv'),

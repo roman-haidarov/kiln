@@ -4,8 +4,8 @@ module Kiln
       private
 
       def linger(sock)
-        sock.shutdown(Socket::SHUT_WR)
-        limit = Kiln.now + LINGER
+        Sock.kiln_sock_shutdown(sock.fileno, 1)
+        limit = Kiln.now + @linger
         drained = 0
         while drained < LINGER_BYTES
           chunk = sock.read_nonblock(16_384, exception: false)

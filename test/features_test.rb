@@ -269,7 +269,8 @@ check 'run raises when the event server is already up', failed_run
 Process.kill('USR1', Process.pid)
 restored = nil
 begin
-  wait_for { restored = trap_reader.read_nonblock(1, exception: false); restored == '1' }
+  wait_for { restored = trap_reader.read_nonblock(1, exception: false)
+             restored == '1' }
 rescue IOError
   nil
 end
@@ -298,7 +299,8 @@ again.run(grace: 1.0, signals: ['USR2'])
 Process.kill('USR2', Process.pid)
 again_hit = nil
 begin
-  wait_for { again_hit = again_reader.read_nonblock(1, exception: false); again_hit == '1' }
+  wait_for { again_hit = again_reader.read_nonblock(1, exception: false)
+             again_hit == '1' }
 rescue IOError
   nil
 end

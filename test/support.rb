@@ -92,3 +92,47 @@ def collect_until(sock, seconds)
   end
   out
 end
+
+def exchange_on(sock, data, seconds = 2.0)
+  sock.write(data)
+  out = (+'').b
+  limit = Kiln.now + seconds
+  while Kiln.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln.now)
+    break unless ready
+
+    chunk = begin
+      sock.read_nonblock(65_536, exception: false)
+    rescue IOError, SystemCallError
+      nil
+    end
+    break if chunk.nil?
+    next if chunk == :wait_readable
+
+    out << chunk
+  end
+  sock.close
+  out
+end
+
+def read_head(sock, seconds = 2.0)
+  out = collect_until(sock, seconds) { |buf| buf.include?("\r\n\r\n") }
+  cut = out.index("\r\n\r\n")
+  cut ? [out.byteslice(0, cut + 4), out.byteslice(cut + 4, out.bytesize - cut - 4)] : [out, ''.b]
+end
+
+def closed_within?(sock, seconds)
+  limit = Kiln.now + seconds
+  while Kiln.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln.now)
+    next unless ready
+
+    chunk = begin
+      sock.read_nonblock(4096, exception: false)
+    rescue IOError, SystemCallError
+      nil
+    end
+    return true if chunk.nil?
+  end
+  false
+end

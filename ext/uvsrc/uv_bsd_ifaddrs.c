@@ -1,4 +1,4 @@
 #include "uv_defines.h"
 #if defined(__APPLE__)
-#include "../libuv/bsd-ifaddrs.c"
+#include "../libuv/src/unix/bsd-ifaddrs.c"
 #endif

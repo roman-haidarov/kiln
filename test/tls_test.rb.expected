@@ -1,0 +1,18 @@
+ok   OpenSSL is found at run time
+ok   an HTTPS request is answered over TLS
+ok   the plain listener of the same server stays HTTP
+ok   a 1 MB response crosses TLS intact
+ok   a streamed 3 MB upload crosses TLS intact
+ok   pipelined requests are answered over TLS
+ok   a websocket works over TLS
+ok   plain HTTP on the TLS port gets no HTTP answer
+ok   ALPN selects http/1.1 from h2,http/1.1
+ok   ALPN without http/1.1 fails the handshake
+ok   max_connection_rate holds new handshakes until a slot frees
+ok   min_version 1.3 refuses TLS 1.2
+ok   verify: :require refuses a client without a certificate
+ok   verify: :require accepts a client certificate signed by the CA
+ok   a missing certificate fails at start
+ok   a key that does not match fails at start
+ok   verify needs a CA
+ok   min_version must be known

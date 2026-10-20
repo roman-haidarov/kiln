@@ -1,4 +1,4 @@
 #include "uv_defines.h"
 #if defined(__linux__) || defined(__APPLE__)
-#include "../libuv/thread.c"
+#include "../libuv/src/unix/thread.c"
 #endif

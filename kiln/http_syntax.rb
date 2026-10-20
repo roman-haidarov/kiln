@@ -5,7 +5,12 @@ module Kiln
     REQ_LINE = %r{\A([A-Za-z0-9!#$%&'*+.^_`|~-]+) ([^ \t]+) HTTP/(\d+\.\d+)\z}n
     CL_NUM = /\A(?:0|[1-9]\d*)\z/n
     PCT_HEX = /\A[0-9A-Fa-f]{2}\z/n
-    HOST = /\A(?:\[(?:[0-9A-Fa-f:.%]+|[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+)\]|[A-Za-z0-9._~!$&'()*+,;=%-]+)(?::[0-9]+)?\z/n
+    HOST = %r{
+      \A(?:
+        \[(?:[0-9A-Fa-f:.%]+|[vV][0-9A-Fa-f]+\.[A-Za-z0-9._~!$&'()*+,;=:-]+)\]
+        |[A-Za-z0-9._~!$&'()*+,;=%-]+
+      )(?::[0-9]+)?\z
+    }nx
     ABSOLUTE_FORM = %r{\Ahttps?://}in
     SINGLE = %w[content-length host transfer-encoding].freeze
     FORBIDDEN_TRAILER = %w[content-length transfer-encoding host connection trailer te upgrade].freeze
@@ -22,6 +27,7 @@ module Kiln
 
     BAD_REQUEST = [400, 'bad request'].freeze
     MAX_HEADERS = 100
+    MAX_LENGTH = 999_999_999_999_999_999
     CHUNK_EXCESS = 16 * 1024
 
     class << self
@@ -117,6 +123,12 @@ module Kiln
         return false if tokens.include?('close')
 
         version == '1.0' ? tokens.include?('keep-alive') : true
+      end
+
+      def token_list?(value, token)
+        return false if value.nil?
+
+        value.to_s.split(',').any? { |part| part.strip.casecmp?(token) }
       end
 
       def error_tuple(kind, version: '1.1')

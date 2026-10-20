@@ -65,6 +65,12 @@ module Kiln
         ["busy\n", 503]
       in BadRequest
         ["#{err.message}\n", 400]
+      in PayloadTooLarge
+        ["payload too large\n", 413]
+      in RequestTimeout
+        ["request timeout\n", 408]
+      in TrailersTooLarge
+        ["headers too large\n", 431]
       in UnsupportedMediaType
         ["#{err.message}\n", 415]
       else
@@ -80,5 +86,16 @@ module Kiln
     end
 
     def apply_reply(ctx, reply) = ctx.res.text(reply[0], status: reply[1])
+
+    def first_port(ports)
+      index = 0
+      while index < ports.size
+        port = ports[index]
+        return port if port.positive?
+
+        index += 1
+      end
+      0
+    end
   end
 end

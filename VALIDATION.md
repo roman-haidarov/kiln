@@ -6,11 +6,50 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
-Current tree: 15 test files and 701 snapshot checks, including
-`test/controller_test.rb` (38 checks for router modules, per-request
-controllers, resource and custom routes, handler isolation, scopes, and all
-server backends). The full suite passed in a Linux aarch64 Docker container on
-the macOS host with Spinel `9922a2c` and `SPINEL_WORKERS=1` on 2026-10-16.
+Current tree: 21 test files, 864 checks. The transport-related files are
+`test/listen_test.rb`, `test/timeouts_test.rb`, `test/payload_test.rb`,
+`test/websocket_test.rb`, `test/tls_test.rb` and `test/sigpipe_test.rb`.
+`test/listen_test.rb` also checks invalid `reuse_port`, invalid `buffer_body`
+and removal of `workers:`; `test/websocket_test.rb` checks heartbeat PONG
+matching and the 1007 answer to a close reason that is not UTF-8;
+`test/payload_test.rb` checks that a handler waiting on a stalled upload gets
+504 on every backend and the server keeps serving. `test/tls_test.rb` uses the
+`openssl` command line tool for the ALPN, TLS 1.2 and client certificate
+checks. `test/sigpipe_test.rb` starts each backend in a child process with the
+default `SIGPIPE` disposition and resets connections mid-response; on Linux it
+passes with or without the SIGPIPE fix, so it guards the macOS behavior only.
+
+### Review fixes (current source tree, 2026-10-19)
+
+Linux x86-64, 2 vCPU, Spinel `9922a2c` built from source:
+
+- `./test-spinel.sh`: 21/21 with `SPINEL_WORKERS=1` and 21/21 with
+  `SPINEL_WORKERS=2`, twice each (before and after the last event-loop change).
+- `ci/c-native.sh all` with `KILN_FUZZ_SECONDS=10`: Clang Static Analyzer on
+  the six native modules, seed checks, all 10 libFuzzer targets, TSan harness.
+- `clang-tidy` and `cppcheck` with the AGENTS.md settings on `ext/kiln_uv.c`
+  and `ext/kiln_sock.c`: no new findings other than braces style already used
+  across the file and `unusedFunction` on the new FFI exports. `lizard`: the
+  two existing warnings (`kuv_parse`, `kuv_send_finish`), none new.
+- RuboCop, Reek, Flog and Flay were not run: rubygems.org is not reachable
+  from this environment. `ruby -c` passed on every changed Ruby file.
+- First request on a new connection, `curl` against the event backend (inline
+  and lanes): 251 ms before the `kiln_uv_settle` fix (0.0.5 and the 0.0.6
+  candidate alike), 0.3-0.8 ms after. A 16 MiB response: 256 ms before, 5-8 ms
+  after. The base backend was not affected.
+- `wrk -t1 -c32`, lanes, server pinned to one core and `wrk` to the other,
+  five alternating 5 s rounds, mean requests/s (this tree before the
+  pump-loop change; the Callgrind counts in CHANGELOG cover the final tree):
+  `/text` 0.0.5 74 327, candidate 71 249, this tree 76 208;
+  `/json` 48 026, 46 553, 47 576; `/gzip-stream` (3 rounds) 22 397, 22 000,
+  22 633. The spread between rounds of one build is up to 10 %, so these only
+  show that this tree is not slower than 0.0.5 on this machine. Callgrind
+  instruction counts per request are in the 0.0.6 CHANGELOG entry.
+- Lanes `/gzip-stream` with `Accept-Encoding: gzip`, three consecutive `wrk`
+  runs against one server with `SPINEL_WORKERS=1` and `2`: the server stayed
+  up. The SIGPIPE crash reported on macOS did not reproduce on Linux before
+  the fix either; the macOS run is still to be repeated.
+
 Historical run summaries below record suite sizes at the time of those checks;
 they do not describe the current test set.
 
@@ -165,6 +204,48 @@ Spinel `Set` implementation is array-backed and was slower for both membership
 and sequential traversal. Router action lookup occurs during configuration, so
 the application startup impact depends on the number of resource routes.
 
+## Transport layer (0.0.6)
+
+Recorded on Linux x86-64 (Ubuntu 24.04, 2 vCPUs, clang 18.1.3, OpenSSL 3.0.13)
+with Spinel `9922a2c`:
+
+- `ci/c-native.sh all` with `KILN_FUZZ_SECONDS=20`: the static analyzer passed
+  for `kiln_http.c`, `kiln_uv.c`, `kiln_uv_parse.c`, `kiln_tls.c`,
+  `kiln_sock.c`, `kiln_ws.c`, `kiln_json.c` and `kiln_gzip.c`; the seed check
+  (including the new chunked, upgrade and oversized-but-streamed event seeds
+  and three chunk decoder cases) and all ten libFuzzer targets passed from an
+  empty corpus; TSan passed. `kiln_uv_chunk_decode` had full line coverage and
+  `kuv_parse_headers` full line coverage.
+- `clang-tidy` with the check set in `AGENTS.md` reports, for the new and
+  changed C, only findings the existing files already carry (missing braces,
+  the C11 Annex K `*_s` suggestions, include-cleaner, `_GNU_SOURCE`).
+  `cppcheck --enable=all --inconclusive` reports the `uv_write` ownership
+  hand-off as a leak (the request is freed in `kuv_after_write`, as before) and
+  the FFI exports as unused. `lizard -C 15 -L 80 -a 8` flags `kuv_parse` (20)
+  and `kuv_send_finish` (21) in `kiln_uv.c`, which were over the limit in
+  0.0.5 (20 and 23), and nothing new.
+- RuboCop, Reek, flog, flay and rubyfast were not run: the gem host was not
+  reachable from the build machine. `ruby -wc` passes for every file under
+  `kiln`, `test` and `bench` except the existing unused variable in
+  `bench/mutations.rb`.
+- `bench/regression.sh` with `wrk`, 16 connections, 5 s rounds, `FEATURES=text`,
+  the 0.0.5 and 0.0.6 trees alternated three times on the same machine. Medians
+  of the three rounds, requests per second:
+
+  | run | inline 0.0.5 | inline 0.0.6 | lanes 0.0.5 | lanes 0.0.6 |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 68,961 | 68,141 | 48,580 | 48,063 |
+  | 2 | 70,124 | 62,486 | 45,040 | 48,040 |
+  | 3 | 67,501 | 66,629 | 50,216 | 45,687 |
+
+  The medians differ by 3.5 % (inline) and 1 % (lanes), inside the spread of
+  repeated runs of one tree (up to 9 %), so this run shows no regression it
+  can resolve. Resident memory after the inline rounds was 12.1 MB before and
+  12.4 MB after.
+- The README examples for listeners, TLS, workers, request bodies and
+  WebSocket were compiled and served `curl` requests, including an HTTP/2
+  capable `curl --http2` that negotiated `http/1.1` through ALPN.
+
 ## Runtime limits
 
 `Thread#kill` cannot interrupt a long native call until it returns to a
@@ -212,17 +293,25 @@ were captured on Linux and have not been repeated on macOS.
 
 ## Self-contained build (vendored libuv)
 
-libuv 1.48.0 from the upstream tag, flattened into `ext/libuv` so its quoted
-includes resolve without `-I` (two forwarding headers: `unix/internal.h` and
-`uv/uv/*.h`). Checked with the system libuv headers moved away: `ext/build.sh`
-builds 44 objects without warnings, the full suite passes 8/8 on Spinel
-`9922a2c` with two workers, and a fresh `spin new` application with
-`spin add kiln --path …` builds with `spin build` and answers requests; `ldd`
-shows only libc and libm. The full suite also passes 8/8 on `dafa0d04`, and
-both `event_*` tests pass with one worker. Hello world CPU per request,
-vendored vs system libuv, two alternating pairs: 11.5–11.6 µs vs 11.0–11.8 µs.
-The macOS wrappers (kqueue path) compile and pass the full test suite on macOS
-with one and two workers.
+Kiln vendors libuv 1.53.0 from upstream tag `v1.53.0` (commit
+`840404ce8ba7cc0204be52389a6cfff9f2c90fb6`) under `ext/libuv/src` and
+`ext/libuv/include`. `ext/build.sh` compiles the selected Linux and macOS
+sources through wrappers in `ext/uvsrc/` with explicit include paths. The
+event backend remains self-contained and links libuv statically. On macOS,
+libuv's runtime probe selects `EVFILT_USER` for async wakeups when supported;
+otherwise it retains its pipe fallback. Kiln's `kiln_uv_settle` watcher fix
+now uses public `uv_backend_timeout()` instead of the private watcher queue.
+The event pump caps `IO.select` by libuv's next deadline in addition to its
+handler deadline. `ci/libuv-embedding.sh` compiles the vendored library into a
+standalone native executable and tests wakeups, new HTTP connections, short
+header timeouts and five start/stop cycles. On Darwin 24.6.0 ARM64, Apple clang
+17.0.0 passed all five native embedding iterations. The full Spinel suite
+passed 21/21 with `SPINEL_WORKERS=1` and again with `SPINEL_WORKERS=2` on
+Spinel `2026.09.12+6969 (9922a2c74)`.
+
+The 1.53.0 sources compile on macOS ARM64 with the pinned Spinel toolchain.
+No A/B latency or CPU-per-request comparison of 1.48.0 and 1.53.0 in
+`handlers: N` mode has been recorded, so no performance gain is claimed.
 
 
 ## EventServer

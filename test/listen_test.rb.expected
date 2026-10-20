@@ -1,0 +1,33 @@
+ok   event: one server answers on TCP and on a unix socket
+ok   event: the unix socket gets the requested mode
+ok   event: shutdown removes the unix socket file
+ok   base: one server answers on TCP and on a unix socket
+ok   base: the unix socket gets the requested mode
+ok   base: shutdown removes the unix socket file
+ok   event: a listening descriptor handed over is served
+ok   base: a listening descriptor named as fd:N is served
+ok   listen strings name TCP and unix addresses
+ok   a stale unix socket file is left behind by a dead server
+ok   a stale unix socket file is replaced
+ok   a unix socket that still accepts is not taken over
+ok   event: shutdown does not unlink a replacement unix socket
+ok   base: shutdown does not unlink a replacement unix socket
+ok   reuse_port lets two servers bind one port
+ok   a second listener on a taken port reports the address
+ok   reuse_port cannot use an ephemeral port
+ok   base also refuses ephemeral reuse_port
+ok   workers option is no longer available
+ok   buffer_body cannot exceed max_body on event
+ok   buffer_body cannot exceed max_body on base
+ok   Listen.systemd is empty without LISTEN_FDS
+ok   Listen.parse reads an IPv6 address
+ok   listen needs a port
+ok   backlog must be positive
+ok   max_connection_rate must not be negative
+ok   base refuses TLS
+ok   TLS refuses unsupported h2 ALPN
+ok   TLS refuses mixed supported and unsupported ALPN
+ok   TLS accepts HTTP/1.1 ALPN
+ok   TLS refuses empty ALPN
+ok   TLS ALPN is independent of the caller array
+ok   TLS ALPN and the default protocol string cannot be mutated

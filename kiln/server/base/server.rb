@@ -12,8 +12,9 @@ module Kiln
                          "Connection: close\r\n\r\n" \
                          "deadline exceeded\n".b.freeze
       EMPTY_BODY = ''.b.freeze
-      LINGER = 0.5
       LINGER_BYTES = 256 * 1024
+      DRAIN_MAX = 256 * 1024
+      ACCEPT_WAIT = 0.25
       ACCEPT_BACKOFF_MIN = 0.005
       ACCEPT_BACKOFF_MAX = 1.0
       CRLF = HttpSyntax::CRLF
@@ -27,11 +28,13 @@ module Kiln
         MAX_BYTES = 64 * 1024
 
         attr_reader :data
+        attr_accessor :buffer
 
         def initialize
           @data = (+'').b
           @count = 0
           @more = false
+          @buffer = ReadBuffer.new
         end
 
         def mark(more)
@@ -61,7 +64,16 @@ module Kiln
         @log = config.log
         @port = config.port
         @host = config.host
+        @listen = Listen.resolve(config.listen, config.host, config.port, nil)
+        @backlog = config.backlog
+        @reuse_port = config.reuse_port
+        @nodelay = config.tcp_nodelay ? 1 : 0
         @read_timeout = config.read_timeout
+        @header_timeout = config.header_timeout || config.read_timeout
+        @keep_alive_timeout = config.keep_alive_timeout || config.read_timeout
+        @keep_alive = @keep_alive_timeout.positive?
+        @linger = config.client_disconnect_timeout
+        @buffer_body = config.buffer_body.nil? ? config.max_body : config.buffer_body
         @request_timeout = config.request_timeout
         @write_timeout = config.write_timeout
         @kill_grace = config.kill_grace
@@ -83,10 +95,15 @@ module Kiln
         @next_shard = 0
         @draining = false
         @shut = false
-        @listener = nil
+        @listeners = []
+        @owned_paths = []
+        @ports = []
+        @acceptors = []
         @acceptor = nil
         @reaper = nil
       end
+
+      attr_reader :ports
 
       def start
         raise Errno::EADDRINUSE if @acceptor&.alive? || @reaper&.alive? || connections.positive?
@@ -98,13 +115,17 @@ module Kiln
         @in_flight.fill(0)
         @killed.fill(0)
         @late.fill(0)
-        @listener = TCPServer.new(@host, @port)
+        Sock.kiln_sock_ignore_sigpipe
+        open_listeners
         @finished = Queue.new
         @reap_wake = SizedQueue.new(1)
-        @acceptor = Thread.new do
-          Thread.current.report_on_exception = false
-          accept_loop
+        @acceptors = @listeners.map do |listener|
+          Thread.new do
+            Thread.current.report_on_exception = false
+            accept_loop(listener)
+          end
         end
+        @acceptor = @acceptors.first
         @reaper = Thread.new do
           Thread.current.report_on_exception = false
           reap_loop
@@ -112,12 +133,12 @@ module Kiln
         self
       end
 
-      def port = @listener ? @listener.addr[1] : @port
+      def port = @ports.empty? ? @port : Kiln.first_port(@ports)
 
       def shutdown(grace: 5.0)
         check_rules([['shutdown grace', grace, :seconds_at_least]])
         return in_flight if @shut
-        return 0 unless @acceptor || @listener
+        return 0 unless @acceptor || !@listeners.empty?
 
         @lock.synchronize { @draining = true }
         shard = 0
@@ -125,8 +146,11 @@ module Kiln
           @shard_locks[shard].synchronize { @shut_by_shard[shard] = true }
           shard += 1
         end
-        close_quietly(@listener)
-        stop_thread(@acceptor)
+        @acceptors.each { |thread| stop_thread(thread) }
+        @listeners.each { |listener| close_quietly(listener) }
+        @listeners = []
+        @owned_paths.each { |record| Sock.unlink_owned(record) }
+        @owned_paths = []
         deadline = Kiln.now + grace
         Kernel.sleep 0.01 while in_flight.positive? && Kiln.now < deadline
         left = in_flight
@@ -192,6 +216,7 @@ module Kiln
       def killed = sum_shards(@killed)
       def late = sum_shards(@late)
       def free_slots = @slots.size
+      def handshakes = 0
 
       def handling
         total = 0
@@ -205,33 +230,53 @@ module Kiln
 
       private
 
-      def accept_loop
+      def open_listeners
+        @listeners = []
+        @ports = []
+        @listen.each do |spec|
+          fd = spec.open(@backlog, @reuse_port)
+          @owned_paths << Sock.own_path(spec.path) if spec.owns_path?
+          @listeners << IO.for_fd(fd, autoclose: true)
+          @ports << Sock.kiln_sock_port(fd)
+        end
+      rescue Exception
+        @listeners.each { |listener| close_quietly(listener) }
+        @listeners = []
+        @owned_paths.each { |record| Sock.unlink_owned(record) }
+        @owned_paths = []
+        raise
+      end
+
+      def accept_loop(listener)
         delay = 0.0
+        fd = listener.fileno
         loop do
           break if @draining
 
-          begin
-            sock = @listener.accept
-          rescue IOError, SystemCallError => err
-            break if @draining || @listener.closed?
+          client = Sock.kiln_sock_accept(fd, @nodelay)
+          if client.negative?
+            break if @draining || listener.closed?
 
+            if Sock.eagain?(client)
+              IO.select([listener], nil, nil, ACCEPT_WAIT)
+              next
+            end
             delay = delay == 0.0 ? ACCEPT_BACKOFF_MIN : delay * 2
             delay = ACCEPT_BACKOFF_MAX if delay > ACCEPT_BACKOFF_MAX
-            log_accept_error(err, delay)
+            log_accept_error(Sock.failure('accept', client), delay)
             Kernel.sleep delay
             next
           end
           delay = 0.0
-          if HttpNative.kiln_socket_nonblock(sock.fileno).negative?
-            close_quietly(sock)
-            next
-          end
+          sock = IO.for_fd(client, autoclose: true)
           if @draining
             close_quietly(sock)
             break
           end
           admit(sock)
         end
+      rescue IOError, SystemCallError
+        nil
       end
 
       def admit(sock)
@@ -273,7 +318,7 @@ module Kiln
 
       def reject(sock)
         write_fixed(sock, 503, 'busy', Kiln.now + 0.5)
-        sock.shutdown(Socket::SHUT_WR)
+        Sock.kiln_sock_shutdown(sock.fileno, 1)
         drained = 0
         while drained < LINGER_BYTES
           chunk = sock.read_nonblock(16_384, exception: false)
@@ -362,15 +407,13 @@ module Kiln
       end
 
       def stop_reading(slot)
-        slot.sock.shutdown(Socket::SHUT_RD)
-        true
+        Sock.kiln_sock_shutdown(slot.sock.fileno, 0).zero?
       rescue IOError, SystemCallError
         false
       end
 
       def release_socket(slot)
-        slot.sock.shutdown(Socket::SHUT_RDWR)
-        true
+        Sock.kiln_sock_shutdown(slot.sock.fileno, 2).zero?
       rescue IOError, SystemCallError
         false
       end
@@ -385,13 +428,16 @@ module Kiln
       def run_connection(slot, box, sock)
         buf = ReadBuffer.new
         buf.outbox = box
+        box.buffer = buf
         scan = HttpNative.scratch
         budget = @coop_budget
+        first = true
         loop do
-          msg = read_request(sock, buf, scan)
+          msg = read_request(sock, buf, scan, first)
           break unless msg
           break unless take_message(slot, box, sock, buf, msg)
 
+          first = false
           budget = coop_slice(budget)
         end
         flush_outbox(sock, box, Kiln.now + 1.0)
@@ -491,3 +537,4 @@ require 'kiln/server/base/heap'
 require 'kiln/server/base/response'
 require 'kiln/server/base/request'
 require 'kiln/server/base/io'
+require 'kiln/server/base/body'

@@ -39,7 +39,7 @@ module Kiln
         results = Array.new(count)
         got = 0
         while got < count
-          kind, idx, val = take(box)
+          kind, idx, val = next_result(box)
           raise val if kind == :err
 
           results[idx] = val
@@ -63,7 +63,7 @@ module Kiln
         seen = 0
         last = nil
         while seen < threads.size
-          kind, _idx, val = take(box)
+          kind, _idx, val = next_result(box)
           return val if kind == :ok
 
           seen += 1
@@ -103,7 +103,7 @@ module Kiln
       end
     end
 
-    def take(box)
+    def next_result(box)
       left = remaining
       raise DeadlineExceeded, 'deadline exceeded' if left <= 0
 

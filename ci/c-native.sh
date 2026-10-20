@@ -70,8 +70,8 @@ spinel_headers() {
 
 run_analyze() {
   headers=$(spinel_headers || true)
-  sources="kiln_http kiln_uv kiln_uv_parse"
-  include="-I$root/ext -I$root/ext/libuv -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
+  sources="kiln_http kiln_uv kiln_uv_parse kiln_tls kiln_sock kiln_ws"
+  include="-I$root/ext -I$root/ext/libuv/include -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
   if [ -n "$headers" ]; then
     sources="$sources kiln_json kiln_gzip"
     include="$include -I$headers"
@@ -171,10 +171,15 @@ write_seeds() {
     write_seed "$dir" request '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nConnection: close, keep-alive\r\nContent-Length: 4\r\n\r\ndata'
     write_seed "$dir" expect '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nExpect: 100-continue\r\nContent-Length: 4\r\n\r\n'
     write_seed "$dir" bad_expect '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nExpect: later\r\n\r\n'
-    write_seed "$dir" unsupported '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nTransfer-Encoding: chunked\r\n\r\n'
+    write_seed "$dir" unsupported '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nTransfer-Encoding: gzip, chunked\r\n\r\n'
+    write_seed "$dir" chunked '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nTransfer-Encoding: chunked\r\n\r\n'
+    write_seed "$dir" upgrade '\0004GET /ws HTTP/1.1\r\nHost: example.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n'
     write_seed "$dir" invalid_length '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nContent-Length: 4x\r\n\r\n'
     write_seed "$dir" oversized '\0004POST /items HTTP/1.1\r\nHost: example.test\r\nContent-Length: 1048577\r\n\r\n'
   done
+  write_seed "$corpus_root/uv-chunk" body '\0003\00055\r\nhello\r\n3;x=1\r\nabc\r\n0\r\nX-Sum: 8\r\n\r\n'
+  write_seed "$corpus_root/uv-chunk" partial '\0007\0002a\r\n0123'
+  write_seed "$corpus_root/uv-chunk" trailer '\0001\00010\r\nTrailer: x\r\n\r\n'
 }
 
 run_fuzz() {
@@ -199,10 +204,13 @@ run_fuzz() {
   run_fuzz_target uv-parse-diff "$root/bench/uv_parse_diff_fuzz.c" 32769 \
     "$root/ext/kiln_uv_parse.c" "$root/ext/kiln_http.c" \
     "$root/ext/picohttpparser/picohttpparser.c"
+  run_fuzz_target uv-chunk "$root/bench/uv_chunk_fuzz.c" 65536 \
+    "$root/ext/kiln_uv_parse.c" "$root/ext/kiln_http.c" \
+    "$root/ext/picohttpparser/picohttpparser.c"
   set -- "$run_dir"/*.profraw
   "$profdata" merge -sparse "$@" -o "$run_dir/fuzz.profdata"
   objects=
-  for name in http-kind-0 http-kind-1 http-kind-2 http-kind-3 http-kind-4 http-kind-5 http-kind-6 uv-parse uv-parse-diff; do
+  for name in http-kind-0 http-kind-1 http-kind-2 http-kind-3 http-kind-4 http-kind-5 http-kind-6 uv-parse uv-parse-diff uv-chunk; do
     objects="$objects -object=$run_dir/fuzz-$name"
   done
   coverage_raw="$artifacts/http-coverage-all.txt"
@@ -211,7 +219,7 @@ run_fuzz() {
     "$root/ext/kiln_http.c" "$root/ext/kiln_uv_parse.c" > "$artifacts/http-coverage.txt"
   awk '
     /^File / || /^Name[[:space:]]/ || /^-+/ { print; next }
-    $1 ~ /^(kiln_http_accepts_gzip|kiln_http_scan|kiln_http_scan_at|kiln_scan_request_head|kiln_chunk_size|kiln_token|kiln_ctl|kiln_digits|kiln_host|kiln_uv_parse_request|kiln_http\.c:(kiln_skip_ows|kiln_trim_ows|kiln_gzip_kind|kiln_accept_parameters|kiln_quality|kiln_scan_terminated|kiln_crlf_only|kiln_ascii|kiln_clean_value|kiln_common_index|kiln_tchar|kiln_hex|kiln_ows|kiln_alnum|kiln_subdelim)|kiln_uv_parse\.c:(kuv_digits|kuv_has_token|kuv_head_length|kuv_parse_headers))$/ { print }
+    $1 ~ /^(kiln_http_accepts_gzip|kiln_http_scan|kiln_http_scan_at|kiln_scan_request_head|kiln_chunk_size|kiln_token|kiln_ctl|kiln_digits|kiln_host|kiln_uv_parse_request|kiln_http\.c:(kiln_skip_ows|kiln_trim_ows|kiln_gzip_kind|kiln_accept_parameters|kiln_quality|kiln_scan_terminated|kiln_crlf_only|kiln_ascii|kiln_clean_value|kiln_common_index|kiln_tchar|kiln_hex|kiln_ows|kiln_alnum|kiln_subdelim)|kiln_uv_chunk_decode|kiln_uv_parse\.c:(kuv_digits|kuv_has_token|kuv_head_length|kuv_parse_headers|kuv_transfer_coding|kuv_note_field|kuv_check_coding|kuv_is_upgrade_name|kuv_forbidden_trailer|kuv_chunk_line|kuv_chunk_size_line|kuv_chunk_trailer_line))$/ { print }
   ' "$artifacts/http-coverage.txt" > "$coverage_raw"
   mv "$coverage_raw" "$artifacts/http-coverage.txt"
   cat "$artifacts/http-coverage.txt"

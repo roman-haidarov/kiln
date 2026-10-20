@@ -28,10 +28,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
             abort();
         return 0;
     }
+    if (result.streamed && result.total_len != result.head_len + 4)
+        abort();
+    if (result.chunked && (!result.streamed || result.body_len != -1))
+        abort();
+    if (!result.streamed && result.body_len > max_body)
+        abort();
     if (state != KILN_UV_PARSE_COMPLETE || result.total_len > len ||
-        result.head_len + 4 > result.total_len || result.body_len < 0 ||
-        result.body_len > max_body || result.nheaders < 0 ||
-        result.nheaders > KILN_UV_MAX_HEADERS || result.minor < 0 || result.minor > 1)
+        result.head_len + 4 > result.total_len || (!result.chunked && result.body_len < 0) ||
+        result.nheaders < 0 || result.nheaders > KILN_UV_MAX_HEADERS || result.minor < 0 ||
+        result.minor > 1)
         abort();
     if (scan[4] < 0 || scan[4] > 3)
         abort();
