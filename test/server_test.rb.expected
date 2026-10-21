@@ -23,7 +23,7 @@ ok   pipelined good + stuck handler: 200 then 504 from reaper
 ok   handler sees client disconnect via client_gone?
 ok   client_gone? is false while the client waits
 ok   client_gone? follows platform semantics with unread bytes pending
-ok   ClientGone closes the connection without a 500 response
+ok   Runtime::ClientGone closes the connection without a 500 response
 ok   GET * -> 400
 ok   invalid status: 500 with full body; next response remains aligned
 ok   OPTIONS * -> 204 with method list
@@ -76,8 +76,8 @@ ok   handler that ignores deadline is killed by reaper -> 504
 ok   pool wait is bounded by deadline -> 504
 ok   resource held during with is closed after kill; slot restored
 ok   next checkout lazily creates a new resource
-ok   CpuPool: 504; task after deadline was not started
-ok   CpuPool remains alive
+ok   Runtime::CpuPool: 504; task after deadline was not started
+ok   Runtime::CpuPool remains alive
 ok   five stuck requests at once -> all receive 504
 -- write timeout
 ok   write reaches response body

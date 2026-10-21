@@ -36,13 +36,13 @@ ok   percent-encoded static pattern matches
 -- testing helper
 ok   Testing.json
 ok   Testing.call installs the deadline
-ok   Testing.call maps BadRequest to 400
-ok   Kiln.pop honours the deadline (504)
+ok   Testing.call maps HTTP::BadRequest to 400
+ok   Kiln::Runtime.pop honours the deadline (504)
 ok   unmapped errors reach the test
-ok   Kiln.pop without a deadline
+ok   Kiln::Runtime.pop without a deadline
 -- middleware
-ok   DefaultHeaders adds missing headers
-ok   DefaultHeaders keeps what the handler set
+ok   Middleware::DefaultHeaders adds missing headers
+ok   Middleware::DefaultHeaders keeps what the handler set
 ok   preflight allowed
 ok   preflight from another origin gets no grant
 ok   preflight with an unlisted header gets no grant

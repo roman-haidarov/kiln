@@ -2,12 +2,12 @@ require 'kiln'
 require 'json'
 require 'stringio'
 
-server = Kiln::Server::Base.new(nil, nil, log: Kiln::Log.new(StringIO.new), port: 0)
+server = Kiln::Server::Base.new(nil, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0)
 reader, writer = Socket.pair(Socket::AF_UNIX, Socket::SOCK_STREAM, 0)
 writer.shutdown(Socket::SHUT_WR)
-scan = Kiln::HttpNative.scratch
+scan = Kiln::HTTP::Native.scratch
 $stdin.each_line do |line|
-  buf = Kiln::ReadBuffer.new
+  buf = Kiln::HTTP::ReadBuffer.new
   buf.append([line.strip].pack('H*'))
   results = []
   until buf.empty?

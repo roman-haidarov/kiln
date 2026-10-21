@@ -8,7 +8,7 @@ class Slow
   def call(ctx)
     ctx.sleep(1.5)
     ctx.res.text("slow\n")
-  rescue Kiln::DeadlineExceeded
+  rescue Kiln::Runtime::DeadlineExceeded
     ctx.res.text("late\n", status: 504)
   end
 end
@@ -18,13 +18,14 @@ class Big
   def call(ctx) = ctx.res.text(BODY)
 end
 
-log = Kiln::Log.new
-router = Kiln::Router.new
+log = Kiln::Observability::Log.new
+router = Kiln::Routing::Router.new
 router.get('/health', Hello.new)
 router.get('/slow', Slow.new)
 router.get('/big', Big.new)
 router.seal!
-handler = Kiln::RequestId.new(Kiln::AccessLog.new(Kiln::Rescue.new(router, log), log))
+guarded = Kiln::Middleware::Rescue.new(router, log)
+handler = Kiln::Middleware::RequestId.new(Kiln::Middleware::AccessLog.new(guarded, log))
 server = Kiln::Server::Base.new(handler, nil, log: log, port: (ENV['PORT'] || '19091').to_i,
                                               host: '127.0.0.1', request_timeout: 5.0, max_conns: 1000,
                                               coop_budget: (ENV['COOP'] || '4').to_i)

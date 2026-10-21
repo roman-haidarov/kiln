@@ -36,9 +36,35 @@ elif command -v shasum > /dev/null 2>&1; then
 else
   hash_tool="cksum"
 fi
-content_key=$(find ext -type f \( -name '*.c' -o -name '*.h' -o -name 'build.sh' \) -print | LC_ALL=C sort | xargs $hash_tool | $hash_tool)
+content_key=$(find ext -path ext/croaring -prune -o -type f \( -name '*.c' -o -name '*.h' -o -name 'build.sh' \) -print | LC_ALL=C sort | xargs $hash_tool | $hash_tool)
+db_sources=""
+db_flags=""
+if [ "${KILN_DB:-0}" = "1" ]; then
+  if [ -n "${KILN_DB_LIBPQ_PREFIX:-}" ]; then
+    pq_flags="-I$KILN_DB_LIBPQ_PREFIX/include"
+  elif pkg-config --exists libpq 2> /dev/null; then
+    pq_flags=$(pkg-config --cflags libpq)
+  elif [ -d /opt/homebrew/opt/libpq/include ]; then
+    pq_flags="-I/opt/homebrew/opt/libpq/include"
+  else
+    pq_flags=""
+  fi
+  if [ -n "${KILN_DB_LIBMARIADB_PREFIX:-}" ]; then
+    my_flags="-I$KILN_DB_LIBMARIADB_PREFIX/include/mariadb"
+  elif pkg-config --exists libmariadb 2> /dev/null; then
+    my_flags=$(pkg-config --cflags libmariadb)
+  elif command -v mariadb_config > /dev/null 2>&1; then
+    my_flags=$(mariadb_config --include)
+  elif [ -d /opt/homebrew/opt/mariadb-connector-c/include/mariadb ]; then
+    my_flags="-I/opt/homebrew/opt/mariadb-connector-c/include/mariadb"
+  else
+    my_flags=""
+  fi
+  db_flags="$pq_flags $my_flags"
+  db_sources=$(printf '%s ' ext/db/*.c)
+fi
 runtime_key=$(cd "$hdr_dir" && $hash_tool spinel/runtime.h spinel_rt.h sp_alloc.h sp_gc.h sp_types.h 2> /dev/null | $hash_tool)
-build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$("$cc_bin" -dumpmachine 2> /dev/null || true)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "$content_key" "$runtime_key")
+build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$("$cc_bin" -dumpmachine 2> /dev/null || true)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "${KILN_DB:-0}" "$db_flags" "$content_key" "$runtime_key")
 target=$("$cc_bin" -dumpmachine 2> /dev/null || uname -m)
 simd_flags() {
   case "$target" in
@@ -69,7 +95,7 @@ settings=build/ext/settings
 if [ ! -f "$settings" ] || [ "$(cat "$settings")" != "$build_key" ]; then
   rebuild=1
 fi
-for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_uv_parse.c ext/kiln_tls.c ext/kiln_sock.c ext/kiln_ws.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/uvsrc/*.c ext/zngsrc/*.c; do
+for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_uv_parse.c ext/kiln_tls.c ext/kiln_sock.c ext/kiln_ws.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/uvsrc/*.c ext/zngsrc/*.c $db_sources; do
   object=build/ext/$(basename "$source" .c).o
   extra=""
   case "$source" in
@@ -77,6 +103,7 @@ for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln
     ext/kiln_uv.c) extra="-Iext/libuv/include" ;;
     ext/zngsrc/*.c) extra="-Iext/zlib-ng $(simd_flags "$source")" ;;
     ext/kiln_http.c | ext/kiln_pico_sse42.c) extra="$(simd_flags "$source")" ;;
+    ext/db/*.c) extra="$db_flags" ;;
   esac
   case "$source" in
     ext/kiln_json.c | ext/kiln_yyjson.c | ext/kiln_gzip.c) extra="-ftls-model=initial-exec -I$hdr_dir" ;;

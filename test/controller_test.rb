@@ -17,7 +17,7 @@ end
 
 def hit(app, verb, target) = Kiln::Testing.call(app, verb, target)
 
-class ControllerUsers < Kiln::Controller
+class ControllerUsers < Kiln::Routing::Controller
   def index = res.text('users')
   def show = res.text("user #{params['id']}")
   def create = res.text('created', status: 201)
@@ -38,13 +38,13 @@ class ControllerUsers < Kiln::Controller
   def who = "##{params['id']}"
 end
 
-class ControllerBooks < Kiln::Controller
+class ControllerBooks < Kiln::Routing::Controller
   def index = res.text('books')
   def show = res.text("book #{params['id']}")
   def search = res.text('book search')
 end
 
-class ControllerSlow < Kiln::Controller
+class ControllerSlow < Kiln::Routing::Controller
   def show
     @mine = params['id']
     Kernel.sleep 0.05
@@ -100,7 +100,7 @@ class ControllerGuard
 end
 
 puts '-- controller resources'
-router = Kiln::Router.new.configure(ControllerRoutes).seal!
+router = Kiln::Routing::Router.new.configure(ControllerRoutes).seal!
 
 check 'router module configures resources', hit(router, 'GET', '/users').body == 'users'
 check 'index', hit(router, 'GET', '/users').body == 'users'
@@ -135,7 +135,7 @@ check 'an action missing from the handlers is not a route',
       books_delete.status == 405 && !books_delete.headers['Allow'].include?('DELETE')
 check 'a missing action is not a route', hit(router, 'POST', '/books').status == 405
 
-slow = Kiln::Router.new.resources('/slow', SLOW_HANDLERS).seal!
+slow = Kiln::Routing::Router.new.resources('/slow', SLOW_HANDLERS).seal!
 results = Queue.new
 workers = %w[a b c d].map do |id|
   Thread.new { results << hit(slow, 'GET', "/slow/#{id}").body }
@@ -146,10 +146,10 @@ bodies << results.pop until results.empty?
 check 'concurrent requests do not share instance state', bodies.sort == ['slow a', 'slow b', 'slow c', 'slow d']
 
 puts '-- options'
-limited = Kiln::Router.new.resources('/users', USER_HANDLERS, only: %i[index show]).seal!
+limited = Kiln::Routing::Router.new.resources('/users', USER_HANDLERS, only: %i[index show]).seal!
 check 'only limits controller actions',
       hit(limited, 'GET', '/users/2').body == 'user 2' && hit(limited, 'POST', '/users').status == 405
-scoped = Kiln::Router.new
+scoped = Kiln::Routing::Router.new
 scoped.scope('/api', wrap: ->(nxt) { ControllerGuard.new(nxt) }) do |api|
   api.get('/users/search', ->(ctx) { ControllerUsers.new(ctx).search })
   api.resources('/users', USER_HANDLERS)
@@ -158,11 +158,11 @@ scoped.seal!
 guarded = hit(scoped, 'GET', '/api/users/search?q=x')
 check 'scope prefix and wrap reach custom routes', guarded.body == 'search x' && guarded.headers['X-Guard'] == 'on'
 check 'scope prefix and wrap reach controller routes', hit(scoped, 'GET', '/api/users/5').headers['X-Guard'] == 'on'
-standalone = Kiln::Router.new.get('/me', ->(ctx) { ControllerUsers.new(ctx).index }).seal!
+standalone = Kiln::Routing::Router.new.get('/me', ->(ctx) { ControllerUsers.new(ctx).index }).seal!
 check 'controller actions work as plain route handlers', hit(standalone, 'GET', '/me').body == 'users'
 
 puts '-- hash handlers keep working'
-hashed = Kiln::Router.new
+hashed = Kiln::Routing::Router.new
 hashed.get('/tags/popular', ->(ctx) { ctx.res.text('popular') })
 hashed.delete('/tags/:id/pin', ->(ctx) { ctx.res.text("unpinned #{ctx.req.params['id']}") })
 tag_handlers = {
@@ -177,10 +177,10 @@ check 'hash resources still map show', hit(hashed, 'GET', '/tags/4').body == 'ta
 
 puts '-- errors'
 refuses('resource handlers must be a hash', 'resource handlers') do
-  Kiln::Router.new.resources('/users', ControllerUsers)
+  Kiln::Routing::Router.new.resources('/users', ControllerUsers)
 end
 refuses('only cannot select an unregistered handler', 'resource actions') do
-  Kiln::Router.new.resources('/books', BOOK_HANDLERS, only: [:destroy])
+  Kiln::Routing::Router.new.resources('/books', BOOK_HANDLERS, only: [:destroy])
 end
 
 puts '-- over a socket'
@@ -192,7 +192,7 @@ ensure
   sock&.close
 end
 
-server_log = Kiln::Log.new(StringIO.new)
+server_log = Kiln::Observability::Log.new(StringIO.new)
 [[:event, 0], [:event, 2], [:base, 0]].each do |backend, handlers|
   options = { log: server_log, host: '127.0.0.1', port: 0, backend: backend }
   options[:handlers] = handlers if backend == :event

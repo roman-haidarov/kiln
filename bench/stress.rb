@@ -8,7 +8,7 @@ require 'thread'
 binary = ARGV.shift || 'build/stress_server'
 idle = 10_000
 seconds = 10.0
-output = File.join(ENV.fetch('KILN_VALIDATION_DIR', '/tmp/kiln-validation'), 'stress.json')
+output = File.join(ENV.fetch('KILN_VALIDATION_DIR') { '/tmp/kiln-validation' }, 'stress.json')
 until ARGV.empty?
   option = ARGV.shift
   value = ARGV.shift
@@ -83,7 +83,7 @@ ensure
   socket&.close
 end
 
-result = { workers: ENV.fetch('SPINEL_WORKERS', Etc.nprocessors.to_s) }
+result = { workers: ENV.fetch('SPINEL_WORKERS') { Etc.nprocessors.to_s } }
 server = server_class.new(binary, 'MAX_CONNS' => idle.to_s)
 warm = 32.times.map { Thread.new { exchange.call(server.port) } }.map(&:value)
 raise warm.inspect unless warm.all? { |code, _| code == 200 }
@@ -145,7 +145,7 @@ pollers = added.delete('anon_inode:[eventpoll]') || 0
 raise added.inspect unless added.all? { |target, count| target.start_with?('pipe:[') && count == 2 }
 raise added.inspect unless added.length == pollers
 
-poller_limit = Integer(ENV.fetch('SPINEL_WORKERS', Etc.nprocessors.to_s)) + 1
+poller_limit = Integer(ENV.fetch('SPINEL_WORKERS') { Etc.nprocessors.to_s }) + 1
 raise after_targets.inspect unless after_targets.fetch('anon_inode:[eventpoll]', 0) <= poller_limit
 
 result[:idle][:lazy_runtime_fds] = { pollers: pollers, wake_pipe_pairs: added.length }
@@ -192,5 +192,5 @@ pending.each { |thread| thread.join(1) }
 raise result[:mixed][:shutdown].inspect unless result[:mixed][:shutdown]['free'] == 512
 
 FileUtils.mkdir_p(File.dirname(output))
-File.write(output, JSON.pretty_generate(result) + "\n")
+File.write(output, "#{JSON.pretty_generate(result)}\n")
 puts JSON.pretty_generate(result)

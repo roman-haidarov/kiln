@@ -14,7 +14,7 @@ BIG_BODY = ('0123456789' * 200_000).freeze
 PAUSED = Queue.new
 SHUTDOWN_CALLS = Queue.new
 HANG_STARTED = Queue.new
-log = Kiln::Log.new(StringIO.new)
+log = Kiln::Observability::Log.new(StringIO.new)
 claim_job = Kiln::Server::Event::Job.new(nil, 0, 0, nil, false, Mutex.new)
 claim_gate = Queue.new
 claim_results = Queue.new
@@ -29,48 +29,50 @@ claim_values = Array.new(2) { claim_results.pop }
 claim_threads.each(&:join)
 check 'a streamed request can be claimed only once across threads', claim_values.count(true) == 1
 
-router = Kiln::Router.new
-                     .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
-                     .post('/echo', ->(ctx) { ctx.res.text("len=#{ctx.req.body.bytesize}") })
-                     .get('/sleep', lambda { |ctx|
-                                      ctx.sleep(0.3)
-                                      ctx.res.text("slept\n")
-                                    })
-                     .get('/boom', ->(_ctx) { raise 'boom' })
-                     .get('/count', lambda { |ctx|
-                                      CALLS << 1
-                                      ctx.res.text("counted\n")
-                                    })
-                     .get('/shutdown-pipe', lambda { |ctx|
-                                              SHUTDOWN_CALLS << 1
-                                              ctx.sleep(0.05)
-                                              ctx.res.text("piped\n")
+router = Kiln::Routing::Router.new
+                              .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
+                              .post('/echo', ->(ctx) { ctx.res.text("len=#{ctx.req.body.bytesize}") })
+                              .get('/sleep', lambda { |ctx|
+                                               ctx.sleep(0.3)
+                                               ctx.res.text("slept\n")
+                                             })
+                              .get('/boom', ->(_ctx) { raise 'boom' })
+                              .get('/count', lambda { |ctx|
+                                               CALLS << 1
+                                               ctx.res.text("counted\n")
+                                             })
+                              .get('/shutdown-pipe', lambda { |ctx|
+                                                       SHUTDOWN_CALLS << 1
+                                                       ctx.sleep(0.05)
+                                                       ctx.res.text("piped\n")
+                                                     })
+                              .get('/pause', lambda { |ctx|
+                                               PAUSED << 1
+                                               ctx.sleep(0.3)
+                                               ctx.res.text("paused\n")
+                                             })
+                              .get('/utf', ->(ctx) { ctx.res.text('привет') })
+                              .get('/big', ->(ctx) { ctx.res.text(BIG_BODY) })
+                              .get('/deadline', lambda { |ctx|
+                                                  ctx.res.text(Kiln::Runtime.deadline.positive? ? 'set' : 'unset')
+                                                })
+                              .get('/late', lambda { |ctx|
+                                              Kernel.sleep 0.3
+                                              Kiln::Runtime.check!
+                                              ctx.res.text('never')
                                             })
-                     .get('/pause', lambda { |ctx|
-                                      PAUSED << 1
-                                      ctx.sleep(0.3)
-                                      ctx.res.text("paused\n")
-                                    })
-                     .get('/utf', ->(ctx) { ctx.res.text('привет') })
-                     .get('/big', ->(ctx) { ctx.res.text(BIG_BODY) })
-                     .get('/deadline', ->(ctx) { ctx.res.text(Kiln.deadline.positive? ? 'set' : 'unset') })
-                     .get('/late', lambda { |ctx|
-                                     Kernel.sleep 0.3
-                                     Kiln.check!
-                                     ctx.res.text('never')
-                                   })
-                     .get('/hang', lambda { |ctx|
-                                     HANG_STARTED << 1
-                                     Kernel.sleep 1.5
-                                     ctx.res.text("late\n")
-                                   })
-                     .get('/absolute', ->(ctx) { ctx.res.text("#{ctx.req.path}|#{ctx.req.headers['host']}") })
-                     .get('/noncooperative', lambda do |ctx|
-                       Kernel.sleep 0.3
-                       ctx.res.headers['Content-Encoding'] = 'gzip'
-                       ctx.res.text('late')
-                     end)
-                     .seal!
+                              .get('/hang', lambda { |ctx|
+                                              HANG_STARTED << 1
+                                              Kernel.sleep 1.5
+                                              ctx.res.text("late\n")
+                                            })
+                              .get('/absolute', ->(ctx) { ctx.res.text("#{ctx.req.path}|#{ctx.req.headers['host']}") })
+                              .get('/noncooperative', lambda do |ctx|
+                                                        Kernel.sleep 0.3
+                                                        ctx.res.headers['Content-Encoding'] = 'gzip'
+                                                        ctx.res.text('late')
+                                                      end)
+                              .seal!
 
 pipe_marker = -> {}
 old_pipe_handler = Signal.trap('PIPE', pipe_marker)
@@ -138,9 +140,9 @@ check 'inline: request after Connection: close is not executed', o.scan('HTTP/1.
 CALLS.clear
 o = exchange(ip, "GET /count HTTP/1.0\r\n\r\nGET /count HTTP/1.0\r\n\r\n")
 check 'inline: HTTP/1.0 without keep-alive stops after one request', o.scan(' 200 ').size == 1 && CALLS.size == 1
-check 'inline: request deadline is visible to Kiln.deadline',
+check 'inline: request deadline is visible to Kiln::Runtime.deadline',
       exchange(ip, "GET /deadline HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").end_with?('set')
-check 'inline: Kiln.check! after the deadline -> 504',
+check 'inline: Kiln::Runtime.check! after the deadline -> 504',
       exchange(ip, "GET /late HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n").start_with?('HTTP/1.1 504 ')
 late_inline = exchange(ip, "GET /noncooperative HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 check 'inline: a late handler returns a clean 504 without interrupting the event loop',
@@ -240,8 +242,8 @@ slow_sock = TCPSocket.new('127.0.0.1', slow.port)
 slow_sock.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 wait_for { slow.connections.positive? }
 slow_closed = false
-slow_limit = Kiln.now + 2
-while Kiln.now < slow_limit
+slow_limit = Kiln::Runtime.now + 2
+while Kiln::Runtime.now < slow_limit
   if slow.connections.zero?
     slow_closed = true
     break
@@ -271,7 +273,7 @@ end
 check 'a later server keeps the loop fd after an earlier one is collected', reused == [true, true]
 
 blocked_started = Queue.new
-deadline_router = Kiln::Router.new
+deadline_router = Kiln::Routing::Router.new
 deadline_router.get('/blocked', lambda do |ctx|
   blocked_started << true
   Kernel.sleep 0.5
@@ -285,9 +287,9 @@ blocked_client = Thread.new do
   exchange(deadline_server.port, "GET /blocked HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 end
 blocked_started.pop
-fast_started = Kiln.now
+fast_started = Kiln::Runtime.now
 fast_reply = exchange(deadline_server.port, "GET /fast HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-fast_elapsed = Kiln.now - fast_started
+fast_elapsed = Kiln::Runtime.now - fast_started
 blocked_reply = blocked_client.value
 check 'a blocked handler gets 504 at its deadline', blocked_reply.start_with?('HTTP/1.1 504 ') &&
                                                     deadline_server.killed == 1
@@ -296,7 +298,7 @@ deadline_server.shutdown(grace: 1)
 
 stream_started = Queue.new
 stream_release = Queue.new
-stream_router = Kiln::Router.new.get('/stream', lambda do |ctx|
+stream_router = Kiln::Routing::Router.new.get('/stream', lambda do |ctx|
   ctx.res.headers['Content-Type'] = 'text/plain'
   ctx.res.stream do |out|
     stream_started << true
@@ -304,7 +306,7 @@ stream_router = Kiln::Router.new.get('/stream', lambda do |ctx|
     out.write('streamed')
   end
 end).seal!
-gzip_streams = Kiln::Compress.new(stream_router, min_size: 1)
+gzip_streams = Kiln::Middleware::Compress.new(stream_router, min_size: 1)
 limited_streams = Kiln::Server::Event.new(gzip_streams, nil, log: log, port: 0, max_streams: 1)
 limited_streams.start
 stream_client = TCPSocket.new('127.0.0.1', limited_streams.port)

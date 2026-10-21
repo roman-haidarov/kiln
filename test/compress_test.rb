@@ -49,7 +49,7 @@ EVENTS = Queue.new
 RELEASE = Queue.new
 
 def build_app
-  router = Kiln::Router.new
+  router = Kiln::Routing::Router.new
   router.get('/text', ->(ctx) { ctx.res.text(TEXT) })
   router.get('/tiny', ->(ctx) { ctx.res.text('tiny') })
   items = Array.new(200) { |i| { 'id' => i, 'name' => "item #{i}" } }
@@ -99,52 +99,53 @@ def build_app
       out.event('second', event: 'tick')
     end
   end)
-  Kiln::Compress.new(router.seal!, min_size: 512)
+  Kiln::Middleware::Compress.new(router.seal!, min_size: 512)
 end
 
 puts '-- negotiation'
-check 'plain gzip', Kiln::Compress.accepts_gzip?('gzip')
-check 'list with q', Kiln::Compress.accepts_gzip?('br;q=1.0, gzip;q=0.8, *;q=0.1')
-check 'gzip refused with q=0', !Kiln::Compress.accepts_gzip?('gzip;q=0, deflate')
-check 'x-gzip alias', Kiln::Compress.accepts_gzip?('x-gzip')
-check 'star allows gzip', Kiln::Compress.accepts_gzip?('*')
-check 'explicit gzip;q=0 beats star', !Kiln::Compress.accepts_gzip?('*, gzip;q=0')
-check 'identity only', !Kiln::Compress.accepts_gzip?('identity') && !Kiln::Compress.accepts_gzip?(nil)
-check 'case and spaces', Kiln::Compress.accepts_gzip?(' GZip ; Q=0.5 ')
-check 'q outside 0..1 is ignored', !Kiln::Compress.accepts_gzip?('gzip;q=2')
-check 'q without a value is ignored', !Kiln::Compress.accepts_gzip?('gzip;q')
-check 'an invalid gzip q leaves the star', Kiln::Compress.accepts_gzip?('*;q=0.1, gzip;q=2')
-check 'q accepts an empty fractional part', Kiln::Compress.accepts_gzip?('gzip;q=1.')
-check 'q accepts three decimal places', Kiln::Compress.accepts_gzip?('gzip;q=1.000')
-check 'q rejects more than three decimal places', !Kiln::Compress.accepts_gzip?('gzip;q=1.0000')
-check 'the last valid q parameter wins', Kiln::Compress.accepts_gzip?('gzip;q=0;q=1')
-raises('levels are validated', ArgumentError, 'levels') { Kiln::Compress.new(->(_ctx) {}, level: 0) }
+check 'plain gzip', Kiln::Middleware::Compress.accepts_gzip?('gzip')
+check 'list with q', Kiln::Middleware::Compress.accepts_gzip?('br;q=1.0, gzip;q=0.8, *;q=0.1')
+check 'gzip refused with q=0', !Kiln::Middleware::Compress.accepts_gzip?('gzip;q=0, deflate')
+check 'x-gzip alias', Kiln::Middleware::Compress.accepts_gzip?('x-gzip')
+check 'star allows gzip', Kiln::Middleware::Compress.accepts_gzip?('*')
+check 'explicit gzip;q=0 beats star', !Kiln::Middleware::Compress.accepts_gzip?('*, gzip;q=0')
+check 'identity only',
+      !Kiln::Middleware::Compress.accepts_gzip?('identity') && !Kiln::Middleware::Compress.accepts_gzip?(nil)
+check 'case and spaces', Kiln::Middleware::Compress.accepts_gzip?(' GZip ; Q=0.5 ')
+check 'q outside 0..1 is ignored', !Kiln::Middleware::Compress.accepts_gzip?('gzip;q=2')
+check 'q without a value is ignored', !Kiln::Middleware::Compress.accepts_gzip?('gzip;q')
+check 'an invalid gzip q leaves the star', Kiln::Middleware::Compress.accepts_gzip?('*;q=0.1, gzip;q=2')
+check 'q accepts an empty fractional part', Kiln::Middleware::Compress.accepts_gzip?('gzip;q=1.')
+check 'q accepts three decimal places', Kiln::Middleware::Compress.accepts_gzip?('gzip;q=1.000')
+check 'q rejects more than three decimal places', !Kiln::Middleware::Compress.accepts_gzip?('gzip;q=1.0000')
+check 'the last valid q parameter wins', Kiln::Middleware::Compress.accepts_gzip?('gzip;q=0;q=1')
+raises('levels are validated', ArgumentError, 'levels') { Kiln::Middleware::Compress.new(->(_ctx) {}, level: 0) }
 
-failed_handle = Kiln::Gzip.open_handle(1)
-Kiln::Gzip.push(failed_handle, 'finished', 2)
-raises('a completed gzip stream cannot be written again', Kiln::CompressError, 'gzip stream finished') do
-  Kiln::Gzip.push(failed_handle, 'unexpected', 0)
+failed_handle = Kiln::Middleware::Gzip.open_handle(1)
+Kiln::Middleware::Gzip.push(failed_handle, 'finished', 2)
+raises('a completed gzip stream cannot be written again', Kiln::Middleware::CompressError, 'gzip stream finished') do
+  Kiln::Middleware::Gzip.push(failed_handle, 'unexpected', 0)
 end
-raises('a failed gzip stream cannot resume', Kiln::CompressError, 'gzip stream failed') do
-  Kiln::Gzip.push(failed_handle, 'unexpected', 0)
+raises('a failed gzip stream cannot resume', Kiln::Middleware::CompressError, 'gzip stream failed') do
+  Kiln::Middleware::Gzip.push(failed_handle, 'unexpected', 0)
 end
-Kiln::Gzip.close_handle(failed_handle)
-first_handle = Kiln::Gzip.open_handle(1)
-second_handle = Kiln::Gzip.open_handle(1)
+Kiln::Middleware::Gzip.close_handle(failed_handle)
+first_handle = Kiln::Middleware::Gzip.open_handle(1)
+second_handle = Kiln::Middleware::Gzip.open_handle(1)
 check 'a failed gzip stream cannot enter the pool twice', first_handle != second_handle
-Kiln::Gzip.close_handle(first_handle)
-Kiln::Gzip.close_handle(second_handle)
-reused_handle = Kiln::Gzip.open_handle(1)
-reused = Kiln::Gzip.push(reused_handle, 'pool reuse', 2)
+Kiln::Middleware::Gzip.close_handle(first_handle)
+Kiln::Middleware::Gzip.close_handle(second_handle)
+reused_handle = Kiln::Middleware::Gzip.open_handle(1)
+reused = Kiln::Middleware::Gzip.push(reused_handle, 'pool reuse', 2)
 check 'a pooled finished gzip stream resets before reuse', Zlib.gunzip(reused) == 'pool reuse'
-Kiln::Gzip.close_handle(reused_handle)
-empty_handle = Kiln::Gzip.open_handle(1)
-empty_start = Kiln::Gzip.push(empty_handle, '', 0)
-empty_flush = Kiln::Gzip.push(empty_handle, '', 1)
-empty_end = Kiln::Gzip.push(empty_handle, 'after flush', 2)
+Kiln::Middleware::Gzip.close_handle(reused_handle)
+empty_handle = Kiln::Middleware::Gzip.open_handle(1)
+empty_start = Kiln::Middleware::Gzip.push(empty_handle, '', 0)
+empty_flush = Kiln::Middleware::Gzip.push(empty_handle, '', 1)
+empty_end = Kiln::Middleware::Gzip.push(empty_handle, 'after flush', 2)
 check 'an empty gzip write and flush do not fail',
       Zlib.gunzip(empty_start + empty_flush + empty_end) == 'after flush'
-Kiln::Gzip.close_handle(empty_handle)
+Kiln::Middleware::Gzip.close_handle(empty_handle)
 
 puts '-- bodies'
 app = build_app
@@ -186,13 +187,13 @@ class RaisingBody
     raise 'boom'
   end
 end
-boom_router = Kiln::Router.new
+boom_router = Kiln::Routing::Router.new
 boom_router.get('/boom', lambda do |ctx|
   ctx.res.headers['Content-Type'] = 'text/plain'
   ctx.res.body = RaisingBody.new
 end)
-boom_log = Kiln::Log.new(StringIO.new)
-guarded = Kiln::Rescue.new(Kiln::Compress.new(boom_router.seal!, min_size: 1), boom_log)
+boom_log = Kiln::Observability::Log.new(StringIO.new)
+guarded = Kiln::Middleware::Rescue.new(Kiln::Middleware::Compress.new(boom_router.seal!, min_size: 1), boom_log)
 failed = gz(guarded, '/boom')
 check 'a body that raises is a plain 500',
       failed.status == 500 && failed.body == "internal error\n" &&
@@ -212,8 +213,8 @@ puts '-- files'
 root = Dir.mktmpdir('kiln-gzip')
 File.write(File.join(root, 'page.html'), TEXT)
 File.write(File.join(root, 'small.txt'), 'tiny')
-files = Kiln::Router.new.get('/f/*path', Kiln::Static.new(root)).seal!
-assets = Kiln::Compress.new(files)
+files = Kiln::Routing::Router.new.get('/f/*path', Kiln::Static.new(root)).seal!
+assets = Kiln::Middleware::Compress.new(files)
 page = gz(assets, '/f/page.html')
 check 'a static file is gzipped with a weak ETag',
       page.headers['Content-Encoding'] == 'gzip' && page.headers['ETag'].start_with?('W/"') &&
@@ -258,19 +259,19 @@ check 'If-Match star still compresses',
       starred.status == 200 && starred.headers['Content-Encoding'] == 'gzip' && starred.headers['ETag'] == weak
 
 mutations = 0
-updates = Kiln::Router.new
+updates = Kiln::Routing::Router.new
 updates.post('/update', lambda do |ctx|
   mutations += 1
   ctx.res.text(TEXT)
   ctx.res.headers['ETag'] = '"identity"'
 end)
-updated = Kiln::Testing.call(Kiln::Compress.new(updates.seal!), 'POST', '/update',
+updated = Kiln::Testing.call(Kiln::Middleware::Compress.new(updates.seal!), 'POST', '/update',
                              headers: { 'Accept-Encoding' => 'gzip', 'If-Match' => '"identity"' })
 check 'a conditional POST is not rejected after its handler has run',
       mutations == 1 && updated.status == 200 && updated.body == TEXT &&
       updated.headers['ETag'] == '"identity"' && updated.headers['Content-Encoding'].nil?
 
-log = Kiln::Log.new(StringIO.new)
+log = Kiln::Observability::Log.new(StringIO.new)
 [[:event, 0], [:event, 2], [:base, 0]].each do |backend, handlers|
   name = backend == :event ? "event/#{handlers}" : 'base'
   options = { log:, port: 0, host: '127.0.0.1', backend: }
@@ -288,8 +289,8 @@ log = Kiln::Log.new(StringIO.new)
   sock.write("GET /ticks HTTP/1.1\r\nHost: t\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n")
   EVENTS.pop(timeout: 3)
   early = (+'').b
-  limit = Kiln.now + 2.0
-  until (early.include?("\r\n\r\n") && early.bytesize > early.index("\r\n\r\n") + 20) || Kiln.now > limit
+  limit = Kiln::Runtime.now + 2.0
+  until (early.include?("\r\n\r\n") && early.bytesize > early.index("\r\n\r\n") + 20) || Kiln::Runtime.now > limit
     ready = IO.select([sock], nil, nil, 0.1)
     early << sock.readpartial(4096) if ready
   end

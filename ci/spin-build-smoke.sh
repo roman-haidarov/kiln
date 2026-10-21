@@ -19,9 +19,9 @@ cd "$scratch/kiln_smoke"
 "$spin" add kiln --path "$root"
 cat >bin/kiln_smoke.rb <<'RUBY'
 require 'kiln'
-json = Kiln::Json.generate({ 'x' => 'ё' })
+json = Kiln::HTTP::Json.generate({ 'x' => 'ё' })
 raise 'JSON mismatch' unless json == '{"x":"ё"}'
-raise 'version mismatch' unless Kiln::VERSION == '0.0.7'
+raise 'version mismatch' unless Kiln::VERSION == '0.0.8'
 puts 'kiln spin build ok'
 RUBY
 SPIN_NO_NATIVE_CACHE=1 SPIN_NATIVE_CACHE="$scratch/native-cache" "$spin" build

@@ -4,12 +4,10 @@ port = Integer(ARGV.fetch(0))
 count = Integer(ARGV.fetch(1))
 socket = nil
 100.times do
-  begin
-    socket = TCPSocket.new('127.0.0.1', port)
-    break
-  rescue SystemCallError
-    sleep 0.1
-  end
+  socket = TCPSocket.new('127.0.0.1', port)
+  break
+rescue SystemCallError
+  sleep 0.1
 end
 abort("unable to connect to port #{port}") unless socket
 

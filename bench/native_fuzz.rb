@@ -2,7 +2,7 @@ require 'open3'
 require 'tempfile'
 
 root = File.expand_path('..', __dir__)
-compiler = ENV.fetch('CC', 'cc')
+compiler = ENV.fetch('CC') { 'cc' }
 source = DATA.read
 Tempfile.create(['kiln-native-fuzz-', '.c']) do |file|
   file.write(source)

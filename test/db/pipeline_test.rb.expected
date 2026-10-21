@@ -1,0 +1,10 @@
+pg17 cap 64
+pg17 q 7,8
+pg17 import blocked
+pg17 reuse 1
+pg18 q 7,8
+pg18 import blocked
+pg18 reuse 1
+mysql84 pipeline off
+mariadb114 pipeline off
+ok pipeline

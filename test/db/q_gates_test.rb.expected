@@ -1,0 +1,37 @@
+pg17 q1 1
+pg17 q2 3 ada 3 3 9223372036854775807
+pg17 q3 3 4 2 6 2 1 3 1 2
+pg17 q4 1:1,1:2,2:,3:,:3 1:1
+pg17 q5 nil 30 3.85 big nil ada 1
+pg17 q6 1 0 1 2
+pg17 q7 3 3 3
+pg17 q8 VALIDATION_REJECTED COMMITTED 4 raised 0 yes
+pg17 q9 pg pg pg lockwait
+pg18 q1 1
+pg18 q2 3 ada 3 3 9223372036854775807
+pg18 q3 3 4 2 6 2 1 3 1 2
+pg18 q4 1:1,1:2,2:,3:,:3 1:1
+pg18 q5 nil 30 3.85 big nil ada 1
+pg18 q6 1 0 1 2
+pg18 q7 3 3 3
+pg18 q8 VALIDATION_REJECTED COMMITTED 4 raised 0 yes
+pg18 q9 pg pg pg lockwait
+mysql84 q1 1
+mysql84 q2 3 ada 3 3 9223372036854775807
+mysql84 q3 3 4 2 6 2 1 3 1 2
+mysql84 q4 1:1,1:2,2:,3:,:3 1:1
+mysql84 q5 nil 30 3.85 big nil ada 1
+mysql84 q6 1 0 1 2
+mysql84 q7 3 3 3
+mysql84 q8 VALIDATION_REJECTED COMMITTED 4 raised 0 yes
+mysql84 q9 blocked blocked yes lockwait
+mariadb114 q1 1
+mariadb114 q2 3 ada 3 3 9223372036854775807
+mariadb114 q3 3 4 2 6 2 1 3 1 2
+mariadb114 q4 1:1,1:2,2:,3:,:3 1:1
+mariadb114 q5 nil 30 3.85 big nil ada 1
+mariadb114 q6 1 0 1 2
+mariadb114 q7 3 3 3
+mariadb114 q8 VALIDATION_REJECTED COMMITTED 4 raised 0 yes
+mariadb114 q9 blocked blocked yes lockwait
+ok q-gates

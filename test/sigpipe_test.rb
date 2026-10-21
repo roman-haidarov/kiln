@@ -15,7 +15,7 @@ BIG = ('x' * (8 << 20)).freeze
 
 def serve(mode, file)
   backend, extra = MODES.fetch(mode)
-  router = Kiln::Router.new
+  router = Kiln::Routing::Router.new
   router.get('/', ->(ctx) { ctx.res.text('alive') })
   router.get('/big', ->(ctx) { ctx.res.text(BIG) })
   router.get('/stream', lambda { |ctx|
@@ -25,8 +25,8 @@ def serve(mode, file)
     end
   })
   router.seal!
-  server = Kiln::Server.new(router, nil, log: Kiln::Log.new(StringIO.new), backend: backend, host: '127.0.0.1',
-                                         port: 0, **extra)
+  server = Kiln::Server.new(router, nil, log: Kiln::Observability::Log.new(StringIO.new), backend: backend,
+                                         host: '127.0.0.1', port: 0, **extra)
   server.start
   File.write("#{file}.part", server.port.to_s)
   File.rename("#{file}.part", file)
@@ -44,8 +44,8 @@ rescue IOError, SystemCallError
 end
 
 def port_from(file)
-  limit = Kiln.now + 10
-  Kernel.sleep 0.02 until File.exist?(file) || Kiln.now >= limit
+  limit = Kiln::Runtime.now + 10
+  Kernel.sleep 0.02 until File.exist?(file) || Kiln::Runtime.now >= limit
   File.exist?(file) ? File.read(file).to_i : 0
 end
 

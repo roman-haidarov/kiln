@@ -22,19 +22,16 @@ def over_unix(path, data)
 end
 
 REQUEST = "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".freeze
-log = Kiln::Log.new(StringIO.new)
-router = Kiln::Router.new
+log = Kiln::Observability::Log.new(StringIO.new)
+router = Kiln::Routing::Router.new
 router.get('/', ->(ctx) { ctx.res.text("#{ctx.req.scheme} ok") })
 router.seal!
 path = "/tmp/kiln-listen-#{Process.pid}.sock"
 FileUtils.rm_f(path)
 
 %i[event base].each do |backend|
-  server = Kiln::Server.new(
-    router, nil, log: log, backend: backend,
-    listen: [Kiln::Listen.tcp('127.0.0.1', 0), Kiln::Listen.unix(path, mode: 0o660)],
-    backlog: 64, tcp_nodelay: false
-  )
+  listen = [Kiln::Transport::Listen.tcp('127.0.0.1', 0), Kiln::Transport::Listen.unix(path, mode: 0o660)]
+  server = Kiln::Server.new(router, nil, log: log, backend: backend, listen: listen, backlog: 64, tcp_nodelay: false)
   server.start
   tcp_reply = exchange(server.port, REQUEST)
   unix_reply = over_unix(path, REQUEST)
@@ -46,16 +43,16 @@ FileUtils.rm_f(path)
   check "#{backend}: shutdown removes the unix socket file", !File.exist?(path)
 end
 
-fd = Kiln::Listen.tcp('127.0.0.1', 0).open(16, false)
-inherited_port = Kiln::Sock.kiln_sock_port(fd)
-adopted = Kiln::Server.new(router, nil, log: log, listen: [Kiln::Listen.fd(fd)])
+fd = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, false)
+inherited_port = Kiln::Transport::Sock.kiln_sock_port(fd)
+adopted = Kiln::Server.new(router, nil, log: log, listen: [Kiln::Transport::Listen.fd(fd)])
 adopted.start
 check 'event: a listening descriptor handed over is served', adopted.port == inherited_port &&
                                                              exchange(inherited_port, REQUEST).end_with?('http ok')
 adopted.shutdown(grace: 0.5)
 
-base_fd = Kiln::Listen.tcp('127.0.0.1', 0).open(16, false)
-base_port = Kiln::Sock.kiln_sock_port(base_fd)
+base_fd = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, false)
+base_port = Kiln::Transport::Sock.kiln_sock_port(base_fd)
 base_adopted = Kiln::Server.new(router, nil, log: log, backend: :base, listen: ["fd:#{base_fd}"])
 base_adopted.start
 check 'base: a listening descriptor named as fd:N is served', exchange(base_port, REQUEST).end_with?('http ok')
@@ -89,14 +86,14 @@ replaced.shutdown(grace: 0.5)
   File.delete(path)
 end
 
-shared = Kiln::Listen.tcp('127.0.0.1', 0).open(16, true)
-shared_port = Kiln::Sock.kiln_sock_port(shared)
+shared = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, true)
+shared_port = Kiln::Transport::Sock.kiln_sock_port(shared)
 first = Kiln::Server.new(router, nil, log: log, port: shared_port, host: '127.0.0.1', reuse_port: true)
 second = Kiln::Server.new(router, nil, log: log, backend: :base, port: shared_port, host: '127.0.0.1',
                                        reuse_port: true)
 first.start
 second.start
-Kiln::Sock.kiln_sock_close(shared)
+Kiln::Transport::Sock.kiln_sock_close(shared)
 answers = Array.new(6) { exchange(shared_port, REQUEST).end_with?('http ok') }
 check 'reuse_port lets two servers bind one port', answers.all?
 first.shutdown(grace: 0.5)
@@ -124,33 +121,35 @@ end
 rejects('buffer_body cannot exceed max_body on base') do
   Kiln::Server.new(router, nil, log: log, backend: :base, max_body: 1024, buffer_body: 4096)
 end
-check 'Listen.systemd is empty without LISTEN_FDS', Kiln::Listen.systemd.empty?
-check 'Listen.parse reads an IPv6 address', Kiln::Listen.parse('[::1]:8080').host == '::1'
-rejects('listen needs a port') { Kiln::Listen.parse('localhost') }
+check 'Transport::Listen.systemd is empty without LISTEN_FDS', Kiln::Transport::Listen.systemd.empty?
+check 'Transport::Listen.parse reads an IPv6 address', Kiln::Transport::Listen.parse('[::1]:8080').host == '::1'
+rejects('listen needs a port') { Kiln::Transport::Listen.parse('localhost') }
 rejects('backlog must be positive') { Kiln::Server.new(router, nil, log: log, port: 0, backlog: 0) }
 rejects('max_connection_rate must not be negative') do
   Kiln::Server.new(router, nil, log: log, port: 0, max_connection_rate: -1)
 end
 rejects('base refuses TLS') do
-  tls = Kiln::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem')
+  tls = Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem')
   Kiln::Server.new(router, nil, log: log, backend: :base, port: 0, tls: tls)
 end
 rejects('TLS refuses unsupported h2 ALPN') do
-  Kiln::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem', alpn: ['h2'])
+  Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem', alpn: ['h2'])
 end
 rejects('TLS refuses mixed supported and unsupported ALPN') do
-  Kiln::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem',
-                alpn: ['http/1.1', 'h2'])
+  Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem',
+                           alpn: ['http/1.1', 'h2'])
 end
 check 'TLS accepts HTTP/1.1 ALPN',
-      Kiln::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem').alpn == ['http/1.1']
+      Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem',
+                               key: 'test/fixtures/tls_key.pem').alpn == ['http/1.1']
 rejects('TLS refuses empty ALPN') do
-  Kiln::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem', alpn: [])
+  Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem', alpn: [])
 end
 custom_alpn = ['http/1.1']
-frozen_tls = Kiln::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem', alpn: custom_alpn)
+frozen_tls = Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem',
+                                      alpn: custom_alpn)
 custom_alpn[0] = 'h2'
 check 'TLS ALPN is independent of the caller array', frozen_tls.alpn == ['http/1.1']
 check 'TLS ALPN and the default protocol string cannot be mutated',
-      frozen_tls.alpn.frozen? && frozen_tls.alpn[0].frozen? && Kiln::Tls::DEFAULT_ALPN[0].frozen?
+      frozen_tls.alpn.frozen? && frozen_tls.alpn[0].frozen? && Kiln::Transport::Tls::DEFAULT_ALPN[0].frozen?
 log.close

@@ -1,0 +1,4 @@
+class KilnGateCUser < Kiln::DB::Model
+end
+KilnGateCUser.define_table(:postgres, 'kiln_gate_c_user', ['id', 'name'], ['id'], 'kiln_gate_c_user')
+ok gen-emit

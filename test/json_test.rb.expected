@@ -59,12 +59,12 @@ ok   other charset refused
 ok   text/plain refused
 ok   form type
 -- request bodies
-ok   Request#json
-ok   Request#json is memoized
-ok   Request#json reapplies a stricter nesting limit
-ok   missing content type -> UnsupportedMediaType
-ok   bad body -> BadRequest
-ok   nil body -> BadRequest
+ok   HTTP::Request#json
+ok   HTTP::Request#json is memoized
+ok   HTTP::Request#json reapplies a stricter nesting limit
+ok   missing content type -> HTTP::UnsupportedMediaType
+ok   bad body -> HTTP::BadRequest
+ok   nil body -> HTTP::BadRequest
 ok   query_params decodes, last value wins
 ok   empty query
 ok   query with invalid UTF-8
@@ -83,7 +83,7 @@ ok   SameSite=None needs Secure
 ok   echo: 200 with JSON body
 ok   invalid body: 400 with reason
 ok   wrong content type: 415
-ok   JsonError outside Request#json is a 500
+ok   HTTP::JsonError outside HTTP::Request#json is a 500
 ok   generate error is a 500
 -- server
 ok   event: JSON round trip over HTTP

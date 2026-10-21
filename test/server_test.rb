@@ -6,9 +6,9 @@ def raw(port, data, wait: 1.5)
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write(data)
   out = (+'').b
-  limit = Kiln.now + wait
+  limit = Kiln::Runtime.now + wait
   loop do
-    left = limit - Kiln.now
+    left = limit - Kiln::Runtime.now
     break if left <= 0
 
     ready, = IO.select([sock], nil, nil, left)
@@ -52,16 +52,16 @@ end
 
 HITS = Queue.new
 MADE = Queue.new
-POOL = Kiln::Pool.new(1) do
+POOL = Kiln::Runtime::Pool.new(1) do
   MADE << 1
   Conn.new
 end
-CPU = Kiln::CpuPool.new(1)
+CPU = Kiln::Runtime::CpuPool.new(1)
 WATCH = Queue.new
 HUGE_BODY = ('z' * (64 * 1024 * 1024)).freeze
-LOG = Kiln::Log.new(StringIO.new)
+LOG = Kiln::Observability::Log.new(StringIO.new)
 
-r = Kiln::Router.new
+r = Kiln::Routing::Router.new
 r.draw do |routes|
   routes.get('/health',  Handler.new { |c| c.res.text("ok\n") })
   routes.get('/utf',     Handler.new { |c| c.res.text('привет') })
@@ -84,16 +84,16 @@ r.draw do |routes|
     c.res.body = 'secret-body'
   end)
   routes.get('/watch', Handler.new do |c|
-    limit = Kiln.now + 0.2
+    limit = Kiln::Runtime.now + 0.2
     gone = false
-    until gone || Kiln.now > limit
+    until gone || Kiln::Runtime.now > limit
       gone = c.client_gone?
       Kernel.sleep 0.01
     end
     WATCH << (gone ? :gone : :timeout)
     c.res.text('watched')
   end)
-  routes.get('/abandoned', Handler.new { |_c| raise Kiln::ClientGone, 'client left' })
+  routes.get('/abandoned', Handler.new { |_c| raise Kiln::Runtime::ClientGone, 'client left' })
   routes.get('/alive',   Handler.new { |c| c.res.text(c.client_gone? ? 'gone' : 'alive') })
   routes.get('/evil',    Handler.new do |c|
     c.res.headers['X-Evil'] = "a\r\nInjected: yes"
@@ -125,24 +125,24 @@ r.draw do |routes|
   routes.get('/huge',    Handler.new { |c| c.res.text(HUGE_BODY) })
 end
 
-srv = Kiln::Server::Base.new(Kiln::Rescue.new(r, LOG), nil, log: LOG, port: 0, host: '127.0.0.1',
-                                                            request_timeout: 0.3, kill_grace: 0.2,
-                                                            write_timeout: 0.5, max_conns: 50, shards: 4)
+srv = Kiln::Server::Base.new(Kiln::Middleware::Rescue.new(r, LOG), nil, log: LOG, port: 0, host: '127.0.0.1',
+                                                                        request_timeout: 0.3, kill_grace: 0.2,
+                                                                        write_timeout: 0.5, max_conns: 50, shards: 4)
 srv.start
 pt = srv.port
 
 puts '-- protocol'
 check 'GET /health 200', codes(get(pt, '/health')) == ['200']
 silent = TCPSocket.new('127.0.0.1', pt)
-limit = Kiln.now + 1
-while srv.connections < 1 && Kiln.now < limit
-  Kiln.pause(0.01)
+limit = Kiln::Runtime.now + 1
+while srv.connections < 1 && Kiln::Runtime.now < limit
+  Kiln::Runtime.pause(0.01)
 end
 admitted = srv.connections >= 1
-Kiln.pause(0.05)
-started = Kiln.now
+Kiln::Runtime.pause(0.05)
+started = Kiln::Runtime.now
 healthy = get(pt, '/health')
-waited = Kiln.now - started
+waited = Kiln::Runtime.now - started
 silent.close
 check 'silent connection does not stall another request',
       admitted && codes(healthy) == ['200'] && waited < 1
@@ -208,14 +208,14 @@ batch = (+'').b
 batch << "GET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b
 check '16 pipelined requests in one packet -> 16 responses', raw(pt, batch).scan('HTTP/1.1 200 '.b).size == 16
 o = raw(pt, "GET /health HTTP/1.1\r\nHost: x\r\n\r\nGET /health HTTP/9.9\r\n\r\n".b)
-check 'pipelined good + malformed: 200 is sent before 400', o.index('HTTP/1.1 200 '.b) == 0 && o.include?(' 400 '.b)
+check 'pipelined good + malformed: 200 is sent before 400', o.index('HTTP/1.1 200 '.b).zero? && o.include?(' 400 '.b)
 cont = TCPSocket.new('127.0.0.1', pt)
 cont.write("GET /health HTTP/1.1\r\nHost: x\r\n\r\n" \
            "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\n" \
            "Expect: 100-continue\r\nConnection: close\r\n\r\n".b)
 seen = (+'').b
-limit = Kiln.now + 2
-until seen.include?('100 Continue'.b) || Kiln.now > limit
+limit = Kiln::Runtime.now + 2
+until seen.include?('100 Continue'.b) || Kiln::Runtime.now > limit
   IO.select([cont], nil, nil, 0.2)
   seen << begin
     cont.read_nonblock(4096, exception: false)
@@ -230,14 +230,14 @@ check 'pipelined response is sent before 100 Continue', first_ok.zero? && cont_a
 cont.close
 o = raw(pt, "GET /health HTTP/1.1\r\nHost: x\r\n\r\nGET /swallow HTTP/1.1\r\nHost: x\r\n\r\n".b, wait: 3)
 check 'pipelined good + stuck handler: 200 then 504 from reaper',
-      o.index('HTTP/1.1 200 '.b) == 0 && o.include?('HTTP/1.1 504 '.b)
+      o.index('HTTP/1.1 200 '.b).zero? && o.include?('HTTP/1.1 504 '.b)
 watcher = TCPSocket.new('127.0.0.1', pt)
 watcher.write("GET /watch HTTP/1.1\r\nHost: x\r\n\r\n")
 Kernel.sleep 0.03
 watcher.close
-t_watch = Kiln.now
+t_watch = Kiln::Runtime.now
 seen_gone = WATCH.pop(timeout: 3)
-check 'handler sees client disconnect via client_gone?', seen_gone == :gone && Kiln.now - t_watch < 1.0
+check 'handler sees client disconnect via client_gone?', seen_gone == :gone && Kiln::Runtime.now - t_watch < 1.0
 o = raw(pt, "GET /alive HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b)
 check 'client_gone? is false while the client waits', body(o) == 'alive'
 half = TCPSocket.new('127.0.0.1', pt)
@@ -246,11 +246,11 @@ Kernel.sleep 0.03
 half.write("GET /unread HTTP/1.1\r\n")
 half.shutdown(Socket::SHUT_WR)
 seen_half = WATCH.pop(timeout: 3)
-expected_half = Kiln::HttpNative.kiln_peer_closed_uses_rdhup == 1 ? :gone : :timeout
+expected_half = Kiln::HTTP::Native.kiln_peer_closed_uses_rdhup == 1 ? :gone : :timeout
 check 'client_gone? follows platform semantics with unread bytes pending', seen_half == expected_half
 half.close
 o = raw(pt, "GET /abandoned HTTP/1.1\r\nHost: x\r\n\r\n".b, wait: 2)
-check 'ClientGone closes the connection without a 500 response', o.empty?
+check 'Runtime::ClientGone closes the connection without a 500 response', o.empty?
 check 'GET * -> 400', codes(raw(pt, "GET * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b)) == ['400']
 o = raw(pt, "GET /badstatus HTTP/1.1\r\nHost: x\r\n\r\nGET /health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b)
 first_end = o.index("internal error\n".b)
@@ -381,17 +381,17 @@ check 'origin-form without Host -> 400',
       codes(raw(pt, "GET /health HTTP/1.1\r\nConnection: close\r\n\r\n".b)) == ['400']
 
 puts '-- deadlines'
-t = Kiln.now
+t = Kiln::Runtime.now
 o = get(pt, '/sleep')
-check 'ctx.sleep hits deadline -> fast 504', codes(o) == ['504'] && Kiln.now - t < 0.45
-t = Kiln.now
+check 'ctx.sleep hits deadline -> fast 504', codes(o) == ['504'] && Kiln::Runtime.now - t < 0.45
+t = Kiln::Runtime.now
 o = get(pt, '/swallow')
-check 'handler that ignores deadline is killed by reaper -> 504', codes(o) == ['504'] && Kiln.now - t < 1.0
+check 'handler that ignores deadline is killed by reaper -> 504', codes(o) == ['504'] && Kiln::Runtime.now - t < 1.0
 holder = Thread.new { POOL.with(timeout: 5) { |_x| Kernel.sleep 0.8 } }
 Kernel.sleep 0.05
-t = Kiln.now
+t = Kiln::Runtime.now
 o = get(pt, '/pool')
-check 'pool wait is bounded by deadline -> 504', codes(o) == ['504'] && Kiln.now - t < 0.45
+check 'pool wait is bounded by deadline -> 504', codes(o) == ['504'] && Kiln::Runtime.now - t < 0.45
 holder.join
 made_before = MADE.size
 o = get(pt, '/stuck')
@@ -408,8 +408,8 @@ Kernel.sleep 0.05
 o = get(pt, '/cpu')
 busy.join
 Kernel.sleep 0.05
-check 'CpuPool: 504; task after deadline was not started', codes(o) == ['504'] && CPU.skipped == 1
-check 'CpuPool remains alive', codes(get(pt, '/cpu')) == ['200']
+check 'Runtime::CpuPool: 504; task after deadline was not started', codes(o) == ['504'] && CPU.skipped == 1
+check 'Runtime::CpuPool remains alive', codes(get(pt, '/cpu')) == ['200']
 
 swallowers = 5.times.map { Thread.new { codes(get(pt, '/swallow')) } }
 results = swallowers.map(&:value)
@@ -428,7 +428,7 @@ class GatedTimeoutServer < Kiln::Server::Base
 end
 
 slow_srv = GatedTimeoutServer.new(->(ctx) { ctx.res.text(HUGE_BODY) }, nil,
-                                  log: Kiln::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
+                                  log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
                                   write_timeout: 0.2, max_conns: 1)
 write_entered = Queue.new
 continue_write = Queue.new
@@ -440,8 +440,8 @@ s.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 check 'write reaches response body', write_entered.pop(timeout: 2) == true
 Kernel.sleep 0.25
 continue_write << true
-slow_limit = Kiln.now + 2.0
-Kernel.sleep 0.01 while slow_srv.connections.positive? && Kiln.now < slow_limit
+slow_limit = Kiln::Runtime.now + 2.0
+Kernel.sleep 0.01 while slow_srv.connections.positive? && Kiln::Runtime.now < slow_limit
 check 'expired write deadline closes the connection', slow_srv.connections.zero?
 s.close
 slow_srv.shutdown(grace: 0)
@@ -450,9 +450,9 @@ puts '-- in-flight request accounting'
 ka = TCPSocket.new('127.0.0.1', pt)
 200.times { ka.write("GET /health HTTP/1.1\r\nHost: x\r\n\r\n") }
 got = (+'').b
-limit = Kiln.now + 3
-while got.scan('HTTP/1.1 200'.b).size < 200 && Kiln.now < limit
-  r, = IO.select([ka], nil, nil, limit - Kiln.now)
+limit = Kiln::Runtime.now + 3
+while got.scan('HTTP/1.1 200'.b).size < 200 && Kiln::Runtime.now < limit
+  r, = IO.select([ka], nil, nil, limit - Kiln::Runtime.now)
   break unless r
 
   got << ka.readpartial(65_536)
@@ -472,10 +472,11 @@ class Lingering
     ctx.res.text('never')
   end
 end
-lr = Kiln::Router.new
+lr = Kiln::Routing::Router.new
 lr.get('/linger', Lingering.new)
-lsrv = Kiln::Server::Base.new(Kiln::Rescue.new(lr, LOG), nil, log: LOG, port: 0, host: '127.0.0.1',
-                                                              request_timeout: 0.2, kill_grace: 0.1, max_conns: 2)
+lsrv = Kiln::Server::Base.new(Kiln::Middleware::Rescue.new(lr, LOG), nil, log: LOG, port: 0, host: '127.0.0.1',
+                                                                          request_timeout: 0.2, kill_grace: 0.1,
+                                                                          max_conns: 2)
 lsrv.start
 lp = lsrv.port
 lt = Thread.new { raw(lp, "GET /linger HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b, wait: 2) }

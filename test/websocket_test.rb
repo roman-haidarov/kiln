@@ -28,7 +28,7 @@ def ws_frame(opcode, data, fin: true, masked: true)
   return out + data unless masked
 
   out << (WS_MASK >> 24) << ((WS_MASK >> 16) & 0xFF) << ((WS_MASK >> 8) & 0xFF) << (WS_MASK & 0xFF)
-  out + (size.zero? ? data : Kiln::WsNative.kiln_ws_mask(data, size, WS_MASK))
+  out + (size.zero? ? data : Kiln::HTTP::WsNative.kiln_ws_mask(data, size, WS_MASK))
 end
 
 class WsClient
@@ -54,13 +54,13 @@ class WsClient
   end
 
   def receive(seconds = 2.0)
-    limit = Kiln.now + seconds
+    limit = Kiln::Runtime.now + seconds
     loop do
       parsed = parse
       return parsed if parsed
-      return nil if Kiln.now >= limit
+      return nil if Kiln::Runtime.now >= limit
 
-      ready, = IO.select([@io], nil, nil, limit - Kiln.now)
+      ready, = IO.select([@io], nil, nil, limit - Kiln::Runtime.now)
       next unless ready
 
       chunk = begin
@@ -112,10 +112,10 @@ class WsClient
   end
 end
 
-log = Kiln::Log.new(StringIO.new)
+log = Kiln::Observability::Log.new(StringIO.new)
 GOT = Queue.new
 CLOSE_CHECKS = Queue.new
-router = Kiln::Router.new
+router = Kiln::Routing::Router.new
 router.get('/ws', lambda { |ctx|
   ctx.res.websocket(ctx, protocols: %w[chat echo], max_message: 4096) do |ws|
     ws.each do |message|
@@ -229,7 +229,7 @@ long = 'w' * 70_000
   GOT.pop(timeout: 2)
   reason.close
 
-  huge =WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
+  huge = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   huge.send(2, long)
   check "#{backend}: a message over max_message closes with 1009", huge.close_code == 1009
   GOT.pop(timeout: 2)

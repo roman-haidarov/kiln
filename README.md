@@ -30,6 +30,10 @@ protocol work.
   architecture-specific optimizations where available.
 - [OpenSSL](https://github.com/openssl/openssl) provides TLS. Kiln loads the
   system OpenSSL library at runtime rather than bundling it.
+- [libpq](https://www.postgresql.org/docs/current/libpq.html) connects Kiln::DB
+  to PostgreSQL.
+- [MariaDB Connector/C](https://mariadb.com/docs/connectors/mariadb-connector-c/)
+  connects Kiln::DB to MySQL and MariaDB.
 
 ## Ideas behind it
 
@@ -44,4 +48,7 @@ routing, room to organize application code by layer, and native compilation.
 
 ## Get started
 
-<p align="center"><a href="getstarted.md"><strong>Installation, examples, and usage →</strong></a></p>
+<p align="center"><a href="docs/GET_STARTED.md"><strong>Installation, examples, and usage →</strong></a></p>
+
+Kiln::DB (experimental, built only on request) covers database adapters,
+models, queries and result shapes: see [DB.md](DB.md).

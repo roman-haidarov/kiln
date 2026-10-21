@@ -11,7 +11,7 @@ end
 class FatalClose < Exception; end
 
 live = []
-failed = Kiln::Pool.new(1, close: ->(_resource) { raise IOError, 'close failed' }) do
+failed = Kiln::Runtime::Pool.new(1, close: ->(_resource) { raise IOError, 'close failed' }) do
   resource, peer = Socket.pair(Socket::AF_UNIX, Socket::SOCK_STREAM, 0)
   peer.close
   live << resource
@@ -25,7 +25,7 @@ end
 blocked = begin
   failed.with(timeout: 0.02) { |_resource| nil }
   false
-rescue Kiln::PoolTimeout
+rescue Kiln::Runtime::PoolTimeout
   true
 end
 check 'close failure preserves physical capacity limit',
@@ -33,7 +33,7 @@ check 'close failure preserves physical capacity limit',
 live.each(&:close)
 
 made = 0
-stale = Kiln::Pool.new(1, validate: ->(_resource) { false }, close: lambda { |_resource|
+stale = Kiln::Runtime::Pool.new(1, validate: ->(_resource) { false }, close: lambda { |_resource|
   raise FatalClose, 'interrupted'
 }) do
   made += 1
@@ -51,7 +51,7 @@ check 'fatal stale-close error is counted without creating a new resource',
 
 entered = Queue.new
 gate = Queue.new
-killed = Kiln::Pool.new(1, close: lambda { |_resource|
+killed = Kiln::Runtime::Pool.new(1, close: lambda { |_resource|
   entered << true
   gate.pop
 }) { Object.new }
@@ -66,7 +66,7 @@ victim.join
 check 'interrupted close keeps its slot',
       pool_holds?(killed, failures: 1, quarantined: 1, available: 0)
 
-ordered = Kiln::Pool.new(1, close: ->(_resource) { true }) { Object.new }
+ordered = Kiln::Runtime::Pool.new(1, close: ->(_resource) { true }) { Object.new }
 begin
   ordered.with { raise IOError, 'discard' }
 rescue IOError
@@ -89,7 +89,8 @@ check 'late duplicate result releases the slot only once',
 puts '-- quarantine: release and policy'
 QConn = Struct.new(:n)
 gate_c = 0
-stale_retry = Kiln::Pool.new(2, validate: ->(c) { c.n != 1 }, close: ->(_c) { raise IOError, 'close failed' }) do
+stale_retry = Kiln::Runtime::Pool.new(2, validate: ->(c) { c.n != 1 },
+                                         close: ->(_c) { raise IOError, 'close failed' }) do
   gate_c += 1
   QConn.new(gate_c)
 end
@@ -100,9 +101,9 @@ check 'stale resource close failure quarantined; another resource checked out',
 released = stale_retry.release_quarantined
 check 'release_quarantined restores capacity',
       released == 1 && pool_holds?(stale_retry, quarantined: 0, available: 2)
-lenient = Kiln::Pool.new(1, discard: ->(_e) { true },
-                            close: ->(_c) { raise IOError, 'close failed' },
-                            on_close_failure: :release) { QConn.new(1) }
+lenient = Kiln::Runtime::Pool.new(1, discard: ->(_e) { true },
+                                     close: ->(_c) { raise IOError, 'close failed' },
+                                     on_close_failure: :release) { QConn.new(1) }
 begin
   lenient.with { raise IOError, 'drop' }
 rescue IOError
@@ -141,12 +142,12 @@ end
 
 close_entered = Queue.new
 close_gate = Queue.new
-released_race = Kiln::Pool.new(1, on_close_failure: :release,
-                                  close: lambda { |_resource|
-                                    close_entered << true
-                                    close_gate.pop
-                                    true
-                                  }) { Object.new }
+released_race = Kiln::Runtime::Pool.new(1, on_close_failure: :release,
+                                           close: lambda { |_resource|
+                                             close_entered << true
+                                             close_gate.pop
+                                             true
+                                           }) { Object.new }
 closer_thread = Thread.new do
   released_race.with { raise IOError, 'discard' }
 rescue IOError
@@ -177,7 +178,7 @@ check 'late close success does not release capacity twice after manual release',
 end
 
 r = begin
-  Kiln::Pool.new(1, on_close_failure: :ignore) { QConn.new(1) }
+  Kiln::Runtime::Pool.new(1, on_close_failure: :ignore) { QConn.new(1) }
   :accepted
 rescue ArgumentError
   :rejected

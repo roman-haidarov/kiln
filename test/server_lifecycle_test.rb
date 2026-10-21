@@ -14,7 +14,8 @@ def start_test_server(server_object)
 end
 
 def local_base(klass, max_conns:, &handler)
-  klass.new(handler, nil, log: Kiln::Log.new(StringIO.new), port: 0, host: '127.0.0.1', max_conns: max_conns)
+  klass.new(handler, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
+                          max_conns: max_conns)
 end
 
 class PausedServeServer < Kiln::Server::Base
@@ -107,7 +108,7 @@ class GatedFinalizeServer < Kiln::Server::Base
   end
 end
 
-reaper_server = GatedFinalizeServer.new(nil, nil, log: Kiln::Log.new(StringIO.new), port: 0,
+reaper_server = GatedFinalizeServer.new(nil, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0,
                                                   host: '127.0.0.1', max_conns: 1)
 reaper_server.finalize_entered = Queue.new
 reaper_server.continue_finalize = Queue.new
@@ -168,8 +169,8 @@ rescue IOError, SystemCallError
   nil
 end
 continue_write << true
-read_deadline = Kiln.now + 3
-Kernel.sleep 0.01 while response_reader.alive? && Kiln.now < read_deadline
+read_deadline = Kiln::Runtime.now + 3
+Kernel.sleep 0.01 while response_reader.alive? && Kiln::Runtime.now < read_deadline
 if response_reader.alive?
   wclient.close
   response_reader.kill

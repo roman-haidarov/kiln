@@ -12,38 +12,38 @@ end
 CALLS = Queue.new
 SHUTDOWN_CALLS = Queue.new
 LONG_STARTED = Queue.new
-log = Kiln::Log.new(StringIO.new)
-router = Kiln::Router.new
-                     .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
-                     .get('/sleep', lambda { |ctx|
-                                      ctx.sleep(0.3)
-                                      ctx.res.text("slept\n")
-                                    })
-                     .get('/long', lambda { |ctx|
-                                     LONG_STARTED << 1
-                                     Kernel.sleep 3
-                                     ctx.res.text("never\n")
-                                   })
-                     .get('/count', lambda { |ctx|
-                                      CALLS << 1
-                                      ctx.sleep(0.05)
-                                      ctx.res.text("counted\n")
-                                    })
-                     .get('/shutdown-pipe', lambda { |ctx|
-                                              SHUTDOWN_CALLS << 1
-                                              ctx.sleep(0.05)
-                                              ctx.res.text("piped\n")
+log = Kiln::Observability::Log.new(StringIO.new)
+router = Kiln::Routing::Router.new
+                              .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
+                              .get('/sleep', lambda { |ctx|
+                                               ctx.sleep(0.3)
+                                               ctx.res.text("slept\n")
+                                             })
+                              .get('/long', lambda { |ctx|
+                                              LONG_STARTED << 1
+                                              Kernel.sleep 3
+                                              ctx.res.text("never\n")
                                             })
-                     .seal!
+                              .get('/count', lambda { |ctx|
+                                               CALLS << 1
+                                               ctx.sleep(0.05)
+                                               ctx.res.text("counted\n")
+                                             })
+                              .get('/shutdown-pipe', lambda { |ctx|
+                                                       SHUTDOWN_CALLS << 1
+                                                       ctx.sleep(0.05)
+                                                       ctx.res.text("piped\n")
+                                                     })
+                              .seal!
 lanes = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: 4)
 lanes.start
 lp = lanes.port
 slow_result = Queue.new
 slow = Thread.new { slow_result << exchange(lp, "GET /sleep HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n") }
 Kernel.sleep 0.05
-started = Kiln.now
+started = Kiln::Runtime.now
 fast = exchange(lp, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-fast_took = Kiln.now - started
+fast_took = Kiln::Runtime.now - started
 slow.join
 check 'lanes: a waiting handler does not block another connection',
       fast.end_with?("Hello, World!\n") && fast_took < 0.2 && slow_result.pop.end_with?("slept\n")
@@ -79,9 +79,9 @@ stuck.start
 stuck_data = (1..3).map { |i| "GET /long HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n" }.join
 stuck_client = Thread.new { exchange(stuck.port, stuck_data, 3.0) }
 LONG_STARTED.pop
-t0 = Kiln.now
+t0 = Kiln::Runtime.now
 stuck_left = stuck.shutdown(grace: 0.2)
-took = Kiln.now - t0
+took = Kiln::Runtime.now - t0
 stuck_client.join
 check 'lanes: grace expired -> active and queued handlers are counted',
       stuck_left == 3 && took < 2.0 && stuck.connections.zero?
@@ -103,9 +103,9 @@ end
 crashed = CrashingPump.new(router, nil, log: log, port: 0, handlers: 1)
 crashed.start
 exchange(crashed.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", 0.5)
-t0 = Kiln.now
+t0 = Kiln::Runtime.now
 crashed.shutdown(grace: 0.2)
-check 'lanes: shutdown returns in bounded time when the loop thread has died', Kiln.now - t0 < 3.0
+check 'lanes: shutdown returns in bounded time when the loop thread has died', Kiln::Runtime.now - t0 < 3.0
 
 closing = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: 2)
 closing.start

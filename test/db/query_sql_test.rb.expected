@@ -1,0 +1,28 @@
+composite-key collision-free
+pg-where SELECT "u"."id", "u"."name" FROM "users" "u" WHERE "u"."id" = $1 binds 1
+pg-join SELECT "u"."id", "p"."title" FROM "users" "u" INNER JOIN "posts" "p" ON "p"."user_id" = "u"."id" binds 0
+pg-left SELECT "u"."id", "u"."name", "p"."id", "p"."user_id", "p"."title" FROM "users" "u" LEFT JOIN "posts" "p" ON "p"."user_id" = "u"."id" binds 0
+pg-full SELECT "u"."id", "g"."label" FROM "users" "u" FULL OUTER JOIN "tags" "g" ON "g"."id" = "u"."id" binds 0
+pg-group SELECT "p"."id", "p"."user_id", "p"."title" FROM "posts" "p" GROUP BY "p"."user_id" binds 0
+pg-count SELECT "p"."user_id", COUNT(*) FROM "posts" "p" GROUP BY "p"."user_id"
+pg-in SELECT "u"."id", "u"."name" FROM "users" "u" WHERE "u"."id" IN ($1, $2) binds 2
+pg-empty SELECT "u"."id", "u"."name" FROM "users" "u" WHERE FALSE binds 0
+pg-exists SELECT "u"."id", "u"."name" FROM "users" "u" WHERE EXISTS (SELECT 1 FROM "posts" "p" WHERE "p"."user_id" = "u"."id") binds 0
+pg-missing SELECT "u"."id", "u"."name" FROM "users" "u" WHERE NOT EXISTS (SELECT 1 FROM "posts" "p" WHERE "p"."user_id" = "u"."id") binds 0
+pg-from SELECT "u"."id", "u"."name" FROM (SELECT "u"."id", "u"."name" FROM "users" "u" WHERE "u"."id" = $1) "u" WHERE "u"."name" = $2 binds 2
+pg-self SELECT "u"."id", "u"."name", "u2"."id", "u2"."name" FROM "users" "u" INNER JOIN "users" "u2" ON "u"."id" = "u2"."id" binds 0
+pg-through SELECT "u"."id", "u"."name", "p"."id", "p"."user_id", "p"."title", "g"."id", "g"."label" FROM "users" "u" INNER JOIN "posts" "p" ON "p"."user_id" = "u"."id" INNER JOIN "tags" "g" ON "g"."id" = "p"."id" binds 0
+pg-root SELECT COUNT(DISTINCT "u"."id") FROM "users" "u"
+my-where SELECT `u`.`id`, `u`.`name` FROM `users` `u` WHERE `u`.`id` = ? binds 1
+my-full SELECT `kiln_full`.`u__id`, `kiln_full`.`g__label` FROM (SELECT `u`.`id` AS `u__id`, `g`.`label` AS `g__label` FROM `users` `u` LEFT JOIN `tags` `g` ON `g`.`id` = `u`.`id` UNION ALL SELECT NULL AS `u__id`, `g`.`label` AS `g__label` FROM `tags` `g` WHERE NOT EXISTS (SELECT 1 FROM `users` `u` WHERE `g`.`id` = `u`.`id`)) `kiln_full` binds 0
+my-full-exists SELECT `kiln_full`.`u__id`, `kiln_full`.`u__name`, `kiln_full`.`g__id`, `kiln_full`.`g__label` FROM (SELECT `u`.`id` AS `u__id`, `u`.`name` AS `u__name`, `g`.`id` AS `g__id`, `g`.`label` AS `g__label` FROM `users` `u` LEFT JOIN `tags` `g` ON `g`.`id` = `u`.`id` UNION ALL SELECT NULL AS `u__id`, NULL AS `u__name`, `g`.`id` AS `g__id`, `g`.`label` AS `g__label` FROM `tags` `g` WHERE NOT EXISTS (SELECT 1 FROM `users` `u` WHERE `g`.`id` = `u`.`id`)) `kiln_full` WHERE EXISTS (SELECT 1 FROM `posts` `p` WHERE (`p`.`user_id` = `kiln_full`.`u__id` AND `p`.`id` = `kiln_full`.`g__id`)) binds 0
+bad-ident
+bad-on
+bad-both
+bad-return
+mysql-ignore
+empty COMMITTED 0
+class Users < Kiln::DB::Model
+end
+Users.define_table(:postgres, 'users', ['id', 'name'], ['id'], 'users')
+ok query-sql

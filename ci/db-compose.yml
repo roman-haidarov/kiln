@@ -1,0 +1,91 @@
+services:
+  pg17:
+    image: ${KILN_DB_IMAGE_PG17}
+    environment:
+      POSTGRES_USER: ${KILN_DB_PG_USER}
+      POSTGRES_PASSWORD: ${KILN_DB_PG_PASSWORD}
+      POSTGRES_DB: ${KILN_DB_PG_DB}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    entrypoint: ["/bin/sh", "/kiln-config/pg-entry.sh"]
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - pg17-data:/var/lib/postgresql/data
+      - ${KILN_DB_CONFIG_DIR}:/kiln-config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+      start_period: 20s
+    restart: "no"
+  pg18:
+    image: ${KILN_DB_IMAGE_PG18}
+    environment:
+      POSTGRES_USER: ${KILN_DB_PG_USER}
+      POSTGRES_PASSWORD: ${KILN_DB_PG_PASSWORD}
+      POSTGRES_DB: ${KILN_DB_PG_DB}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    entrypoint: ["/bin/sh", "/kiln-config/pg-entry.sh"]
+    ports:
+      - "127.0.0.1::5432"
+    volumes:
+      - pg18-data:/var/lib/postgresql
+      - ${KILN_DB_CONFIG_DIR}:/kiln-config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+      start_period: 20s
+    restart: "no"
+  mysql84:
+    image: ${KILN_DB_IMAGE_MYSQL84}
+    environment:
+      MYSQL_USER: ${KILN_DB_MY_USER}
+      MYSQL_PASSWORD: ${KILN_DB_MY_PASSWORD}
+      MYSQL_DATABASE: ${KILN_DB_MY_DB}
+      MYSQL_ROOT_PASSWORD: ${KILN_DB_MY_ROOT_PASSWORD}
+    entrypoint: ["/bin/sh", "/kiln-config/my-entry.sh"]
+    ports:
+      - "127.0.0.1::3306"
+    volumes:
+      - mysql84-data:/var/lib/mysql
+      - ${KILN_DB_CONFIG_DIR}:/kiln-config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin --protocol=socket -uroot -p\"$$MYSQL_ROOT_PASSWORD\" ping --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+      start_period: 40s
+    restart: "no"
+  mariadb114:
+    image: ${KILN_DB_IMAGE_MARIADB114}
+    environment:
+      MARIADB_USER: ${KILN_DB_MY_USER}
+      MARIADB_PASSWORD: ${KILN_DB_MY_PASSWORD}
+      MARIADB_DATABASE: ${KILN_DB_MY_DB}
+      MARIADB_ROOT_PASSWORD: ${KILN_DB_MY_ROOT_PASSWORD}
+      MYSQL_USER: ${KILN_DB_MY_USER}
+      MYSQL_PASSWORD: ${KILN_DB_MY_PASSWORD}
+      MYSQL_DATABASE: ${KILN_DB_MY_DB}
+      MYSQL_ROOT_PASSWORD: ${KILN_DB_MY_ROOT_PASSWORD}
+      MARIADB_AUTO_UPGRADE: "1"
+    entrypoint: ["/bin/sh", "/kiln-config/maria-entry.sh"]
+    ports:
+      - "127.0.0.1::3306"
+    volumes:
+      - mariadb114-data:/var/lib/mysql
+      - ${KILN_DB_CONFIG_DIR}:/kiln-config:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 50
+      start_period: 40s
+    restart: "no"
+volumes:
+  pg17-data:
+  pg18-data:
+  mysql84-data:
+  mariadb114-data:

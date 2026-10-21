@@ -19,11 +19,11 @@ end
 def rejects(label, fragment)
   yield
   raise "#{label} accepted"
-rescue ArgumentError => caught
-  check(label, caught.message.include?(fragment))
+rescue ArgumentError => e
+  check(label, e.message.include?(fragment))
 end
 
-log = Kiln::Log.new(StringIO.new)
+log = Kiln::Observability::Log.new(StringIO.new)
 
 event = Kiln::Server.new(->(ctx) { ctx.res.text('ok') }, nil, log: log, port: 0)
 check('event is the default backend', event.backend == :event)

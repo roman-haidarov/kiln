@@ -40,8 +40,8 @@ end
 
 UPLOAD = ('0123456789abcdef' * 262_144).b.freeze
 SMALL = ('abcdefgh' * 512).b.freeze
-log = Kiln::Log.new(StringIO.new)
-router = Kiln::Router.new
+log = Kiln::Observability::Log.new(StringIO.new)
+router = Kiln::Routing::Router.new
 router.post('/count', lambda { |ctx|
   payload = ctx.req.payload
   total = 0
@@ -157,7 +157,7 @@ router.seal!
   server.shutdown(grace: 1.0)
 end
 
-stalled = Kiln::Router.new
+stalled = Kiln::Routing::Router.new
 stalled.post('/wait', ->(ctx) { ctx.res.text("len=#{ctx.req.body.bytesize}") })
 stalled.post('/deaf', lambda { |ctx|
   Thread.current[:kiln_deadline] = nil
@@ -175,9 +175,9 @@ stalled.seal!
   %w[/wait /deaf].each do |path|
     sock = TCPSocket.new('127.0.0.1', port)
     sock.write("POST #{path} HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\nConnection: close\r\n\r\nstart")
-    started = Kiln.now
+    started = Kiln::Runtime.now
     reply = read_until_closed(sock, 4)
-    took = Kiln.now - started
+    took = Kiln::Runtime.now - started
     sock.close
     check "#{label}: a handler waiting on a stalled body #{path} gets 504 at its deadline",
           reply.start_with?('HTTP/1.1 504 ') && took < 2.0
@@ -189,14 +189,14 @@ stalled.seal!
   server.shutdown(grace: 1.0)
 end
 
-payload = Kiln::Payload.buffered('hello world'.b, nil)
+payload = Kiln::HTTP::Payload.buffered('hello world'.b, nil)
 check 'a buffered payload reads in pieces',
       payload.read(5) == 'hello' && payload.read(100) == ' world' && payload.read.nil?
-limited = Kiln::Payload.buffered('hello world'.b, 4)
+limited = Kiln::HTTP::Payload.buffered('hello world'.b, 4)
 refused = begin
   limited.read_all
   false
-rescue Kiln::PayloadTooLarge
+rescue Kiln::HTTP::PayloadTooLarge
   true
 end
 check 'a buffered payload enforces its limit', refused
