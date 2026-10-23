@@ -54,23 +54,23 @@ module Kiln
       NUM_SUB = 2
       NUM_MUL = 3
       NUM_DIV = 4
-      NUM_MOD = 5
       NUM_NEG = 6
 
       ffi_func :kiln_db_configure_values, %i[int_array int], :int
       ffi_func :kiln_db_now_ms, [], :long
       ffi_func :kiln_db_load_kind, [:int], :int
       ffi_func :kiln_db_client_version, [:int], :long
-      ffi_func :kiln_db_caps, [:int], :long
       ffi_func :kiln_db_load_error, [], :str
       ffi_func :kiln_db_conn_create, %i[int long long int_array], :long
       ffi_func :kiln_db_conn_set, %i[long long long str long int str long str long str long int str long int str long],
                :int
       ffi_func :kiln_db_set_sql, %i[long long long str long], :int
       ffi_func :kiln_db_set_format, %i[long long long int int], :int
+      ffi_func :kiln_db_set_stmt_cache, %i[long long long int], :int
       ffi_func :kiln_db_bind_str, %i[long long long int str long int int], :int
       ffi_func :kiln_db_result_types, %i[long long long int_array int], :int
       ffi_func :kiln_db_result_row, %i[long long long long int_array int], :binstr
+      ffi_func :kiln_db_result_rows, %i[long long long long long long int_array int int_array int], :binstr
       ffi_func :kiln_db_conn_broken, %i[long long long], :int
       ffi_func :kiln_db_os_thread_token, [], :long
       ffi_func :kiln_db_dns_submit, %i[str long int_array int], :int
@@ -100,7 +100,7 @@ module Kiln
       module Calls
         def configure
           values = [65_536, 1024, 4096, 67_108_864, 8, 64, 16, 5000]
-          Native.kiln_db_configure_values(values, 8)
+          Native.kiln_db_configure_values(values, values.length)
         end
 
         def now_ms
@@ -167,6 +167,10 @@ module Kiln
 
         def set_format(handle, scope, thread_id, format, chunk)
           Native.kiln_db_set_format(handle, scope, thread_id, format, chunk)
+        end
+
+        def set_stmt_cache(handle, scope, thread_id, capacity)
+          Native.kiln_db_set_stmt_cache(handle, scope, thread_id, capacity)
         end
 
         def bind_str(handle, scope, thread_id, index, encoded)

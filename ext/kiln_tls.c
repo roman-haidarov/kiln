@@ -34,6 +34,8 @@ extern int sp_ffi_bin_len;
 #define KTLS_ALPN_NOACK          3
 #define KTLS_NEGOTIATED          1
 #define KTLS_ALPN_MAX            255
+#define KTLS_ALPN_ID_MAX         255
+#define KTLS_RECORD_MAX          16384
 
 typedef struct ssl_ctx_st SSL_CTX;
 typedef struct ssl_st SSL;
@@ -242,7 +244,7 @@ static int ktls_alpn_wire(ktls_context *context, const char *list) {
     while (at && *at) {
         const char *comma = strchr(at, ',');
         size_t n = comma ? (size_t)(comma - at) : strlen(at);
-        if (n == 0 || n > 255 || len + 1 + n > KTLS_ALPN_MAX)
+        if (n == 0 || n > KTLS_ALPN_ID_MAX || len + 1 + n > KTLS_ALPN_MAX)
             return -1;
         context->alpn[len++] = (unsigned char)n;
         memcpy(context->alpn + len, at, n);
@@ -426,7 +428,7 @@ long kiln_tls_read(kiln_tls_conn *conn, char *out, size_t cap) {
 int kiln_tls_write(kiln_tls_conn *conn, const char *data, size_t len, size_t *consumed) {
     *consumed = 0;
     while (len > 0) {
-        int chunk = len > 16384 ? 16384 : (int)len;
+        int chunk = len > KTLS_RECORD_MAX ? KTLS_RECORD_MAX : (int)len;
         int rc = ktls.write(conn->ssl, data, chunk);
         if (rc <= 0) {
             int err = ktls.get_error(conn->ssl, rc);

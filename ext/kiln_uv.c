@@ -141,6 +141,7 @@ typedef struct kuv_conn {
     int tunnel;
     int lingering;
     int resume_parse;
+    size_t head_scanned;
 } kuv_conn;
 
 typedef struct kuv_req {
@@ -692,6 +693,7 @@ static void kuv_track_head(kuv_conn *c) {
 
 static void kuv_parse(kuv_conn *c) {
     size_t pos = 0;
+    int partial_head = 0;
     while (
         !c->close_after_flush && !c->stop_parse && !c->hold && !c->body_active && pos < c->in_len) {
         if (c->pending + c->awaiting >= KUV_PIPELINE_MAX) {
@@ -702,9 +704,11 @@ static void kuv_parse(kuv_conn *c) {
         size_t avail = c->in_len - pos;
         int64_t scan[KILN_UV_SCAN_CAP];
         kiln_uv_parse_result parsed;
-        int state =
-            kiln_uv_parse_request(start, avail, kuv_buffer_body, scan, KILN_UV_SCAN_CAP, &parsed);
+        size_t scan_from = pos == 0 ? c->head_scanned : 0;
+        int state = kiln_uv_parse_request_from(
+            start, avail, scan_from, kuv_buffer_body, scan, KILN_UV_SCAN_CAP, &parsed);
         if (state < 0) {
+            c->head_scanned = 0;
             kuv_close(c);
             return;
         }
@@ -714,18 +718,22 @@ static void kuv_parse(kuv_conn *c) {
         }
         if (state == KILN_UV_PARSE_INCOMPLETE) {
             c->body_wait = parsed.head_len > 0;
+            partial_head = parsed.head_len == 0;
             if (parsed.expect_continue) {
                 c->want_continue = 1;
                 kuv_maybe_continue(c);
             }
             break;
         }
+        partial_head = 0;
         if (kuv_enqueue(c, start, scan, &parsed) < 0) {
+            c->head_scanned = 0;
             return;
         }
         pos += parsed.total_len;
         int close = parsed.has_close || (parsed.minor == 0 && !parsed.has_keep);
         if (parsed.streamed) {
+            c->head_scanned = 0;
             kuv_consume(c, pos);
             kuv_start_body(c, &parsed, close);
             c->head_active = 0;
@@ -747,8 +755,10 @@ static void kuv_parse(kuv_conn *c) {
     if (c->stop_parse && !c->body_active) {
         c->in_len = 0;
         c->head_active = 0;
+        c->head_scanned = 0;
     } else {
         kuv_consume(c, pos);
+        c->head_scanned = partial_head ? c->in_len : 0;
     }
     kuv_sync_read(c);
 }

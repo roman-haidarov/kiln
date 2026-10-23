@@ -44,6 +44,7 @@ extern int sp_ffi_bin_len;
 
 #define KILN_DB_MAX_PARAMS 65535
 #define KILN_DB_MAX_COLS   4096
+#define KILN_DB_UUID_BYTES 16
 
 #define KILN_DB_HOSTADDR_MAX 8
 #define KILN_DB_HOSTADDR_CAP 512
@@ -110,6 +111,8 @@ extern int sp_ffi_bin_len;
 #define KILN_DB_SLOT_FREE    0
 #define KILN_DB_SLOT_LIVE    1
 #define KILN_DB_SLOT_RETIRED 2
+
+#define KILN_DB_CONFIG_VALUE_COUNT 8
 
 typedef struct kiln_db_limits {
     uint32_t max_live_slots;
@@ -195,6 +198,7 @@ struct kiln_db_conn {
     size_t sql_len;
     void *native;
     int prepared;
+    int stmt_cache;
     void *cancel;
     void *res;
     kiln_db_block *blocks;
@@ -231,6 +235,10 @@ int kiln_db_pg_result_types(kiln_db_conn *conn, int64_t *out, int n);
 int kiln_db_my_result_types(kiln_db_conn *conn, int64_t *out, int n);
 const char *kiln_db_pg_result_row(kiln_db_conn *conn, uint32_t row, int64_t *lens, int n);
 const char *kiln_db_my_result_row(kiln_db_conn *conn, uint32_t row, int64_t *lens, int n);
+const char *kiln_db_pg_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta);
+const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta);
 int kiln_db_pg_result_meta(kiln_db_conn *conn, int64_t *out, int n);
 int kiln_db_my_result_meta(kiln_db_conn *conn, int64_t *out, int n);
 const char *kiln_db_pg_result_bytes(
@@ -290,8 +298,8 @@ void kiln_db_metrics_reset_test(void);
 int kiln_db_idset_new(int kind, uint64_t *out_handle);
 int kiln_db_idset_add_u64(uint64_t handle, uint64_t value);
 int kiln_db_idset_has_u64(uint64_t handle, uint64_t value);
-int kiln_db_idset_add_uuid(uint64_t handle, const uint8_t key[16]);
-int kiln_db_idset_has_uuid(uint64_t handle, const uint8_t key[16]);
+int kiln_db_idset_add_uuid(uint64_t handle, const uint8_t key[KILN_DB_UUID_BYTES]);
+int kiln_db_idset_has_uuid(uint64_t handle, const uint8_t key[KILN_DB_UUID_BYTES]);
 int kiln_db_idset_free(uint64_t handle);
 
 typedef int (*kiln_db_step_fn)(kiln_db_conn *conn, int ready_bits, int64_t deadline_ms);
@@ -317,11 +325,15 @@ int kiln_db_configure_values(const int64_t *values, int n);
 char *kiln_db_thread_room(size_t need);
 int64_t kiln_db_now_ms(void);
 int kiln_db_set_format(uint64_t handle, uint64_t scope, uint64_t thread_id, int format, int chunk);
+int kiln_db_set_stmt_cache(uint64_t handle, uint64_t scope, uint64_t thread_id, int capacity);
 int kiln_db_bind_str(uint64_t handle, uint64_t scope, uint64_t thread_id, uint32_t index,
     const char *data, long n, int is_null, int format);
 int kiln_db_result_types(uint64_t handle, uint64_t scope, uint64_t thread_id, int64_t *out, int n);
 const char *kiln_db_result_row(
     uint64_t handle, uint64_t scope, uint64_t thread_id, uint32_t row, int64_t *lens, int n);
+const char *kiln_db_result_rows(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    int64_t first_row, int64_t max_rows, int64_t max_bytes, int64_t *lens, int lens_cap,
+    int64_t *meta, int meta_n);
 int kiln_db_conn_broken(uint64_t handle, uint64_t scope, uint64_t thread_id);
 int64_t kiln_db_os_thread_token(void);
 int kiln_db_result_meta(uint64_t handle, uint64_t scope, uint64_t thread_id, int64_t *out, int n);
@@ -382,6 +394,8 @@ void *kiln_db_slot_use(uint64_t handle, int kind, uint64_t scope, uint64_t threa
 int kiln_db_slot_take(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, void **out);
 int kiln_db_slot_pin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id);
 int kiln_db_slot_unpin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id);
+void *kiln_db_slot_acquire(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, int *err);
+void kiln_db_slot_release(uint64_t handle, int kind);
 int kiln_db_slot_take_conn_idle(uint64_t handle, uint64_t scope, uint64_t thread_id, void **out);
 void kiln_db_metric_add(int id, int64_t delta);
 void kiln_db_block_free(kiln_db_block *block);

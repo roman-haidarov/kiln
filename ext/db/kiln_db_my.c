@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <mysql.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -22,8 +23,9 @@ static void my_arm_socket(MYSQL *mysql);
 #define MY_PREPARE  3
 #define MY_EXEC     4
 #define MY_FETCH    5
-#define MY_COMMIT   6
-#define MY_ROLLBACK 7
+#define MY_COMMIT     6
+#define MY_ROLLBACK   7
+#define MY_CLOSE_STMT 8
 
 typedef struct {
     MYSQL *(*mysql_init)(MYSQL *mysql);
@@ -55,6 +57,8 @@ typedef struct {
     int (*mysql_stmt_fetch_start)(int *ret, MYSQL_STMT *stmt);
     int (*mysql_stmt_fetch_cont)(int *ret, MYSQL_STMT *stmt, int status);
     my_bool (*mysql_stmt_close)(MYSQL_STMT *stmt);
+    int (*mysql_stmt_close_start)(my_bool *ret, MYSQL_STMT *stmt);
+    int (*mysql_stmt_close_cont)(my_bool *ret, MYSQL_STMT *stmt, int status);
     unsigned int (*mysql_stmt_errno)(MYSQL_STMT *stmt);
     const char *(*mysql_stmt_sqlstate)(MYSQL_STMT *stmt);
     const char *(*mysql_stmt_error)(MYSQL_STMT *stmt);
@@ -76,6 +80,15 @@ typedef struct {
     int (*mysql_stmt_fetch_column)(
         MYSQL_STMT *stmt, MYSQL_BIND *bind_arg, unsigned int column, unsigned long offset);
 } my_api;
+
+typedef struct {
+    uint64_t hash;
+    char *sql;
+    size_t len;
+    MYSQL_STMT *stmt;
+    uint64_t stamp;
+    int unread;
+} my_stmt_ent;
 
 typedef struct {
     MYSQL *mysql;
@@ -118,6 +131,21 @@ typedef struct {
     uint32_t batch_max;
     int deferred_row;
     int warnings;
+    int cap;
+    int cache_set;
+    int used;
+    int close_n;
+    int close_prepare;
+    int reprepare;
+    int prepare_exec;
+    uint64_t clock;
+    MYSQL_STMT *closing;
+    MYSQL_STMT *hit_stmt;
+    MYSQL_STMT *close_q[4];
+    MYSQL_STMT **grave;
+    int ngrave;
+    int grave_cap;
+    my_stmt_ent *slots;
 } my_sess;
 
 static my_api my;
@@ -136,6 +164,13 @@ static const char my_begin_sql[] = "START TRANSACTION";
 
 static int my_step(kiln_db_conn *conn, int ready_bits, int64_t deadline_ms);
 static void my_release(kiln_db_conn *conn);
+static void my_cache_invalidate(my_sess *sess);
+static int my_cache_store(my_sess *sess, kiln_db_conn *conn);
+static void my_cache_forget_stmt(my_sess *sess, MYSQL_STMT *stmt);
+static int my_prepare_handle(my_sess *sess, kiln_db_conn *conn, int make_new);
+static int my_drain_closes(my_sess *sess, kiln_db_conn *conn);
+static int my_queue_close(my_sess *sess, MYSQL_STMT *stmt);
+static int my_begin_exec(my_sess *sess, kiln_db_conn *conn);
 
 static int my_need(void **slot, const char *name) {
     void *sym = dlsym(my_lib, name);
@@ -173,6 +208,8 @@ static int my_bind(void) {
         my_need((void **)&my.mysql_stmt_fetch_start, "mysql_stmt_fetch_start") ||
         my_need((void **)&my.mysql_stmt_fetch_cont, "mysql_stmt_fetch_cont") ||
         my_need((void **)&my.mysql_stmt_close, "mysql_stmt_close") ||
+        my_need((void **)&my.mysql_stmt_close_start, "mysql_stmt_close_start") ||
+        my_need((void **)&my.mysql_stmt_close_cont, "mysql_stmt_close_cont") ||
         my_need((void **)&my.mysql_stmt_errno, "mysql_stmt_errno") ||
         my_need((void **)&my.mysql_stmt_sqlstate, "mysql_stmt_sqlstate") ||
         my_need((void **)&my.mysql_stmt_error, "mysql_stmt_error") ||
@@ -274,6 +311,9 @@ static my_sess *my_session(kiln_db_conn *conn) {
 
 static int my_fail(my_sess *sess, kiln_db_conn *conn, int code, int vendor, const char *state,
     const char *message) {
+    if (sess && conn && conn->broken) {
+        my_cache_invalidate(sess);
+    }
     if (sess) {
         sess->phase = MY_IDLE;
     }
@@ -312,12 +352,14 @@ static int my_vendor_code(unsigned int vendor) {
     return KILN_DB_ERR;
 }
 
+static int my_stmt_unknown(unsigned int vendor, const char *state);
+
 static int my_conn_fail(my_sess *sess, kiln_db_conn *conn) {
     const char *state = my.mysql_sqlstate(sess->mysql);
     const char *message = my.mysql_error(sess->mysql);
     unsigned int vendor = my.mysql_errno(sess->mysql);
     int code = my_vendor_code(vendor);
-    if (code == KILN_DB_CONN) {
+    if (code == KILN_DB_CONN || my_stmt_unknown(vendor, state)) {
         conn->broken = 1;
     }
     return my_fail(
@@ -339,13 +381,20 @@ static void my_note_warnings(my_sess *sess) {
     sess->warnings = n > 2147483647u ? 2147483647 : (int)n;
 }
 
+static int my_stmt_unknown(unsigned int vendor, const char *state) {
+    if (vendor == 1243u) {
+        return 1;
+    }
+    return state && state[0] == '0' && state[1] == '8';
+}
+
 static int my_stmt_fail(my_sess *sess, kiln_db_conn *conn) {
     const char *state = sess->stmt ? my.mysql_stmt_sqlstate(sess->stmt) : NULL;
     const char *message = sess->stmt ? my.mysql_stmt_error(sess->stmt) : "statement";
     unsigned int vendor = sess->stmt ? my.mysql_stmt_errno(sess->stmt) : 0;
     int vendor_i = vendor > 2147483647u ? 2147483647 : (int)vendor;
     int code = my_vendor_code(vendor);
-    if (code == KILN_DB_CONN) {
+    if (code == KILN_DB_CONN || my_stmt_unknown(vendor, state)) {
         conn->broken = 1;
     }
     return my_fail(sess, conn, code, vendor_i, state, message);
@@ -845,9 +894,29 @@ static int my_begin_fetch(my_sess *sess, kiln_db_conn *conn) {
 
 static int my_after_exec(my_sess *sess, kiln_db_conn *conn) {
     int meta;
+    unsigned int vendor;
     if (sess->iret != 0) {
+        vendor = sess->stmt ? my.mysql_stmt_errno(sess->stmt) : 0;
+        if ((vendor == 1615u || vendor == 2057u) && !sess->reprepare) {
+            sess->reprepare = 1;
+            sess->prepare_exec = 1;
+            my_cache_forget_stmt(sess, sess->stmt);
+            if (vendor == 2057u) {
+                if (!my_queue_close(sess, sess->stmt)) {
+                    return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "statement cache");
+                }
+                sess->stmt = NULL;
+                sess->close_prepare = 1;
+                sess->hit_stmt = NULL;
+                return my_drain_closes(sess, conn);
+            }
+            return my_prepare_handle(sess, conn, 0);
+        }
+        sess->reprepare = 0;
+        sess->prepare_exec = 0;
         return my_stmt_fail(sess, conn);
     }
+    sess->reprepare = 0;
     meta = my_take_meta(sess, conn);
     if (meta != 1) {
         return meta;
@@ -873,12 +942,23 @@ static int my_after_query(my_sess *sess, kiln_db_conn *conn) {
 }
 
 static int my_after_prepare(my_sess *sess, kiln_db_conn *conn) {
+    int again;
     if (sess->iret != 0) {
+        sess->prepare_exec = 0;
+        sess->reprepare = 0;
         conn->prepared = 0;
         return my_stmt_fail(sess, conn);
     }
+    if (!my_cache_store(sess, conn)) {
+        return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "statement cache");
+    }
     conn->prepared = 1;
     conn->fetch_done = 1;
+    again = sess->prepare_exec;
+    sess->prepare_exec = 0;
+    if (again) {
+        return my_begin_exec(sess, conn);
+    }
     sess->phase = MY_IDLE;
     conn->fd = (int)my.mysql_get_socket(sess->mysql);
     conn->wait_kind = 0;
@@ -965,6 +1045,19 @@ static int my_resume(my_sess *sess, kiln_db_conn *conn, int ready_bits) {
             return my_park(sess, conn, sess->status);
         }
         return my_after_prepare(sess, conn);
+    }
+    if (sess->phase == MY_CLOSE_STMT) {
+        sess->status = my.mysql_stmt_close_cont(&sess->bret, sess->closing, mask);
+        if (sess->status) {
+            return my_park(sess, conn, sess->status);
+        }
+        sess->closing = NULL;
+        if (sess->bret != 0) {
+            conn->broken = 1;
+            my_cache_invalidate(sess);
+            return my_conn_fail(sess, conn);
+        }
+        return my_drain_closes(sess, conn);
     }
     if (sess->phase == MY_EXEC) {
         sess->status = my.mysql_stmt_execute_cont(&sess->iret, sess->stmt, mask);
@@ -1085,19 +1178,310 @@ static int my_begin_query(my_sess *sess, kiln_db_conn *conn, const char *sql, si
     return my_after_query(sess, conn);
 }
 
-static int my_begin_prepare(my_sess *sess, kiln_db_conn *conn) {
-    if (!conn->sql) {
-        return my_fail(sess, conn, KILN_DB_CONFIG, 0, NULL, "missing sql");
+static uint64_t my_hash(const char *sql, size_t len) {
+    uint64_t h = 14695981039346656037ull;
+    size_t i;
+    for (i = 0; i < len; i++) {
+        h ^= (unsigned char)sql[i];
+        h *= 1099511628211ull;
     }
+    return h;
+}
+
+static int my_grave_room(my_sess *sess, int want) {
+    MYSQL_STMT **next;
+    if (want <= 0 || (size_t)want > SIZE_MAX / sizeof *next) {
+        return 0;
+    }
+    if (want <= sess->grave_cap) {
+        return 1;
+    }
+    next = realloc(sess->grave, (size_t)want * sizeof *next);
+    if (!next) {
+        return 0;
+    }
+    sess->grave = next;
+    sess->grave_cap = want;
+    return 1;
+}
+
+static void my_grave(my_sess *sess, MYSQL_STMT *stmt) {
+    int i;
+    if (!stmt) {
+        return;
+    }
+    for (i = 0; i < sess->ngrave; i++) {
+        if (sess->grave[i] == stmt) {
+            return;
+        }
+    }
+    if (sess->ngrave == sess->grave_cap) {
+        if (sess->grave_cap > INT_MAX / 2) {
+            return;
+        }
+        if (!my_grave_room(sess, sess->grave_cap ? sess->grave_cap * 2 : 8)) {
+            return;
+        }
+    }
+    sess->grave[sess->ngrave++] = stmt;
+}
+
+static int my_graved(const my_sess *sess, MYSQL_STMT *stmt) {
+    int i;
+    for (i = 0; i < sess->ngrave; i++) {
+        if (sess->grave[i] == stmt) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int my_cache_contains(const my_sess *sess, MYSQL_STMT *stmt) {
+    int i;
+    if (!stmt || !sess->slots) {
+        return 0;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        if (sess->slots[i].stmt == stmt) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void my_cache_invalidate(my_sess *sess) {
+    int i;
+    if (!sess) {
+        return;
+    }
+    for (i = 0; i < sess->close_n; i++) {
+        my_grave(sess, sess->close_q[i]);
+    }
+    sess->close_n = 0;
+    sess->close_prepare = 0;
+    sess->hit_stmt = NULL;
+    sess->prepare_exec = 0;
+    sess->reprepare = 0;
     if (sess->stmt) {
-        my.mysql_stmt_close(sess->stmt);
+        my_grave(sess, sess->stmt);
         sess->stmt = NULL;
     }
+    if (sess->slots) {
+        for (i = 0; i < sess->cap; i++) {
+            free(sess->slots[i].sql);
+            sess->slots[i].sql = NULL;
+            sess->slots[i].len = 0;
+            sess->slots[i].hash = 0;
+            sess->slots[i].unread = 0;
+            sess->slots[i].stamp = 0;
+            if (sess->slots[i].stmt) {
+                my_grave(sess, sess->slots[i].stmt);
+                sess->slots[i].stmt = NULL;
+            }
+        }
+    }
+    sess->used = 0;
+}
+
+static int my_cache_ensure(my_sess *sess, kiln_db_conn *conn) {
+    int cap = conn->stmt_cache;
+    if (cap < 0) {
+        cap = 0;
+    }
+    if (cap > 256) {
+        cap = 256;
+    }
+    if (!my_grave_room(sess, cap + 8)) {
+        return 0;
+    }
+    if (sess->slots) {
+        return 1;
+    }
+    if (sess->cache_set && sess->cap == cap) {
+        return 1;
+    }
+    sess->cap = cap;
+    sess->cache_set = 1;
+    if (cap == 0) {
+        return 1;
+    }
+    sess->slots = calloc((size_t)cap, sizeof *sess->slots);
+    return sess->slots != NULL;
+}
+
+static my_stmt_ent *my_cache_find(my_sess *sess, const char *sql, size_t len) {
+    uint64_t hash;
+    int i;
+    if (!sess->slots || !sql) {
+        return NULL;
+    }
+    hash = my_hash(sql, len);
+    for (i = 0; i < sess->cap; i++) {
+        my_stmt_ent *slot = &sess->slots[i];
+        if (!slot->sql || slot->len != len || slot->hash != hash) {
+            continue;
+        }
+        if (len == 0 || memcmp(slot->sql, sql, len) == 0) {
+            return slot;
+        }
+    }
+    return NULL;
+}
+
+static my_stmt_ent *my_cache_by_stmt(my_sess *sess, MYSQL_STMT *stmt) {
+    int i;
+    if (!sess->slots || !stmt) {
+        return NULL;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        if (sess->slots[i].stmt == stmt) {
+            return &sess->slots[i];
+        }
+    }
+    return NULL;
+}
+
+static void my_cache_forget_stmt(my_sess *sess, MYSQL_STMT *stmt) {
+    int i;
+    if (!sess->slots || !stmt) {
+        return;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        if (sess->slots[i].stmt != stmt) {
+            continue;
+        }
+        free(sess->slots[i].sql);
+        sess->slots[i].sql = NULL;
+        sess->slots[i].stmt = NULL;
+        sess->slots[i].len = 0;
+        sess->slots[i].hash = 0;
+        sess->slots[i].unread = 0;
+        sess->slots[i].stamp = 0;
+        if (sess->used > 0) {
+            sess->used--;
+        }
+    }
+}
+
+static void my_note_unread(my_sess *sess, kiln_db_conn *conn) {
+    int i;
+    if (!sess->slots || !sess->stmt) {
+        return;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        if (sess->slots[i].stmt == sess->stmt) {
+            sess->slots[i].unread = conn->fetch_done ? 0 : 1;
+        }
+    }
+}
+
+static my_stmt_ent *my_cache_lru(my_sess *sess, int allow_current) {
+    my_stmt_ent *best = NULL;
+    int i;
+    if (!sess->slots) {
+        return NULL;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        my_stmt_ent *slot = &sess->slots[i];
+        if (!slot->stmt || !slot->sql || slot->unread) {
+            continue;
+        }
+        if (!allow_current && slot->stmt == sess->stmt) {
+            continue;
+        }
+        if (!best || slot->stamp < best->stamp) {
+            best = slot;
+        }
+    }
+    return best;
+}
+
+static int my_cache_store(my_sess *sess, kiln_db_conn *conn) {
+    my_stmt_ent *slot = NULL;
+    char *copy;
+    size_t len;
+    int i;
+    if (!sess->slots || sess->cap <= 0 || !sess->stmt || !conn->sql) {
+        return 1;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        if (sess->slots[i].stmt == sess->stmt) {
+            sess->slots[i].stamp = ++sess->clock;
+            return 1;
+        }
+    }
+    if (sess->used >= sess->cap) {
+        return 1;
+    }
+    for (i = 0; i < sess->cap; i++) {
+        if (!sess->slots[i].stmt && !sess->slots[i].sql) {
+            slot = &sess->slots[i];
+            break;
+        }
+    }
+    if (!slot) {
+        return 1;
+    }
+    len = conn->sql_len;
+    copy = malloc(len + 1);
+    if (!copy) {
+        return 0;
+    }
+    if (len) {
+        memcpy(copy, conn->sql, len);
+    }
+    copy[len] = 0;
+    slot->hash = my_hash(copy, len);
+    slot->sql = copy;
+    slot->len = len;
+    slot->stmt = sess->stmt;
+    slot->stamp = ++sess->clock;
+    slot->unread = 0;
+    sess->used++;
+    return 1;
+}
+
+static int my_queue_close(my_sess *sess, MYSQL_STMT *stmt) {
+    int i;
+    if (!stmt) {
+        return 1;
+    }
+    for (i = 0; i < sess->close_n; i++) {
+        if (sess->close_q[i] == stmt) {
+            return 1;
+        }
+    }
+    if (sess->close_n >= 4) {
+        return 0;
+    }
+    sess->close_q[sess->close_n++] = stmt;
+    return 1;
+}
+
+static int my_apply_hit(my_sess *sess, kiln_db_conn *conn, my_stmt_ent *hit) {
+    sess->stmt = hit->stmt;
+    hit->stamp = ++sess->clock;
+    if (conn->fetch_done) {
+        hit->unread = 0;
+    }
+    conn->prepared = 1;
+    sess->phase = MY_IDLE;
+    conn->wait_kind = 0;
+    conn->fd = (int)my.mysql_get_socket(sess->mysql);
+    return KILN_DB_STEP_DONE;
+}
+
+static int my_prepare_handle(my_sess *sess, kiln_db_conn *conn, int make_new) {
     conn->prepared = 0;
     my_free_results(sess);
-    sess->stmt = my.mysql_stmt_init(sess->mysql);
+    if (make_new) {
+        sess->stmt = my.mysql_stmt_init(sess->mysql);
+        if (!sess->stmt) {
+            return my_conn_fail(sess, conn);
+        }
+    }
     if (!sess->stmt) {
-        return my_conn_fail(sess, conn);
+        return my_fail(sess, conn, KILN_DB_ERR, 0, NULL, "statement");
     }
     sess->phase = MY_PREPARE;
     my_arm_socket(sess->mysql);
@@ -1107,6 +1491,122 @@ static int my_begin_prepare(my_sess *sess, kiln_db_conn *conn) {
         return my_park(sess, conn, sess->status);
     }
     return my_after_prepare(sess, conn);
+}
+
+static int my_after_closes(my_sess *sess, kiln_db_conn *conn) {
+    int prepare = sess->close_prepare;
+    MYSQL_STMT *hit = sess->hit_stmt;
+    my_stmt_ent *ent;
+    sess->close_prepare = 0;
+    sess->hit_stmt = NULL;
+    if (hit) {
+        ent = my_cache_by_stmt(sess, hit);
+        if (ent) {
+            return my_apply_hit(sess, conn, ent);
+        }
+    }
+    if (prepare) {
+        return my_prepare_handle(sess, conn, 1);
+    }
+    sess->phase = MY_IDLE;
+    conn->wait_kind = 0;
+    if (sess->mysql) {
+        conn->fd = (int)my.mysql_get_socket(sess->mysql);
+    }
+    return KILN_DB_STEP_DONE;
+}
+
+static int my_drain_closes(my_sess *sess, kiln_db_conn *conn) {
+    while (sess->close_n > 0) {
+        MYSQL_STMT *stmt = sess->close_q[0];
+        int i;
+        for (i = 1; i < sess->close_n; i++) {
+            sess->close_q[i - 1] = sess->close_q[i];
+        }
+        sess->close_n--;
+        sess->closing = stmt;
+        sess->phase = MY_CLOSE_STMT;
+        sess->bret = 0;
+        my_arm_socket(sess->mysql);
+        sess->status = my.mysql_stmt_close_start(&sess->bret, stmt);
+        if (sess->status) {
+            return my_park(sess, conn, sess->status);
+        }
+        sess->closing = NULL;
+        if (sess->bret != 0) {
+            conn->broken = 1;
+            my_cache_invalidate(sess);
+            return my_conn_fail(sess, conn);
+        }
+    }
+    return my_after_closes(sess, conn);
+}
+
+static int my_prepare_miss(my_sess *sess, kiln_db_conn *conn) {
+    my_stmt_ent *victim;
+    if (sess->stmt && !my_cache_contains(sess, sess->stmt)) {
+        if (!my_queue_close(sess, sess->stmt)) {
+            return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "statement cache");
+        }
+        sess->stmt = NULL;
+    }
+    if (sess->cap > 0 && sess->used >= sess->cap) {
+        victim = my_cache_lru(sess, 0);
+        if (!victim && conn->fetch_done) {
+            victim = my_cache_lru(sess, 1);
+        }
+        if (victim && victim->stmt) {
+            MYSQL_STMT *stmt = victim->stmt;
+            free(victim->sql);
+            victim->sql = NULL;
+            victim->stmt = NULL;
+            victim->len = 0;
+            victim->hash = 0;
+            victim->unread = 0;
+            victim->stamp = 0;
+            if (sess->used > 0) {
+                sess->used--;
+            }
+            if (sess->stmt == stmt) {
+                sess->stmt = NULL;
+            }
+            if (!my_queue_close(sess, stmt)) {
+                my_grave(sess, stmt);
+                return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "statement cache");
+            }
+        }
+    }
+    sess->close_prepare = 1;
+    sess->hit_stmt = NULL;
+    if (sess->close_n > 0) {
+        return my_drain_closes(sess, conn);
+    }
+    return my_prepare_handle(sess, conn, 1);
+}
+
+static int my_begin_prepare(my_sess *sess, kiln_db_conn *conn) {
+    my_stmt_ent *hit;
+    if (!conn->sql) {
+        return my_fail(sess, conn, KILN_DB_CONFIG, 0, NULL, "missing sql");
+    }
+    if (!my_cache_ensure(sess, conn)) {
+        return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "statement cache");
+    }
+    my_note_unread(sess, conn);
+    hit = my_cache_find(sess, conn->sql, conn->sql_len);
+    if (hit && hit->stmt) {
+        if (sess->stmt && sess->stmt != hit->stmt && !my_cache_contains(sess, sess->stmt)) {
+            if (!my_queue_close(sess, sess->stmt)) {
+                return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "statement cache");
+            }
+            sess->stmt = NULL;
+            sess->close_prepare = 1;
+            sess->hit_stmt = hit->stmt;
+            return my_drain_closes(sess, conn);
+        }
+        return my_apply_hit(sess, conn, hit);
+    }
+    return my_prepare_miss(sess, conn);
 }
 
 static int my_begin_exec(my_sess *sess, kiln_db_conn *conn) {
@@ -1206,15 +1706,44 @@ static int my_step(kiln_db_conn *conn, int ready_bits, int64_t deadline_ms) {
 
 static void my_release(kiln_db_conn *conn) {
     my_sess *sess = conn->native;
+    int i;
     if (!sess) {
         return;
     }
-    if (sess->stmt) {
-        my.mysql_stmt_close(sess->stmt);
+    if (sess->closing) {
+        sess->closing->mysql = NULL;
     }
     if (sess->mysql) {
         my.mysql_close(sess->mysql);
+        sess->mysql = NULL;
     }
+    if (sess->stmt && !my_cache_contains(sess, sess->stmt) && !my_graved(sess, sess->stmt)) {
+        my.mysql_stmt_close(sess->stmt);
+    }
+    sess->stmt = NULL;
+    if (sess->closing && !my_cache_contains(sess, sess->closing) && !my_graved(sess, sess->closing)) {
+        my.mysql_stmt_close(sess->closing);
+    }
+    sess->closing = NULL;
+    for (i = 0; i < sess->close_n; i++) {
+        if (!my_cache_contains(sess, sess->close_q[i]) && !my_graved(sess, sess->close_q[i])) {
+            my.mysql_stmt_close(sess->close_q[i]);
+        }
+    }
+    sess->close_n = 0;
+    if (sess->slots) {
+        for (i = 0; i < sess->cap; i++) {
+            if (sess->slots[i].stmt) {
+                my.mysql_stmt_close(sess->slots[i].stmt);
+            }
+            free(sess->slots[i].sql);
+        }
+    }
+    for (i = 0; i < sess->ngrave; i++) {
+        my.mysql_stmt_close(sess->grave[i]);
+    }
+    free(sess->slots);
+    free(sess->grave);
     my_free_results(sess);
     my_drop_params(sess);
     free(sess->big);
@@ -1359,4 +1888,50 @@ const char *kiln_db_my_result_bytes(
     }
     sp_ffi_bin_len = (int)len;
     return sess->batch + off;
+}
+
+const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
+    static __thread char empty[1];
+    my_sess *sess = conn->native;
+    uint32_t last;
+    uint32_t row;
+    size_t bytes;
+    char *buf;
+    empty[0] = 0;
+    if (!sess || first >= sess->rows || sess->ncols <= 0 || !sess->batch) {
+        meta[0] = 0;
+        return empty;
+    }
+    if (sess->ncols >= lens_cap) {
+        return empty;
+    }
+    last = first + 1;
+    while (last < sess->rows && last - first < max_rows &&
+           (int64_t)(last - first + 1) * (sess->ncols + 1) <= lens_cap &&
+           sess->row_start[last + 1] - sess->row_start[first] <= max_bytes) {
+        last++;
+    }
+    bytes = sess->row_start[last] - sess->row_start[first];
+    if (bytes > INT_MAX) {
+        return empty;
+    }
+    buf = kiln_db_thread_room(bytes + 1);
+    if (!buf) {
+        return empty;
+    }
+    if (bytes) {
+        memcpy(buf, sess->batch + sess->row_start[first], bytes);
+    }
+    for (row = first; row < last; row++) {
+        size_t base = (size_t)(row - first) * (size_t)(sess->ncols + 1);
+        memcpy(lens + base, sess->cell_len + ((size_t)row * (size_t)sess->ncols),
+            (size_t)sess->ncols * sizeof *lens);
+        lens[base + (size_t)sess->ncols] = (int64_t)(sess->row_start[row + 1] - sess->row_start[row]);
+    }
+    meta[0] = last - first;
+    meta[1] = (int64_t)bytes;
+    meta[2] = sess->ncols;
+    sp_ffi_bin_len = (int)bytes;
+    return buf;
 }

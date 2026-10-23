@@ -30,18 +30,23 @@ module Kiln
     class Conn
       DEFAULT_TIMEOUT = 15.0
       CANCEL_MS = 2000
-      OPEN_KEYS = %i[tls timeout].freeze
+      OPEN_KEYS = %i[tls timeout statement_cache].freeze
+      BATCH_ROWS = 256
+      BATCH_BYTES = 1_048_576
 
       module Opening
         def open(kind, host, port, *auth, **options)
           raise Unsupported, 'Kiln::DB on an inline event-loop handler' if Thread.current[:kiln_inline]
 
           check_open(auth, options)
+          cache = options.fetch(:statement_cache, 32)
+          raise ConfigError, 'statement_cache' unless cache_capacity?(cache)
+
           endpoint = build_endpoint(kind, host, port, auth, options.fetch(:tls, :verify_full))
           timeout = options.fetch(:timeout) { DEFAULT_TIMEOUT }
           raise ConfigError, 'timeout' unless timeout.is_a?(Numeric) && timeout.positive?
 
-          connect(kind, endpoint, timeout)
+          connect(kind, endpoint, timeout, cache)
         end
 
         def tls_settings(kind, ca_path, tls_name, tls)
@@ -99,13 +104,15 @@ module Kiln
           ca_path
         end
 
-        def connect(kind, endpoint, timeout)
+        def connect(kind, endpoint, timeout, cache)
           prepare_native(kind)
           conn = new(kind, create_handle(kind, endpoint), endpoint.database)
           conn.timeout = timeout
-          conn.establish(endpoint.host)
+          conn.establish(endpoint.host, cache)
           conn
         end
+
+        def cache_capacity?(value) = value.is_a?(Integer) && value.between?(0, 256)
 
         def prepare_native(kind)
           raise ConnectionError, 'configure' if Native.configure != Native::OK
@@ -277,15 +284,25 @@ module Kiln
           rows
         end
 
+        def fetch_rows(first, lens, meta)
+          raw = Native.kiln_db_result_rows(@handle, 1, 1, first, BATCH_ROWS, BATCH_BYTES, lens, lens.length, meta,
+                                           meta.length)
+          raise ConnectionError, 'database rows unavailable or invalid' unless meta[0].positive?
+
+          raw
+        end
+
         def append_rows(rows, width, count)
           return unless count.positive? && width.positive?
 
           types = Native.result_types(@handle, 1, 1, width)
-          lens = Array.new(width, 0)
+          lens = Array.new(BATCH_ROWS * (width + 1), 0)
+          meta = [0, 0, 0]
           r = 0
           while r < count
-            rows << Codec.row(Native.result_row(@handle, 1, 1, r, lens), lens, types, width)
-            r += 1
+            raw = fetch_rows(r, lens, meta)
+            Codec.rows_into(rows, raw, lens, types, meta[0])
+            r += meta[0]
           end
         end
       end
@@ -595,15 +612,29 @@ module Kiln
 
         def stream_next
           while @cursor_open == true
-            row = @cursor_row
-            if row < @cursor_count
-              @cursor_row = row + 1
-              lens = @cursor_lens
-              return Codec.row(Native.result_row(@handle, 1, 1, row, lens), lens, @cursor_types, @cursor_width)
-            end
+            return next_streamed if @cursor_row < @cursor_count
+
             stream_more?
           end
           nil
+        end
+
+        def next_streamed
+          load_stream_batch if @cursor_left.zero?
+          at = @cursor_at * (@cursor_width + 1)
+          values = Codec.row_values(@cursor_raw, @cursor_lens, at, @cursor_off, @cursor_types)
+          @cursor_off += @cursor_lens[at + @cursor_width]
+          @cursor_at += 1
+          @cursor_row += 1
+          @cursor_left -= 1
+          values
+        end
+
+        def load_stream_batch
+          meta = [0, 0, 0]
+          @cursor_raw = fetch_rows(@cursor_row, @cursor_lens, meta)
+          @cursor_off = @cursor_at = 0
+          @cursor_left = meta[0]
         end
 
         def stream_more?
@@ -649,11 +680,14 @@ module Kiln
           @cursor_count = meta[0].positive? ? meta[1] : 0
           @cursor_done = meta[2] == 1
           @cursor_row = 0
-          if @cursor_count.positive?
-            @cursor_types = Native.result_types(@handle, 1, 1, @cursor_width)
-            @cursor_lens = Array.new(@cursor_width, 0)
-          end
+          @cursor_left = 0
+          cursor_shape if @cursor_count.positive?
           nil
+        end
+
+        def cursor_shape
+          @cursor_types = Native.result_types(@handle, 1, 1, @cursor_width)
+          @cursor_lens = Array.new(BATCH_ROWS * (@cursor_width + 1), 0)
         end
 
         def abort_fetch
@@ -715,12 +749,14 @@ module Kiln
         init_cursor
       end
 
-      def establish(host)
+      def establish(host, cache)
         connected = false
         begin
           resolve_host(host) if @kind == Native::KIND_PG
           drive(Native::OP_CONNECT, 'connect')
           detect_server
+          raise ConnectionError, 'statement_cache' if Native.set_stmt_cache(@handle, 1, 1, cache) != Native::OK
+
           connected = true
         ensure
           close_quietly unless connected
@@ -784,6 +820,9 @@ module Kiln
         @cursor_row = 0
         @cursor_types = Array.new(1, 0)
         @cursor_lens = Array.new(1, 0)
+        @cursor_left = 0
+        @cursor_raw = ''.b
+        @cursor_off = @cursor_at = 0
       end
     end
   end

@@ -10,7 +10,7 @@ pg auto id-integer renamed
 pg import PENDING_COMMIT 0 COMMITTED
 pg commit-fail UniqueViolation depth 0 after 1
 pg inline Unsupported
-pg prepared 0
+pg prepared bounded
 pg longtext 1000000
 pg deadline Timeout 42
 pg pool isolated pinned 100

@@ -1,0 +1,18 @@
+cache bad_cache ConfigError
+mysql prepare_delta<=2 yes
+mysql open_result yes
+mysql alter yes
+mysql disabled yes
+mysql bound yes
+mysql large_break yes
+mysql binds_eviction yes
+mysql failed_prepare yes
+mariadb prepare_delta<=2 yes
+mariadb open_result yes
+mariadb alter yes
+mariadb disabled yes
+mariadb bound yes
+mariadb large_break yes
+mariadb binds_eviction yes
+mariadb failed_prepare yes
+ok stmt_cache

@@ -564,3 +564,852 @@ at `SPINEL_WORKERS=2`, checking the shutdown and free-slot transition.
 lizard, apart from `no-int-to-ptr` on the GC macros and `unusedFunction` on the
 FFI exports. The vendored zlib-ng sources are not linted, like libuv. RuboCop
 1.39 reports only `Metrics` on the test's router builder in the new files.
+
+## 0.0.9
+
+P9-00 measurement base, taken before any 0.0.9 product change. Status: PASS.
+The three Appendix A probes print their `ok` lines (`head_scan` prints three
+`head_scan` lines per run). Thresholds later in this section are relative to
+the medians below.
+
+Machine: Darwin 24.6.0 arm64, macOS 15.7.9 (24G830), 8 cores, 16 GiB,
+Apple clang 17.0.0, wrk 4.2.0. Spinel commit
+`519280dc9edd136186c0b0767fb73766b6e45aba`. `spinel --version` prints
+`spinel 2026.09.12+7957 (519280dc) [apple clang 17.0.0 (cc)]`.
+`git describe --tags` on this checkout is `2026.09.12-7957-g519280dc`
+(tag `2026.09.12` is `112bae85c1a25fc5399009a849f805bfe691426b`). libpq
+prefix `/opt/homebrew/opt/libpq`, `pg_config` PostgreSQL 18.4,
+`PQlibVersion` 180004. MariaDB Connector/C prefix
+`/opt/homebrew/opt/mariadb-connector-c`, package version 3.4.8
+(`MARIADB_PACKAGE_VERSION_ID` 30408). DB stand from `ci/db-services.sh up`,
+four healthy containers: PostgreSQL 17.11 on 127.0.0.1:52517, PostgreSQL
+18.6 on 127.0.0.1:52518, MySQL 8.4.11 on 127.0.0.1:52516, MariaDB
+11.4.13-MariaDB-ubu2404 on 127.0.0.1:52515.
+
+`row_transfer` and `statement_reuse` were compiled with
+`dblinks=$(KILN_DB=1 ./ext/build.sh)` and
+`SPINEL=/tmp/spinel-519280d/bin/spinel`, headers
+`/tmp/spinel-519280d/lib`, `KILN_DB_LIBPQ_PREFIX=/opt/homebrew/opt/libpq`,
+`KILN_DB_LIBMARIADB_PREFIX=/opt/homebrew/opt/mariadb-connector-c`, then run
+three times at `SPINEL_WORKERS=2`. Each of those six processes exited 0.
+`head_scan` was built with the Appendix A.4 `cc` line and run three times
+as one process. HTTP baseline:
+`SAMPLE=0 MODES="inline lanes" FEATURES=text CLIENTS=wrk ROUNDS=3 DURATION=8`
+`bench/regression.sh` (default `SPINEL_WORKERS=1`), exit 0. Saved
+`median.tsv` and `summary.tsv` at
+`/tmp/kiln-regression/20261023-134029-59635/`.
+
+Median is the middle of three sorted runs. For `statement_reuse`, each run
+prints two samples per engine; the median is the mean of the two central
+values of those six samples. Spread is min–max of the same samples.
+
+| series | median | min | max |
+| --- | --- | --- | --- |
+| head_scan 1 byte/read, ms | 92.777 | 92.358 | 93.424 |
+| head_scan 8 bytes/read, ms | 11.579 | 11.518 | 11.622 |
+| head_scan 64 bytes/read, ms | 1.443 | 1.426 | 1.456 |
+| exec_per_row, ns | 852 | 841 | 889 |
+| exec_per_row_2_threads, ns | 1182 | 1017 | 1378 |
+| row_call, ns | 133 | 130 | 144 |
+| locked_ffi_call, ns | 73 | 72 | 75 |
+| plain_ffi_call, ns | 2 | 2 | 2 |
+| codec_row, ns | 198 | 192 | 202 |
+| locked_ffi_call_2_threads, ns | 167 | 162 | 173 |
+| row_call_2_threads, ns | 309 | 309 | 332 |
+| pg conn_exec_us | 429.9 | 423.8 | 438.7 |
+| pg unique_exec_us | 423.35 | 405.9 | 431.5 |
+| mysql conn_exec_us | 859.2 | 839.8 | 880.7 |
+| mysql unique_exec_us | 850.3 | 799.4 | 899.0 |
+| mariadb conn_exec_us | 849.85 | 776.7 | 860.3 |
+| mariadb unique_exec_us | 836.65 | 739.6 | 881.5 |
+| inline text wrk cpu_us/request | 10.4938 | 10.433 | 10.5032 |
+| lanes text wrk cpu_us/request | 12.6321 | 12.5607 | 12.8186 |
+
+`median.tsv`:
+
+```
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+inline	text	wrk	92982.5	0.2665	99	0.59	10.4938
+lanes	text	wrk	56283.78	0.4321	99	1.21	12.6321
+```
+
+`summary.tsv`:
+
+```
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+inline	text	wrk	1	92982.5	0.24102	99	0.457	753107	false	7.91	10.5032
+inline	text	wrk	2	93367.43	0.26654	99	0.59	756256	false	7.89	10.433
+inline	text	wrk	3	92870.3	0.30885	99	0.842	745204	false	7.82	10.4938
+lanes	text	wrk	1	55565.15	0.44598000000000004	99	1.54	450128	false	5.77	12.8186
+lanes	text	wrk	2	56283.78	0.43213	99	1.21	455981	false	5.76	12.6321
+lanes	text	wrk	3	56909.68	0.40048	99	0.65	460962	false	5.79	12.5607
+```
+
+Raw probe stdout:
+
+```
+=== head_scan run 1 ===
+head_scan bytes_per_read=1 total_ms=92.777 incomplete=16366
+head_scan bytes_per_read=8 total_ms=11.518 incomplete=2045
+head_scan bytes_per_read=64 total_ms=1.426 incomplete=255
+=== head_scan run 2 ===
+head_scan bytes_per_read=1 total_ms=92.358 incomplete=16366
+head_scan bytes_per_read=8 total_ms=11.579 incomplete=2045
+head_scan bytes_per_read=64 total_ms=1.443 incomplete=255
+=== head_scan run 3 ===
+head_scan bytes_per_read=1 total_ms=93.424 incomplete=16366
+head_scan bytes_per_read=8 total_ms=11.622 incomplete=2045
+head_scan bytes_per_read=64 total_ms=1.456 incomplete=255
+=== row_transfer run 1 ===
+exec_per_row 852 ns
+exec_per_row_2_threads 1378 ns
+row_call 144 ns
+locked_ffi_call 72 ns
+plain_ffi_call 2 ns
+codec_row 192 ns
+locked_ffi_call_2_threads 162 ns
+row_call_2_threads 309 ns
+ok row_transfer
+=== row_transfer run 2 ===
+exec_per_row 841 ns
+exec_per_row_2_threads 1017 ns
+row_call 130 ns
+locked_ffi_call 73 ns
+plain_ffi_call 2 ns
+codec_row 202 ns
+locked_ffi_call_2_threads 167 ns
+row_call_2_threads 309 ns
+ok row_transfer
+=== row_transfer run 3 ===
+exec_per_row 889 ns
+exec_per_row_2_threads 1182 ns
+row_call 133 ns
+locked_ffi_call 75 ns
+plain_ffi_call 2 ns
+codec_row 198 ns
+locked_ffi_call_2_threads 173 ns
+row_call_2_threads 332 ns
+ok row_transfer
+=== statement_reuse run 1 ===
+pg prepare_exec_us 833.5 exec_prepared_us 398.0 conn_exec_us 426.3 unique_exec_us 427.2
+pg prepare_exec_us 839.1 exec_prepared_us 390.9 conn_exec_us 428.2 unique_exec_us 419.5
+mysql prepare_exec_us 829.0 exec_prepared_us 412.6 conn_exec_us 858.5 unique_exec_us 799.4
+mysql prepare_exec_us 808.7 exec_prepared_us 407.8 conn_exec_us 840.9 unique_exec_us 851.8
+mariadb prepare_exec_us 790.4 exec_prepared_us 405.0 conn_exec_us 849.5 unique_exec_us 829.2
+mariadb prepare_exec_us 848.2 exec_prepared_us 396.4 conn_exec_us 776.7 unique_exec_us 739.6
+ok statement_reuse
+=== statement_reuse run 2 ===
+pg prepare_exec_us 806.6 exec_prepared_us 393.7 conn_exec_us 423.8 unique_exec_us 417.1
+pg prepare_exec_us 819.1 exec_prepared_us 398.3 conn_exec_us 431.6 unique_exec_us 431.5
+mysql prepare_exec_us 804.8 exec_prepared_us 413.2 conn_exec_us 839.8 unique_exec_us 835.6
+mysql prepare_exec_us 844.1 exec_prepared_us 424.5 conn_exec_us 859.9 unique_exec_us 889.6
+mariadb prepare_exec_us 809.2 exec_prepared_us 415.1 conn_exec_us 850.2 unique_exec_us 856.1
+mariadb prepare_exec_us 825.2 exec_prepared_us 409.2 conn_exec_us 856.9 unique_exec_us 844.1
+ok statement_reuse
+=== statement_reuse run 3 ===
+pg prepare_exec_us 820.4 exec_prepared_us 395.5 conn_exec_us 438.7 unique_exec_us 428.9
+pg prepare_exec_us 825.0 exec_prepared_us 399.4 conn_exec_us 435.3 unique_exec_us 405.9
+mysql prepare_exec_us 826.8 exec_prepared_us 415.9 conn_exec_us 880.7 unique_exec_us 899.0
+mysql prepare_exec_us 851.2 exec_prepared_us 424.9 conn_exec_us 871.2 unique_exec_us 848.8
+mariadb prepare_exec_us 824.8 exec_prepared_us 412.8 conn_exec_us 860.3 unique_exec_us 825.0
+mariadb prepare_exec_us 822.2 exec_prepared_us 416.9 conn_exec_us 842.2 unique_exec_us 881.5
+ok statement_reuse
+```
+
+P9-01 header-end search from the remembered offset. Status: PASS.
+Within each run, `head_scan_from` at 1 byte/read is under 5% of that run's
+`head_scan`, and at 8 bytes/read under 10%. Incomplete counts match the
+unmodified loop (16366, 2045, 255).
+
+| run | head_scan 1 ms | from 1 ms | ratio | head_scan 8 ms | from 8 ms | ratio |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 96.358 | 0.101 | 0.105% | 11.645 | 0.023 | 0.197% |
+| 2 | 121.578 | 0.100 | 0.082% | 11.810 | 0.023 | 0.195% |
+| 3 | 93.645 | 0.107 | 0.114% | 11.739 | 0.024 | 0.204% |
+
+`event_server`, `server`, `payload`, `timeouts`, and `tls` matched their
+snapshots, each exit 0. `KILN_NATIVE_CC=clang ci/c-native.sh fuzz` exit 0:
+seed checks passed, and libFuzzer passed http-kind-0 through http-kind-6,
+uv-parse, uv-parse-diff, and uv-chunk, 5 seconds each.
+`SAMPLE=0 MODES=inline FEATURES=text CLIENTS=wrk ROUNDS=3 DURATION=8 bench/regression.sh`
+exit 0. Inline text wrk `cpu_us_per_request` median 10.3286 against the
+P9-00 median 10.4938, which is 1.57% lower and inside ±3%. Rounds were
+10.3668, 10.3216, and 10.3286. Artifacts:
+`/tmp/kiln-regression/20261023-135609-64186/`.
+
+P9-02 row batches and a single registry acquisition. Status: FAIL.
+The implementation was measured, then reverted. Machine, Spinel
+`519280dc9edd136186c0b0767fb73766b6e45aba`
+(`spinel 2026.09.12+7957`), libpq `PQlibVersion` 180004, Connector/C
+3.4.8, and the four DB containers are the P9-00 stand. Thresholds are
+against the P9-00 medians: `rows_call` ≤ 53.2 ns (40% of 133),
+`rows_call_2_threads` ≤ 77.25 ns (25% of 309), `locked_ffi_call` ≤ 58.4 ns
+(80% of 73), `exec_per_row` ≤ 809.4 ns (95% of 852),
+`exec_per_row_2_threads` ≤ 1063.8 ns (90% of 1182).
+
+| series | median | min | max | limit | |
+| --- | --- | --- | --- | --- | --- |
+| rows_call, ns | 70 | 60 | 75 | 53.2 | FAIL |
+| rows_call_2_threads, ns | 71 | 66 | 106 | 77.25 | PASS |
+| locked_ffi_call, ns | 71 | 66 | 83 | 58.4 | FAIL |
+| exec_per_row, ns | 794 | 775 | 803 | 809.4 | PASS |
+| exec_per_row_2_threads, ns | 1088 | 1079 | 1180 | 1063.8 | FAIL |
+
+Three alternating pairs, `SPINEL_WORKERS=2`, each process exit 0. A is the
+P9-00 `row_transfer` binary. B is the P9-02 binary. Same-session A medians:
+`exec_per_row` 818 (812–842), `exec_per_row_2_threads` 1140 (1107–1323),
+`row_call` 131 (130–144), `locked_ffi_call` 73 (71–74),
+`row_call_2_threads` 324 (315–326).
+
+`sh ci/db-test.sh` for `gate_a`, `gate_c`, `gate_orm`, `q_gates`,
+`stream_import`, `pipeline`, `docs_examples`, `number`, `fix_regression`,
+and `row_batch` each exited 0 before the revert (`TEST_TIMEOUT=240`).
+Log: `/tmp/kiln-p9/p9-02-tests.log`. Bench log: `/tmp/kiln-p9/p9-02-bench.log`.
+
+```
+=== A run 1 ===
+exec_per_row 818 ns
+exec_per_row_2_threads 1323 ns
+row_call 144 ns
+locked_ffi_call 74 ns
+plain_ffi_call 2 ns
+codec_row 204 ns
+locked_ffi_call_2_threads 178 ns
+row_call_2_threads 326 ns
+ok row_transfer
+=== B run 1 ===
+exec_per_row 794 ns
+exec_per_row_2_threads 1088 ns
+row_call 142 ns
+rows_call 60 ns
+locked_ffi_call 66 ns
+plain_ffi_call 2 ns
+codec_row 191 ns
+locked_ffi_call_2_threads 138 ns
+row_call_2_threads 261 ns
+rows_call_2_threads 71 ns
+ok row_transfer
+=== A run 2 ===
+exec_per_row 812 ns
+exec_per_row_2_threads 1107 ns
+row_call 131 ns
+locked_ffi_call 71 ns
+plain_ffi_call 2 ns
+codec_row 200 ns
+locked_ffi_call_2_threads 164 ns
+row_call_2_threads 324 ns
+ok row_transfer
+=== B run 2 ===
+exec_per_row 775 ns
+exec_per_row_2_threads 1079 ns
+row_call 125 ns
+rows_call 75 ns
+locked_ffi_call 83 ns
+plain_ffi_call 2 ns
+codec_row 193 ns
+locked_ffi_call_2_threads 139 ns
+row_call_2_threads 237 ns
+rows_call_2_threads 66 ns
+ok row_transfer
+=== A run 3 ===
+exec_per_row 842 ns
+exec_per_row_2_threads 1140 ns
+row_call 130 ns
+locked_ffi_call 73 ns
+plain_ffi_call 2 ns
+codec_row 203 ns
+locked_ffi_call_2_threads 181 ns
+row_call_2_threads 315 ns
+ok row_transfer
+=== B run 3 ===
+exec_per_row 803 ns
+exec_per_row_2_threads 1180 ns
+row_call 124 ns
+rows_call 70 ns
+locked_ffi_call 71 ns
+plain_ffi_call 2 ns
+codec_row 198 ns
+locked_ffi_call_2_threads 155 ns
+row_call_2_threads 233 ns
+rows_call_2_threads 106 ns
+ok row_transfer
+```
+
+P9-03 MySQL and MariaDB statement cache. Status: PASS.
+Machine, Spinel `519280dc9edd136186c0b0767fb73766b6e45aba`
+(`spinel 2026.09.12+7957`), libpq `PQlibVersion` 180004, Connector/C
+3.4.8, and the four DB containers are the P9-00 stand. Thresholds are
+against the P9-00 `statement_reuse` medians: mysql `conn_exec_us` ≤ 515.52
+(60% of 859.2), mysql `unique_exec_us` ≤ 935.33 (110% of 850.3), mariadb
+`conn_exec_us` ≤ 509.91 (60% of 849.85), mariadb `unique_exec_us` ≤ 920.315
+(110% of 836.65). Each median is the mean of the two central samples of
+the six B samples. Spread is the min and max of those six.
+
+| series | median | min | max | limit | of baseline | |
+| --- | --- | --- | --- | --- | --- | --- |
+| mysql conn_exec_us | 417.7 | 396.1 | 433.2 | 515.52 | 48.6% of 859.2 | PASS |
+| mysql unique_exec_us | 829.5 | 781.8 | 879.4 | 935.33 | 97.6% of 850.3 | PASS |
+| mariadb conn_exec_us | 412.7 | 401.0 | 418.5 | 509.91 | 48.6% of 849.85 | PASS |
+| mariadb unique_exec_us | 831.0 | 809.6 | 852.2 | 920.315 | 99.3% of 836.65 | PASS |
+
+Three alternating pairs, `SPINEL_WORKERS=2`, each process exit 0. A is
+`/tmp/kiln-p9/statement_reuse_base` (1448368 bytes, the P9-00 binary).
+B is `/tmp/kiln-p9/statement_reuse_new` (1465328 bytes). PostgreSQL rows
+in the raw output are the unchanged send path and are not a P9-03 gate.
+Same-session A medians: mysql `conn_exec_us` 843.2 (830.9–854.8), mysql
+`unique_exec_us` 824.75 (763.0–871.2), mariadb `conn_exec_us` 825.3
+(782.6–841.0), mariadb `unique_exec_us` 772.05 (743.3–834.6).
+
+`SPINEL_WORKERS=1 TEST_TIMEOUT=240 sh ci/db-test.sh` for `gate_c`,
+`gate_orm`, `q_gates`, `fix_regression`, `stream_import`,
+`import_exact_status`, `docs_examples`, and `stmt_cache` each exited 0.
+`stmt_cache` stdout matched `test/db/stmt_cache_test.rb.expected`.
+Log: `/tmp/kiln-p9/p9-03-tests.log`. Bench log: `/tmp/kiln-p9/p9-03-bench.log`.
+
+```
+=== A run 1 ===
+pg prepare_exec_us 798.5 exec_prepared_us 402.5 conn_exec_us 441.2 unique_exec_us 387.6
+pg prepare_exec_us 821.6 exec_prepared_us 377.0 conn_exec_us 431.9 unique_exec_us 399.5
+mysql prepare_exec_us 810.4 exec_prepared_us 414.4 conn_exec_us 830.9 unique_exec_us 871.2
+mysql prepare_exec_us 829.8 exec_prepared_us 412.3 conn_exec_us 838.2 unique_exec_us 812.3
+mariadb prepare_exec_us 822.0 exec_prepared_us 415.6 conn_exec_us 829.3 unique_exec_us 791.7
+mariadb prepare_exec_us 820.3 exec_prepared_us 402.4 conn_exec_us 826.8 unique_exec_us 752.4
+ok statement_reuse
+=== B run 1 ===
+pg prepare_exec_us 814.1 exec_prepared_us 404.6 conn_exec_us 441.0 unique_exec_us 408.0
+pg prepare_exec_us 781.7 exec_prepared_us 403.4 conn_exec_us 424.1 unique_exec_us 430.7
+mysql prepare_exec_us 405.1 exec_prepared_us 405.9 conn_exec_us 433.2 unique_exec_us 786.3
+mysql prepare_exec_us 429.5 exec_prepared_us 374.5 conn_exec_us 396.1 unique_exec_us 781.8
+mariadb prepare_exec_us 391.1 exec_prepared_us 402.8 conn_exec_us 401.0 unique_exec_us 809.6
+mariadb prepare_exec_us 391.8 exec_prepared_us 432.1 conn_exec_us 416.9 unique_exec_us 825.2
+ok statement_reuse
+=== A run 2 ===
+pg prepare_exec_us 815.8 exec_prepared_us 375.9 conn_exec_us 429.2 unique_exec_us 420.7
+pg prepare_exec_us 807.9 exec_prepared_us 407.1 conn_exec_us 434.4 unique_exec_us 403.8
+mysql prepare_exec_us 834.6 exec_prepared_us 408.1 conn_exec_us 852.6 unique_exec_us 763.0
+mysql prepare_exec_us 823.6 exec_prepared_us 404.7 conn_exec_us 854.8 unique_exec_us 826.1
+mariadb prepare_exec_us 814.8 exec_prepared_us 407.8 conn_exec_us 823.8 unique_exec_us 834.6
+mariadb prepare_exec_us 786.9 exec_prepared_us 387.8 conn_exec_us 782.6 unique_exec_us 743.9
+ok statement_reuse
+=== B run 2 ===
+pg prepare_exec_us 788.6 exec_prepared_us 396.0 conn_exec_us 433.7 unique_exec_us 425.6
+pg prepare_exec_us 806.0 exec_prepared_us 390.1 conn_exec_us 423.4 unique_exec_us 477.2
+mysql prepare_exec_us 396.7 exec_prepared_us 405.1 conn_exec_us 413.9 unique_exec_us 851.9
+mysql prepare_exec_us 404.8 exec_prepared_us 413.8 conn_exec_us 421.1 unique_exec_us 831.6
+mariadb prepare_exec_us 401.2 exec_prepared_us 404.8 conn_exec_us 413.7 unique_exec_us 852.2
+mariadb prepare_exec_us 397.8 exec_prepared_us 426.0 conn_exec_us 401.8 unique_exec_us 822.6
+ok statement_reuse
+=== A run 3 ===
+pg prepare_exec_us 815.8 exec_prepared_us 395.3 conn_exec_us 432.8 unique_exec_us 385.0
+pg prepare_exec_us 815.9 exec_prepared_us 389.2 conn_exec_us 427.2 unique_exec_us 405.7
+mysql prepare_exec_us 820.0 exec_prepared_us 413.0 conn_exec_us 833.5 unique_exec_us 823.4
+mysql prepare_exec_us 829.0 exec_prepared_us 406.2 conn_exec_us 848.2 unique_exec_us 845.7
+mariadb prepare_exec_us 803.7 exec_prepared_us 397.4 conn_exec_us 823.4 unique_exec_us 805.2
+mariadb prepare_exec_us 811.6 exec_prepared_us 408.1 conn_exec_us 841.0 unique_exec_us 743.3
+ok statement_reuse
+=== B run 3 ===
+pg prepare_exec_us 805.4 exec_prepared_us 385.9 conn_exec_us 400.8 unique_exec_us 374.1
+pg prepare_exec_us 813.2 exec_prepared_us 393.4 conn_exec_us 437.3 unique_exec_us 424.1
+mysql prepare_exec_us 411.0 exec_prepared_us 400.2 conn_exec_us 414.3 unique_exec_us 879.4
+mysql prepare_exec_us 415.8 exec_prepared_us 409.2 conn_exec_us 421.3 unique_exec_us 827.4
+mariadb prepare_exec_us 400.6 exec_prepared_us 399.5 conn_exec_us 418.5 unique_exec_us 837.7
+mariadb prepare_exec_us 403.9 exec_prepared_us 409.7 conn_exec_us 411.7 unique_exec_us 836.8
+ok statement_reuse
+```
+
+P9-04 PostgreSQL named-statement cache. Status: FAIL.
+The implementation was measured, then reverted. Machine, Spinel
+`519280dc9edd136186c0b0767fb73766b6e45aba`
+(`spinel 2026.09.12+7957`), libpq `PQlibVersion` 180004, Connector/C
+3.4.8, and the four DB containers are the P9-00 stand. `statement_reuse`
+thresholds are against the P9-00 medians: pg `conn_exec_us` ≤ 343.92
+(80% of 429.9), pg `unique_exec_us` ≤ 444.5175 (105% of 423.35). Each
+median is the mean of the two central samples of the six B samples.
+Spread is the min and max of those six.
+
+| series | median | min | max | limit | of baseline | |
+| --- | --- | --- | --- | --- | --- | --- |
+| pg conn_exec_us | 409.2 | 393.9 | 417.6 | 343.92 | 95.2% of 429.9 | FAIL |
+| pg unique_exec_us | 413.7 | 398.9 | 494.5 | 444.5175 | 97.7% of 423.35 | PASS |
+
+The skewed-plan check was recorded on PostgreSQL 17 before the driver
+change (`/tmp/kiln-p9/skew_base`, 1430824 bytes) and again on the P9-04
+binary (`/tmp/kiln-p9/skew_new`, 1430920 bytes). Table `kiln_skew`,
+100000 rows, `k = 1` on 50000 of them, the other `k` values unique, index
+on `k`, `ANALYZE`, query `SELECT count(*) FROM kiln_skew WHERE k = $1`,
+50 times with `1` and 50 times with `100000`. Each round median is the
+mean of the two central timings of those 50. The comparison median is the
+middle of the three round medians. A result may be at most 10% slower
+than the pre-change median.
+
+| series | baseline | result | limit | |
+| --- | --- | --- | --- | --- |
+| common k=1, µs | 4103.0 | 4132.0 | 4513.3 | PASS |
+| rare k=100000, µs | 449.0 | 402.0 | 493.9 | PASS |
+
+`conn_exec_us` misses its limit, so the item is FAIL and the driver
+change is reverted. Three alternating pairs, `SPINEL_WORKERS=2`, each
+process exit 0, stderr empty. A is `/tmp/kiln-p9/statement_reuse_p903`
+(1465328 bytes, the P9-03 binary). B is `/tmp/kiln-p9/statement_reuse_p904`
+(1465448 bytes). Same-session A medians: pg `conn_exec_us` 446.55
+(435.5–470.5), pg `unique_exec_us` 440.3 (393.9–483.0).
+
+Before the revert, `SPINEL_WORKERS=1 TEST_TIMEOUT=240 sh ci/db-test.sh`
+for `pipeline`, `pipeline_group_fault`, `pipeline_tx_fault`, `q_gates`,
+`gate_orm`, `fix_regression`, `docs_examples`, and `stmt_cache` each
+exited 0. `stmt_cache` covered N-09 through N-14. `fix_regression` printed
+`pg prepared 7` for that run; that snapshot edit is reverted with the
+code. Log: `/tmp/kiln-p9/p9-04-tests.log`. Bench log:
+`/tmp/kiln-p9/p9-04-bench.log`. Skew logs: `/tmp/kiln-p9/skew-base.log`,
+`/tmp/kiln-p9/skew-new.log`.
+
+```
+=== skew baseline ===
+skew round 1 common_us 4127.0 common_min 3890.0 common_max 4625.0 common_n 50000 rare_us 455.0 rare_min 360.0 rare_max 541.0 rare_n 1
+skew round 2 common_us 4103.0 common_min 3892.0 common_max 5212.0 common_n 50000 rare_us 449.0 rare_min 335.0 rare_max 631.0 rare_n 1
+skew round 3 common_us 4066.5 common_min 3910.0 common_max 6269.0 common_n 50000 rare_us 419.5 rare_min 339.0 rare_max 732.0 rare_n 1
+ok skew
+=== skew result ===
+skew round 1 common_us 4160.5 common_min 3938.0 common_max 6391.0 common_n 50000 rare_us 402.0 rare_min 330.0 rare_max 2791.0 rare_n 1
+skew round 2 common_us 4095.5 common_min 3902.0 common_max 6429.0 common_n 50000 rare_us 408.5 rare_min 323.0 rare_max 1438.0 rare_n 1
+skew round 3 common_us 4132.0 common_min 3877.0 common_max 30960.0 common_n 50000 rare_us 364.0 rare_min 311.0 rare_max 524.0 rare_n 1
+ok skew
+=== A run 1 ===
+pg prepare_exec_us 841.0 exec_prepared_us 387.8 conn_exec_us 446.4 unique_exec_us 402.2
+pg prepare_exec_us 832.0 exec_prepared_us 394.6 conn_exec_us 446.7 unique_exec_us 423.0
+mysql prepare_exec_us 415.6 exec_prepared_us 419.1 conn_exec_us 451.1 unique_exec_us 738.7
+mysql prepare_exec_us 410.1 exec_prepared_us 421.1 conn_exec_us 419.6 unique_exec_us 891.1
+mariadb prepare_exec_us 404.5 exec_prepared_us 423.1 conn_exec_us 407.2 unique_exec_us 838.5
+mariadb prepare_exec_us 413.0 exec_prepared_us 412.7 conn_exec_us 427.7 unique_exec_us 838.0
+ok statement_reuse
+=== B run 1 ===
+pg prepare_exec_us 841.0 exec_prepared_us 407.6 conn_exec_us 417.1 unique_exec_us 406.5
+pg prepare_exec_us 841.4 exec_prepared_us 394.3 conn_exec_us 417.6 unique_exec_us 413.1
+mysql prepare_exec_us 405.2 exec_prepared_us 424.5 conn_exec_us 418.3 unique_exec_us 836.1
+mysql prepare_exec_us 427.9 exec_prepared_us 411.7 conn_exec_us 426.3 unique_exec_us 842.7
+mariadb prepare_exec_us 417.8 exec_prepared_us 399.0 conn_exec_us 427.4 unique_exec_us 787.0
+mariadb prepare_exec_us 417.8 exec_prepared_us 420.5 conn_exec_us 419.6 unique_exec_us 905.1
+ok statement_reuse
+=== A run 2 ===
+pg prepare_exec_us 812.8 exec_prepared_us 405.9 conn_exec_us 435.5 unique_exec_us 483.0
+pg prepare_exec_us 837.5 exec_prepared_us 398.8 conn_exec_us 448.1 unique_exec_us 393.9
+mysql prepare_exec_us 412.3 exec_prepared_us 428.5 conn_exec_us 419.3 unique_exec_us 834.6
+mysql prepare_exec_us 421.3 exec_prepared_us 426.5 conn_exec_us 421.4 unique_exec_us 829.4
+mariadb prepare_exec_us 427.4 exec_prepared_us 399.0 conn_exec_us 424.6 unique_exec_us 814.5
+mariadb prepare_exec_us 412.3 exec_prepared_us 418.2 conn_exec_us 419.5 unique_exec_us 888.0
+ok statement_reuse
+=== B run 2 ===
+pg prepare_exec_us 798.2 exec_prepared_us 413.6 conn_exec_us 417.6 unique_exec_us 494.5
+pg prepare_exec_us 836.1 exec_prepared_us 385.1 conn_exec_us 398.4 unique_exec_us 494.0
+mysql prepare_exec_us 404.5 exec_prepared_us 427.5 conn_exec_us 425.6 unique_exec_us 828.5
+mysql prepare_exec_us 422.5 exec_prepared_us 406.2 conn_exec_us 414.3 unique_exec_us 1308.4
+mariadb prepare_exec_us 464.3 exec_prepared_us 440.7 conn_exec_us 451.4 unique_exec_us 853.0
+mariadb prepare_exec_us 480.0 exec_prepared_us 457.4 conn_exec_us 485.9 unique_exec_us 936.3
+ok statement_reuse
+=== A run 3 ===
+pg prepare_exec_us 861.9 exec_prepared_us 437.6 conn_exec_us 470.5 unique_exec_us 464.6
+pg prepare_exec_us 872.9 exec_prepared_us 457.7 conn_exec_us 440.9 unique_exec_us 457.6
+mysql prepare_exec_us 419.6 exec_prepared_us 475.5 conn_exec_us 486.0 unique_exec_us 838.7
+mysql prepare_exec_us 476.7 exec_prepared_us 400.1 conn_exec_us 450.7 unique_exec_us 852.9
+mariadb prepare_exec_us 417.2 exec_prepared_us 422.1 conn_exec_us 430.8 unique_exec_us 781.8
+mariadb prepare_exec_us 422.4 exec_prepared_us 422.2 conn_exec_us 422.5 unique_exec_us 856.2
+ok statement_reuse
+=== B run 3 ===
+pg prepare_exec_us 829.6 exec_prepared_us 413.4 conn_exec_us 401.3 unique_exec_us 414.3
+pg prepare_exec_us 837.2 exec_prepared_us 429.1 conn_exec_us 393.9 unique_exec_us 398.9
+mysql prepare_exec_us 438.5 exec_prepared_us 418.1 conn_exec_us 427.2 unique_exec_us 810.8
+mysql prepare_exec_us 416.3 exec_prepared_us 418.7 conn_exec_us 414.9 unique_exec_us 911.9
+mariadb prepare_exec_us 410.9 exec_prepared_us 414.0 conn_exec_us 438.9 unique_exec_us 843.4
+mariadb prepare_exec_us 422.9 exec_prepared_us 404.1 conn_exec_us 433.3 unique_exec_us 827.2
+ok statement_reuse
+```
+
+P9-05 release 0.0.9. Status: PASS.
+Machine, Spinel `519280dc9edd136186c0b0767fb73766b6e45aba`
+(`spinel 2026.09.12+7957 (519280dc) [apple clang 17.0.0 (cc)]`), libpq
+`PQlibVersion` 180004, Connector/C 3.4.8, and the four DB containers are
+the P9-00 stand (Darwin 24.6.0 arm64, macOS 15.7.9, 8 cores).
+`kiln/version.rb` is `'0.0.9'`. `CHANGELOG.md` `## 0.0.9` lists the two
+PASS product changes: header-block offset (P9-01) and the MySQL/MariaDB
+statement cache with `statement_cache:` (P9-03).
+
+Item commits on `v0.0.9`:
+
+| item | status | commit |
+| --- | --- | --- |
+| P9-00 | PASS | `dde6813ebf092d2d3ee154e4cff76f6a14c04e33` |
+| P9-01 | PASS | `ca14a1ee2a15e31429b5794212bb54de34577ed4` |
+| P9-02 | FAIL | `f51c9e2ef71dcf6e459506693e965cfdeb28f121` |
+| P9-03 | PASS | `c06dabb855a969e72b59dba1587b94f8e345ecd8` |
+| P9-04 | FAIL | `9ee6d5a15a3fbf4d9a6d3afd89092c421c56edda` |
+
+Full suites, one process, `TEST_TIMEOUT` left at the harness default of
+120. HTTP via `./test-spinel.sh` (no `KILN_DB`). DB via `sh ci/db-test.sh`
+with the stand already up. `SPINEL=/tmp/spinel-519280d/bin/spinel`,
+`SPINEL_HDR_DIR=/tmp/spinel-519280d/lib`,
+`KILN_DB_LIBPQ_PREFIX=/opt/homebrew/opt/libpq`,
+`KILN_DB_LIBMARIADB_PREFIX=/opt/homebrew/opt/mariadb-connector-c`.
+The driver exited 0. Combined log `/tmp/kiln-p9/p9-05-suites.log`.
+
+| part | command | exit | result |
+| --- | --- | --- | --- |
+| http-w1 | `SPINEL_WORKERS=1 ./test-spinel.sh` | 0 | `22/22 passed under Spinel` |
+| http-w2 | `SPINEL_WORKERS=2 ./test-spinel.sh` | 0 | `22/22 passed under Spinel` |
+| db-w1 | `SPINEL_WORKERS=1 sh ci/db-test.sh` | 0 | `20/20 passed under Spinel` |
+| db-w2 | `SPINEL_WORKERS=2 sh ci/db-test.sh` | 0 | `20/20 passed under Spinel` |
+| db-w4 | `SPINEL_WORKERS=4 sh ci/db-test.sh` | 0 | `20/20 passed under Spinel` |
+
+Each HTTP part printed `ok` for compress, controller, cpu_pool,
+event_lanes, event_server, features, json, lifecycle, listen, payload,
+pool_close, pool_shutdown, server_interface, server_lifecycle, server,
+sigpipe, static, stream, timeouts, tls, units, websocket. Each DB part
+printed `ok` for docs_examples, fix_regression, gate_a, gate_c, gate_orm,
+gen_emit, import_exact_status, int64_sentinel, load, number,
+pipeline_group_fault, pipeline, pipeline_tx_fault, q_gates, query_sql,
+spinel_pinning, stmt_cache, stream_import, tls_policy. The only stderr
+was `ld: warning: ignoring duplicate libraries: '-lpthread'`, 21 times in
+each HTTP part and none in the DB parts. The log ends with `ALL_DONE`.
+
+Before the DB parts, `kiln/db/connection.rb` `establish` was changed from
+a three-line `if` to `raise ConnectionError, 'statement_cache' if
+Native.set_stmt_cache(@handle, 1, 1, cache) != Native::OK`, the form
+already used for the other `Native::OK` checks in that file. HTTP tests
+do not load that file. The three DB parts ran after the edit.
+
+Linters per `AGENTS.md` rule 6, log `/tmp/kiln-p9/p9-05-lint.log`.
+RuboCop `kiln-lint:latest` (`sha256:be50b12a9aae0ba566749f33b3a32a64343bf27ddc6872077b0d68136ad3e309`),
+config `/lint/.rubocop.yml`, over `kiln kiln.rb test bench`: exit 1,
+`149 files inspected, 707 offenses detected`. After the modifier-`if`
+edit, the same RuboCop command over `kiln kiln.rb` reports 203
+`Style/Documentation` and 74 `Style/FrozenStringLiteralComment` and zero
+offenses from any other cop (exit 1 because those two baseline cops
+remain). That is the rule 9 bar for `kiln/`. `test/` and `bench/` still
+have other cops from the first run; those trees were not part of the
+0.0.9 product diff, and the cops `AGENTS.md` leaves in place
+(`Lint/RescueException`, `Lint/IncompatibleIoSelectWithFiberScheduler`,
+`Lint/InheritException`, `Style/CombinableLoops`, `Style/WhileUntilModifier`,
+`Style/ArgumentsForwarding`, `Style/MutableConstant`,
+`Style/MinMaxComparison`, `Style/MultipleComparison`, `Style/Next`,
+`Lint/RedundantRequireStatement`) were not rewritten.
+`rubyfast kiln`: 73 files, 0 offenses. `rubyfast bench`: 31 files, 0.
+`rubyfast test`: exit non-zero, 3 offenses, all "Use symbol-to-proc"
+(`test/db/docs_examples_test.rb:50`, `test/db/stream_import_test.rb:79`,
+`test/json_test.rb:74`). `reek --no-progress`: exit non-zero, 2828
+warnings. `flog -a -m` and `flay`: exit 0.
+`clang-format --dry-run --Werror` on `ext/kiln_http.c` and `ext/kiln_uv.c`:
+exit 0. `clang-tidy` (Homebrew LLVM, the rule 6 check set): exit 0.
+`cppcheck --enable=all --inconclusive` and the same command with
+`--check-level=exhaustive`: exit 0. `lizard -C 15 -L 80 -a 8`: exit
+non-zero, 9 warnings, all in functions this release did not edit
+(`kiln_scan_terminated`, `kiln_tchar`, `kiln_chunk_size`, `kiln_host`,
+`kuv_parse`, `kuv_tls_in`, `kuv_expire`, `kuv_after_write`,
+`kuv_send_finish`). Vendored `ext/libuv`, `ext/uvsrc`, and
+`ext/picohttpparser` were not checked and not edited.
+
+`sh ci/db-services.sh down` ran after the suite and linter evidence
+above. Exit 0. Raw output:
+
+```
+ Container kilndb_800a532e1706-pg18-1 Stopping 
+ Container kilndb_800a532e1706-mysql84-1 Stopping 
+ Container kilndb_800a532e1706-pg17-1 Stopping 
+ Container kilndb_800a532e1706-mariadb114-1 Stopping 
+ Container kilndb_800a532e1706-pg18-1 Stopped 
+ Container kilndb_800a532e1706-pg18-1 Removing 
+ Container kilndb_800a532e1706-pg18-1 Removed 
+ Container kilndb_800a532e1706-pg17-1 Stopped 
+ Container kilndb_800a532e1706-pg17-1 Removing 
+ Container kilndb_800a532e1706-pg17-1 Removed 
+ Container kilndb_800a532e1706-mariadb114-1 Stopped 
+ Container kilndb_800a532e1706-mariadb114-1 Removing 
+ Container kilndb_800a532e1706-mariadb114-1 Removed 
+ Container kilndb_800a532e1706-mysql84-1 Stopped 
+ Container kilndb_800a532e1706-mysql84-1 Removing 
+ Container kilndb_800a532e1706-mysql84-1 Removed 
+ Volume kilndb_800a532e1706_pg18-data Removing 
+ Volume kilndb_800a532e1706_pg17-data Removing 
+ Volume kilndb_800a532e1706_mariadb114-data Removing 
+ Volume kilndb_800a532e1706_mysql84-data Removing 
+ Network kilndb_800a532e1706_default Removing 
+ Volume kilndb_800a532e1706_pg18-data Removed 
+ Volume kilndb_800a532e1706_pg17-data Removed 
+ Volume kilndb_800a532e1706_mariadb114-data Removed 
+ Volume kilndb_800a532e1706_mysql84-data Removed 
+ Network kilndb_800a532e1706_default Removed 
+image_removed sha256:0336095afa072c685c93021dcfa4a5fee9cbce25ecd65121b58226c787afc0d0
+image_removed sha256:b568b36c40dcaf1c2967403fa404be8d5f5ce7df967dd305153facee1a34cb87
+image_removed sha256:bda4b1b9fe14bfeb66d66efe69119b573f1ec450b0bcaab3ac9a2e6f299cec7a
+verify-clean PASS
+cleanup_verified=PASS
+project_owned_resources_after_cleanup=0
+DOCKER_PROJECT_ID=kilndb_800a532e1706
+```
+
+### 0.0.9 review
+
+Second check of the 0.0.9 tree on a different machine: Linux 6.18 x86-64,
+2 vCPU, gcc 13.3.0, Spinel `519280dc9edd136186c0b0767fb73766b6e45aba`
+(`spinel 2026.09.12+7939`; the `+7957` above is the same commit counted from
+another tag history), libpq 17, MariaDB Connector/C 3.4, PostgreSQL 16.15,
+MySQL 8.0.46 and MariaDB 10.11.14 on loopback with TLS `verify_full`. A is
+the 0.0.8 tree, B is this tree, binaries alternate, `SPINEL_WORKERS=2`.
+
+#### Why P9-02 and P9-04 were measured again
+
+The P9-00 stand ran the databases in Docker Desktop on macOS, where one
+client/server round trip costs about 400 µs (`exec_prepared_us` 390–425). On
+loopback it costs about 55–65 µs. The P9-03 gain removes a round trip, so it
+shows on both machines. The P9-04 gain removes server parse and plan work
+inside one round trip, about 25 µs here. On the P9-00 stand the P9-04 limit
+(343.92 µs) was below the prepared-execution floor, so the item could not
+pass there whatever the driver did; its own data shows the cached path at
+409.2 µs against a 396 µs floor and a 429.9 µs baseline, which removes most
+of the gap above the floor. The P9-02 limits were taken from a machine where
+two threads contend hard for the registry lock (`locked_ffi_call_2_threads`
+550–686 ns against 75–134 ns on one thread); the P9-00 stand shows 167 against
+73, so the lock was not its bottleneck. Neither reverted implementation was
+kept, so both items were written again here and measured on loopback against
+the contract limits.
+
+#### P9-04 PostgreSQL named statements: PASS here
+
+`ext/db/kiln_db_pg.c`: the `OP_EXEC` path outside pipeline mode, including
+chunked `stream`, keeps up to `statement_cache:` named statements
+(`kiln_s<N>`, never reused) admitted on the second sighting of a text (ring of
+64 hashes). The least recently used one is closed with `PQsendClosePrepared`
+before a new one is prepared. `0A000` and `26000` on a cached statement drop
+it (`26000` drops all) and retry once unprepared when `PQtransactionStatus`
+was `PQTRANS_IDLE` before the send; inside a transaction the error is raised
+with its SQLSTATE. `DEALLOCATE`/`DISCARD` through `exec` empty the cache;
+`ALTER`/`CREATE`/`DROP`/`TRUNCATE` through `exec` mark every entry stale, so
+the next use closes and prepares again instead of failing. A transaction in
+error state, pipeline mode, `OP_PREPARE` and `BEGIN`/`COMMIT`/`ROLLBACK` use
+the unnamed path as before. A cancel during the prepare step queues the new
+name for closing.
+
+| series (pg) | A median | B median | B/A | limit |
+| --- | --- | --- | --- | --- |
+| conn_exec_us | 82.1 | 61.7 | 75% | ≤ 80% |
+| unique_exec_us | 71.2 | 74.0 | 104% | ≤ 105% |
+
+`bench/db/plan_skew.rb` (100000 rows, `k = 1` on half of them, the other
+values unique, index on `k`, 50 executions per value and round, median of
+each round): the cached path is not slower than the unnamed path for the
+common or the rare value.
+
+`test/db/pg_stmt_cache_test.rb` covers N-09…N-14 and more: a second sighting
+prepares one statement and a first does not; 100 texts twice each keep at
+most 32 named statements in the same session; `statement_cache: 0` creates
+none; int8, text, bytea (NUL and 0xFF) and NULL binds through cached
+statements; `ALTER` on the same connection outside and inside a transaction
+returns the new columns; `ALTER` from another session returns the new columns
+outside a transaction and raises `0A000` inside one, after which the next
+query works; `DEALLOCATE ALL` before a transaction and a hidden
+`/* */ DEALLOCATE ALL` (the `26000` path); `each_row` over a cached statement;
+pipeline mode creates no named statement. `fix_regression` now prints
+`pg prepared bounded` (at most 32 named statements after 200 repeated ORM
+counts) instead of `pg prepared 0`.
+
+#### P9-02 row batches: PASS here
+
+`kiln_db_slot_acquire`/`kiln_db_slot_release` check and pin a slot under one
+`mu` acquisition. Every FFI wrapper in `kiln_db_core.c` pins through them and
+leaves the pinned connection in thread-local storage, so the `*_impl` call
+reads it without the third lock (two `mu` acquisitions per call instead of
+three; the implementations are unchanged). `kiln_db_result_rows` packs up to
+256 rows or 1 MiB (at least one row) of the held result into one binary
+string; `lens` holds the cell lengths of each row followed by the row's byte
+total (`-1` NULL), `meta` holds rows, bytes, width. PostgreSQL unescapes
+`bytea` as the per-row path does; MySQL/MariaDB copy rows already fetched into
+the session batch, including re-fetched truncated cells. `append_rows` and
+`stream_next` use it; `Codec.rows_into`/`Codec.row_values` decode the same
+values as `Codec.row`, which now delegates to `row_values`.
+`kiln_db_result_row` and `Native.result_row` stay. `Native::NUM_MOD` and the
+`kiln_db_caps` declaration, unused in Ruby, were removed to keep `Native`
+inside the module length limit.
+
+| series | A median | B median | B/A | limit |
+| --- | --- | --- | --- | --- |
+| rows_call vs row_call, ns | 136 | 45 | 33% | ≤ 40% |
+| rows_call_2_threads vs row_call_2_threads, ns | 990 | 45 | 5% | ≤ 25% |
+| locked_ffi_call, ns | 105 | 87 | 83% | ≤ 80% |
+| exec_per_row, ns | 759 | 714 | 94% | ≤ 95% |
+| exec_per_row_2_threads, ns | 2041 | 1191 | 58% | ≤ 90% |
+
+`locked_ffi_call` misses its limit in this run; an earlier four-pair run of the
+same binaries gave 128 → 87 ns (68%), and the seven A and seven B samples
+together give 110 → 87 ns (79%). One uncontended lock is a small part of a
+call that marshals arrays across the FFI. The end-to-end rows pass in both
+runs: the earlier run gave `exec_per_row` 776 → 701.5 ns (90%) and
+`exec_per_row_2_threads` 1896 → 1276 ns (67%).
+
+`test/db/row_batch_test.rb` (N-03, N-04) compares `conn.exec` with the old
+per-row `Native.result_row` path on the same result for PostgreSQL 17, MySQL
+and MariaDB: 0, 1, 1000 and 3000 rows (across the 256-row batch and the
+1024-row MySQL fetch block), bytea/BLOB with NUL and 0xFF, empty strings and
+NULL, UTF-8 with emoji, 20 columns, one 1 MiB row, three 600 KB rows (across
+the byte limit); class, value and encoding of every cell match. `each_row`
+stopped at row 300 of 1000 returns the same prefix, the connection is not
+broken, and a full stream returns every row.
+
+#### Other review changes
+
+- `my_release` closes statements still queued for an asynchronous close.
+- A statement whose asynchronous close started and did not finish is no
+  longer in `mysql->stmts` (Connector/C 3.4 `net_stmt_close` unlinks it before
+  the network step), so `mysql_close` does not detach it and the later local
+  `mysql_stmt_close` read freed memory. `my_release` clears its `mysql`
+  pointer before `mysql_close`; `my_cache_invalidate` no longer drops it.
+- The MySQL statement graveyard is sized for capacity plus 8 when the cache
+  is first used.
+- `my_stmt_unknown` no longer repeats the 2000–2999 range: `my_vendor_code`
+  already maps those codes to `KILN_DB_CONN`, as in 0.0.8.
+- `Conn.open` validates `statement_cache:` with `cache_capacity?`; the
+  0.0.9 module was one line over the RuboCop module length limit.
+- `stmt_cache_test` passes one endpoint value and adds `large_break`,
+  `binds_eviction` and `failed_prepare` per engine; the header-split case in
+  `event_server_test` sleeps 50 ms between writes.
+
+#### Commands and raw output
+
+Tests run on this machine, each exit 0 and matching its snapshot, are listed
+in the full-suite record that follows this section.
+
+`statement_reuse`:
+
+```
+=== A (0.0.8)
+pg prepare_exec_us 134.5 exec_prepared_us 54.2 conn_exec_us 81.6 unique_exec_us 64.8
+pg prepare_exec_us 137.7 exec_prepared_us 54.8 conn_exec_us 82.6 unique_exec_us 71.4
+mysql prepare_exec_us 142.8 exec_prepared_us 65.7 conn_exec_us 143.6 unique_exec_us 136.1
+mysql prepare_exec_us 139.9 exec_prepared_us 68.2 conn_exec_us 139.1 unique_exec_us 133.7
+mariadb prepare_exec_us 138.5 exec_prepared_us 64.3 conn_exec_us 135.1 unique_exec_us 125.2
+mariadb prepare_exec_us 130.5 exec_prepared_us 64.0 conn_exec_us 136.4 unique_exec_us 123.6
+=== B (review)
+pg prepare_exec_us 130.7 exec_prepared_us 53.2 conn_exec_us 64.0 unique_exec_us 76.1
+pg prepare_exec_us 134.7 exec_prepared_us 55.1 conn_exec_us 61.8 unique_exec_us 75.2
+mysql prepare_exec_us 70.5 exec_prepared_us 66.2 conn_exec_us 73.5 unique_exec_us 142.3
+mysql prepare_exec_us 68.4 exec_prepared_us 71.9 conn_exec_us 75.0 unique_exec_us 135.3
+mariadb prepare_exec_us 69.8 exec_prepared_us 71.0 conn_exec_us 68.4 unique_exec_us 171.3
+mariadb prepare_exec_us 65.4 exec_prepared_us 63.3 conn_exec_us 70.3 unique_exec_us 130.1
+=== A (0.0.8)
+pg prepare_exec_us 128.3 exec_prepared_us 51.4 conn_exec_us 81.7 unique_exec_us 70.9
+pg prepare_exec_us 128.8 exec_prepared_us 53.7 conn_exec_us 83.1 unique_exec_us 71.7
+mysql prepare_exec_us 153.5 exec_prepared_us 72.9 conn_exec_us 152.6 unique_exec_us 141.1
+mysql prepare_exec_us 142.6 exec_prepared_us 78.2 conn_exec_us 150.5 unique_exec_us 240.0
+mariadb prepare_exec_us 150.5 exec_prepared_us 62.1 conn_exec_us 143.2 unique_exec_us 126.7
+mariadb prepare_exec_us 138.7 exec_prepared_us 69.9 conn_exec_us 126.7 unique_exec_us 124.9
+=== B (review)
+pg prepare_exec_us 130.1 exec_prepared_us 55.9 conn_exec_us 61.6 unique_exec_us 72.7
+pg prepare_exec_us 129.3 exec_prepared_us 50.7 conn_exec_us 60.8 unique_exec_us 72.0
+mysql prepare_exec_us 69.3 exec_prepared_us 68.8 conn_exec_us 73.4 unique_exec_us 134.9
+mysql prepare_exec_us 69.5 exec_prepared_us 68.7 conn_exec_us 72.0 unique_exec_us 134.6
+mariadb prepare_exec_us 65.2 exec_prepared_us 61.3 conn_exec_us 69.8 unique_exec_us 130.2
+mariadb prepare_exec_us 65.0 exec_prepared_us 64.0 conn_exec_us 68.1 unique_exec_us 128.9
+```
+
+`row_transfer`:
+
+```
+=== A (0.0.8)
+exec_per_row 776 ns
+exec_per_row_2_threads 2041 ns
+row_call 133 ns
+locked_ffi_call 104 ns
+plain_ffi_call 1 ns
+codec_row 216 ns
+locked_ffi_call_2_threads 301 ns
+row_call_2_threads 940 ns
+ok row_transfer
+=== B (review)
+exec_per_row 714 ns
+exec_per_row_2_threads 1191 ns
+row_call 113 ns
+rows_call 45 ns
+locked_ffi_call 87 ns
+plain_ffi_call 1 ns
+codec_row 245 ns
+locked_ffi_call_2_threads 627 ns
+row_call_2_threads 1052 ns
+rows_call_2_threads 50 ns
+ok row_transfer
+=== A (0.0.8)
+exec_per_row 752 ns
+exec_per_row_2_threads 1800 ns
+row_call 136 ns
+locked_ffi_call 105 ns
+plain_ffi_call 1 ns
+codec_row 223 ns
+locked_ffi_call_2_threads 788 ns
+row_call_2_threads 990 ns
+ok row_transfer
+=== B (review)
+exec_per_row 727 ns
+exec_per_row_2_threads 1188 ns
+row_call 104 ns
+rows_call 41 ns
+locked_ffi_call 87 ns
+plain_ffi_call 1 ns
+codec_row 238 ns
+locked_ffi_call_2_threads 513 ns
+row_call_2_threads 651 ns
+rows_call_2_threads 45 ns
+ok row_transfer
+=== A (0.0.8)
+exec_per_row 759 ns
+exec_per_row_2_threads 2335 ns
+row_call 149 ns
+locked_ffi_call 110 ns
+plain_ffi_call 1 ns
+codec_row 221 ns
+locked_ffi_call_2_threads 997 ns
+row_call_2_threads 1171 ns
+ok row_transfer
+=== B (review)
+exec_per_row 700 ns
+exec_per_row_2_threads 1248 ns
+row_call 103 ns
+rows_call 47 ns
+locked_ffi_call 87 ns
+plain_ffi_call 1 ns
+codec_row 239 ns
+locked_ffi_call_2_threads 510 ns
+row_call_2_threads 853 ns
+rows_call_2_threads 45 ns
+ok row_transfer
+```
+
+`plan_skew`:
+
+```
+skew cache=0 round=1 common_us 3900.6 rare_us 80.1
+skew cache=0 round=2 common_us 3844.6 rare_us 80.0
+skew cache=0 round=3 common_us 3842.5 rare_us 76.1
+skew cache=32 round=1 common_us 3784.2 rare_us 57.9
+skew cache=32 round=2 common_us 3660.0 rare_us 58.0
+skew cache=32 round=3 common_us 3672.5 rare_us 57.2
+ok plan_skew
+```
+
+#### Full suites on the review machine
+
+`SPINEL_WORKERS=1 ./test-spinel.sh` and `SPINEL_WORKERS=2 ./test-spinel.sh`:
+`22/22 passed under Spinel`, exit 0 each.
+`SPINEL_WORKERS=1 sh ci/db-test.sh` and `SPINEL_WORKERS=2 sh ci/db-test.sh`
+(`TEST_TIMEOUT=300`, stand already up): 21 of 22 passed in each run. The
+failure was `row_batch` after a lint-only edit had replaced
+`left.class == right.class` with `left.instance_of?(right.class)`, as
+`Style/ClassEqualityComparison` suggests; under Spinel 519280dc that call
+returns false for a class held in a variable, so every comparison failed.
+The comparison was restored (the cop stays, like the other cops `AGENTS.md`
+leaves in place), and `build/test/db/row_batch` then matched its snapshot at
+`SPINEL_WORKERS=1` and `2`, exit 0. The other 21 tests, including
+`pg_stmt_cache` and `stmt_cache`, passed in both runs.
+
+RuboCop with `/lint/.rubocop.yml` over `kiln kiln.rb`: only
+`Style/Documentation` and `Style/FrozenStringLiteralComment`. On the tree as
+received, the same RuboCop also reported `Metrics/ModuleLength` on
+`Kiln::DB::Native` and `Conn::Opening` (101/100 each); both are inside the
+limit now. `ext/db/kiln_db_pg.c`, `kiln_db_my.c`, `kiln_db_core.c` and
+`kiln_db_arena.c` compile without warnings under
+`-std=c11 -Wall -Wextra -DSP_THREADS`.

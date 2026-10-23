@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.9
+
+### Changed
+
+- The HTTP parser keeps the header-block offset it has already scanned and continues from there.
+- MySQL and MariaDB connections keep a prepared-statement cache (`statement_cache:` on `Conn.open`, default 32).
+- PostgreSQL connections prepare a named statement on the second run of the same text and keep up to `statement_cache:` of them.
+- Query results are read from the driver in batches of up to 256 rows with one registry lock per call, and every driver call takes the registry lock twice instead of three times.
+
 ## 0.0.8
 
 ### Added

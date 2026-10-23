@@ -1,0 +1,10 @@
+pg first_sighting yes
+pg session_bound yes
+pg disabled yes
+pg binds yes
+pg same_session_alter yes
+pg other_session_alter yes
+pg deallocate yes
+pg stream yes
+pg pipeline yes
+ok pg_stmt_cache

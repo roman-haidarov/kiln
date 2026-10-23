@@ -45,7 +45,7 @@ end
 Kiln::DB::Scope.pool = pool
 ```
 
-`Conn.open(kind, host, port, user, password, database, ca, tls_name, tls:, timeout:)`:
+`Conn.open(kind, host, port, user, password, database, ca, tls_name, tls:, timeout:, statement_cache:)`:
 
 - `tls: :verify_full` (the default) requires a CA file and a TLS server name
   and verifies the certificate against that name. PostgreSQL also accepts
@@ -61,6 +61,31 @@ Kiln::DB::Scope.pool = pool
   connects to), so `host` is informational there.
 - `timeout:` bounds every database operation. Inside a Kiln request the
   request deadline (`request_timeout`) is used when it is earlier.
+- `statement_cache:` keeps prepared statements on the connection. The default
+  is 32. `statement_cache: 0` turns the cache off. Any value other than an
+  integer from 0 through 256 raises `ConfigError` before the driver connects.
+  The cache is keyed by the SQL text alone, and a pool keeps one cache per
+  connection.
+  - MySQL and MariaDB reuse the prepared statement from the first execution
+    of a text. Each cached statement counts toward `max_prepared_stmt_count`,
+    so the server limit has to cover pool size × cache capacity. A cached
+    statement keeps the default database and SQL mode it was prepared with,
+    so on a connection that runs `USE` or changes `sql_mode`, use qualified
+    table names or `statement_cache: 0`.
+  - PostgreSQL prepares a named statement (`kiln_s<N>`) the second time the
+    same text runs outside pipeline mode; the first run uses the unnamed
+    statement as before. The least recently used statement is closed when the
+    cache is full. `DEALLOCATE` and `DISCARD` run through `exec` empty the
+    cache, and `ALTER`, `CREATE`, `DROP` or `TRUNCATE` run through `exec` make
+    the next use prepare again. When another session changes a table so that a
+    cached statement returns different columns, PostgreSQL reports `0A000`
+    (`cached plan must not change result type`); outside a transaction Kiln
+    drops the statement and runs the query again unprepared, inside a
+    transaction the error is raised and the transaction rolls back. A missing
+    statement (`26000`) is handled the same way. The server chooses custom or
+    generic plans for cached statements (`plan_cache_mode`). PgBouncer in
+    transaction pooling needs `max_prepared_statements` (version 1.21 or
+    later) or `statement_cache: 0`.
 
 `Kiln::DB::Pool.new(size, timeout:) { Conn.open(...) }` hands each thread its own
 connection. A connection that timed out, lost its server, or is left inside a

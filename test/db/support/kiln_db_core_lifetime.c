@@ -82,6 +82,21 @@ const char *kiln_db_pg_result_row(kiln_db_conn *conn, uint32_t row, int64_t *len
 const char *kiln_db_my_result_row(kiln_db_conn *conn, uint32_t row, int64_t *lens, int n) {
     return kiln_db_pg_result_row(conn, row, lens, n);
 }
+const char *kiln_db_pg_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
+    (void)conn;
+    (void)first;
+    (void)max_rows;
+    (void)max_bytes;
+    (void)lens;
+    (void)lens_cap;
+    meta[0] = -2;
+    return "";
+}
+const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
+    return kiln_db_pg_result_rows(conn, first, max_rows, max_bytes, lens, lens_cap, meta);
+}
 const char *kiln_db_pg_result_bytes(
     kiln_db_conn *conn, uint32_t row, uint32_t col, int64_t *meta, int n) {
     (void)row;
