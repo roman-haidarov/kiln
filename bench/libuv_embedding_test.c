@@ -36,7 +36,7 @@ extern long kiln_uv_flush(void);
 static double now_seconds(void) {
     struct timespec ts;
     assert(clock_gettime(CLOCK_MONOTONIC, &ts) == 0);
-    return ts.tv_sec + ts.tv_nsec / 1000000000.0;
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
 }
 
 static void poll_backend(long max_ms) {
@@ -49,7 +49,7 @@ static void poll_backend(long max_ms) {
     fd_set fds;
     FD_ZERO(&fds);
     FD_SET(fd, &fds);
-    struct timeval tv = {ms / 1000, (ms % 1000) * 1000};
+    struct timeval tv = {(time_t)(ms / 1000), (suseconds_t)((ms % 1000) * 1000)};
     int rc = select(fd + 1, &fds, NULL, NULL, &tv);
     assert(rc >= 0 || errno == EINTR);
 }
@@ -63,7 +63,8 @@ static void *waker(void *arg) {
 }
 
 int main(void) {
-    static const int64_t cfg[] = {256, 1024 * 1024, TEST_HEADER_TIMEOUT_MS, 40, 500, 1000, 50, 1, 256, 128};
+    static const int64_t cfg[] = {
+        256, 1024L * 1024L, TEST_HEADER_TIMEOUT_MS, 40, 500, 1000, 50, 1, 256, 128};
     static const char request[] = "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
     static const char head[] = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n";
 
@@ -74,7 +75,10 @@ int main(void) {
         assert(setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof reuse) == 0);
         struct sockaddr_in address = {.sin_family = AF_INET, .sin_port = 0};
         address.sin_addr.s_addr = htonl(0x7f000001u);
-        assert(bind(listener, (struct sockaddr *)&address, sizeof address) == 0);
+        if (bind(listener, (struct sockaddr *)&address, sizeof address) != 0) {
+            perror("bind");
+            return 1;
+        }
         assert(listen(listener, 128) == 0);
         socklen_t address_len = sizeof address;
         assert(getsockname(listener, (struct sockaddr *)&address, &address_len) == 0);

@@ -37,3 +37,6 @@ ok   a blocked handler gets 504 at its deadline
 ok   a blocked handler does not stall the next request
 ok   event stream overflow discards headers from the gzip representation
 ok   a stream below max_streams completes
+ok   a request sent one byte at a time matches the whole request
+ok   a write split before each of the last four header bytes matches
+ok   a header larger than 16384 bytes sent 64 bytes at a time -> 431

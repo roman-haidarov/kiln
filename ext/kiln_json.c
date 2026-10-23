@@ -134,7 +134,8 @@ static sp_RbVal kiln_json_object(kiln_jctx *jc, yyjson_val *val, long depth) {
 }
 
 static sp_RbVal kiln_json_value(kiln_jctx *jc, yyjson_val *val, long depth) {
-    switch (yyjson_get_type(val)) {
+    yyjson_type type = yyjson_get_type(val);
+    switch (type) {
     case YYJSON_TYPE_NULL:
         return sp_box_nil();
     case YYJSON_TYPE_BOOL:
@@ -153,15 +154,13 @@ static sp_RbVal kiln_json_value(kiln_jctx *jc, yyjson_val *val, long depth) {
     case YYJSON_TYPE_STR:
         return sp_box_str(kiln_gc_str(yyjson_get_str(val), yyjson_get_len(val)));
     case YYJSON_TYPE_ARR:
-        if (depth >= jc->depth_limit) {
-            jc->failed = 1;
-            return sp_box_nil();
-        }
-        return kiln_json_array(jc, val, depth);
     case YYJSON_TYPE_OBJ:
         if (depth >= jc->depth_limit) {
             jc->failed = 1;
             return sp_box_nil();
+        }
+        if (type == YYJSON_TYPE_ARR) {
+            return kiln_json_array(jc, val, depth);
         }
         return kiln_json_object(jc, val, depth);
     default:

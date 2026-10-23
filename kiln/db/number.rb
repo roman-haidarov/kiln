@@ -1,6 +1,10 @@
 module Kiln
   module DB
     module Words
+      I32_MIN = -2_147_483_648
+      I32_MAX = 2_147_483_647
+      U32_MAX = 4_294_967_295
+
       def /(other) = divmod(other)[0]
       def %(other) = divmod(other)[1]
       def <(other) = (self <=> other).negative?
@@ -37,8 +41,8 @@ module Kiln
       attr_reader :hi, :lo
 
       def initialize(high, low)
-        raise RangeError, 'int64 hi' unless high.is_a?(Integer) && high >= -2_147_483_648 && high <= 2_147_483_647
-        raise RangeError, 'int64 lo' unless low.is_a?(Integer) && low >= 0 && low <= 4_294_967_295
+        raise RangeError, 'int64 hi' unless high.is_a?(Integer) && high.between?(Words::I32_MIN, Words::I32_MAX)
+        raise RangeError, 'int64 lo' unless low.is_a?(Integer) && low >= 0 && low <= Words::U32_MAX
 
         @hi = high
         @lo = low
@@ -55,11 +59,11 @@ module Kiln
         end
 
         def min_value
-          new(-2_147_483_648, 0)
+          new(Words::I32_MIN, 0)
         end
 
         def max_value
-          new(2_147_483_647, 4_294_967_295)
+          new(Words::I32_MAX, Words::U32_MAX)
         end
 
         def apply(operation, left, right)
@@ -83,7 +87,7 @@ module Kiln
       end
 
       def min_value?
-        @hi == -2_147_483_648 && @lo.zero?
+        @hi == Words::I32_MIN && @lo.zero?
       end
 
       def -@
@@ -106,7 +110,7 @@ module Kiln
       def divmod(other)
         rhs = coerce(other)
         raise ZeroDivisionError, 'divide by zero' if rhs.hi.zero? && rhs.lo.zero?
-        raise RangeError, 'int64 div' if min_value? && rhs.hi == -1 && rhs.lo == 4_294_967_295
+        raise RangeError, 'int64 div' if min_value? && rhs.hi == -1 && rhs.lo == Words::U32_MAX
 
         Int64Value.apply(Native::NUM_DIV, self, rhs)
       end
@@ -155,8 +159,8 @@ module Kiln
       attr_reader :hi, :lo
 
       def initialize(high, low)
-        raise RangeError, 'uint64 hi' unless high.is_a?(Integer) && high >= 0 && high <= 4_294_967_295
-        raise RangeError, 'uint64 lo' unless low.is_a?(Integer) && low >= 0 && low <= 4_294_967_295
+        raise RangeError, 'uint64 hi' unless high.is_a?(Integer) && high >= 0 && high <= Words::U32_MAX
+        raise RangeError, 'uint64 lo' unless low.is_a?(Integer) && low >= 0 && low <= Words::U32_MAX
 
         @hi = high
         @lo = low
@@ -173,7 +177,7 @@ module Kiln
         end
 
         def max_value
-          new(4_294_967_295, 4_294_967_295)
+          new(Words::U32_MAX, Words::U32_MAX)
         end
 
         def apply(operation, left, right)
@@ -244,7 +248,7 @@ module Kiln
       end
 
       def to_i
-        raise RangeError, 'uint64 to_i' if @hi > 2_147_483_647
+        raise RangeError, 'uint64 to_i' if @hi > Words::I32_MAX
 
         to_s.to_i
       end

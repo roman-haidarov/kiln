@@ -66,8 +66,13 @@ static int kuv_digits(const char *s, long len, long *value) {
     return 0;
 }
 
-static int kuv_head_length(const char *data, size_t len, size_t *head_len, int *error_status) {
-    const char *end = memmem(data, len, "\r\n\r\n", 4);
+static int kuv_head_length(const char *data, size_t len, size_t scan_from, size_t *head_len,
+    int *error_status) {
+    size_t from = scan_from > 3 ? scan_from - 3 : 0;
+    if (from > len) {
+        from = len;
+    }
+    const char *end = memmem(data + from, len - from, "\r\n\r\n", 4);
     if (!end) {
         if (len > KILN_UV_HEAD_MAX) {
             *error_status = 431;
@@ -193,14 +198,14 @@ static int kuv_parse_headers(const char *data, size_t head_len, long max_body, i
     return KILN_UV_PARSE_COMPLETE;
 }
 
-int kiln_uv_parse_request(const char *data, size_t len, long max_body, int64_t *scan, long cap,
-    kiln_uv_parse_result *result) {
+int kiln_uv_parse_request_from(const char *data, size_t len, size_t scan_from, long max_body,
+    int64_t *scan, long cap, kiln_uv_parse_result *result) {
     if (!data || !scan || !result || len > LONG_MAX || max_body < 0 || cap < KILN_UV_SCAN_CAP) {
         return -1;
     }
     memset(result, 0, sizeof(*result));
     size_t head_len = 0;
-    int head_state = kuv_head_length(data, len, &head_len, &result->error_status);
+    int head_state = kuv_head_length(data, len, scan_from, &head_len, &result->error_status);
     if (head_state != KILN_UV_PARSE_COMPLETE) {
         return head_state;
     }
@@ -212,6 +217,11 @@ int kiln_uv_parse_request(const char *data, size_t len, long max_body, int64_t *
         return KILN_UV_PARSE_INCOMPLETE;
     }
     return KILN_UV_PARSE_COMPLETE;
+}
+
+int kiln_uv_parse_request(const char *data, size_t len, long max_body, int64_t *scan, long cap,
+    kiln_uv_parse_result *result) {
+    return kiln_uv_parse_request_from(data, len, 0, max_body, scan, cap, result);
 }
 
 void kiln_uv_chunk_init(kiln_uv_chunk_state *state) {

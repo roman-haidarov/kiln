@@ -64,11 +64,11 @@ uint64_t kiln_db_caps(int kind) {
 int kiln_db_configure_values(const int64_t *values, int n) {
     kiln_db_limits next;
     int i;
-    if (!values || n != 8) {
+    if (!values || n != KILN_DB_CONFIG_VALUE_COUNT) {
         return KILN_DB_CONFIG;
     }
-    for (i = 0; i < 8; i++) {
-        if (values[i] <= 0 || (uint64_t)values[i] > 4294967295ull) {
+    for (i = 0; i < KILN_DB_CONFIG_VALUE_COUNT; i++) {
+        if (values[i] <= 0 || (uint64_t)values[i] > UINT32_MAX) {
             return KILN_DB_CONFIG;
         }
     }
@@ -185,7 +185,19 @@ uint64_t kiln_db_conn_create(int kind, uint64_t scope, uint64_t thread_id, int64
     return handle;
 }
 
+static __thread uint64_t kiln_db_held_handle;
+static __thread uint64_t kiln_db_held_scope;
+static __thread uint64_t kiln_db_held_thread;
+static __thread kiln_db_conn *kiln_db_held_conn;
+
 kiln_db_conn *kiln_db_conn_get(uint64_t handle, uint64_t scope, uint64_t thread_id, int *err) {
+    if (kiln_db_held_conn && handle == kiln_db_held_handle && scope == kiln_db_held_scope &&
+        thread_id == kiln_db_held_thread) {
+        if (err) {
+            *err = KILN_DB_OK;
+        }
+        return kiln_db_held_conn;
+    }
     return kiln_db_slot_use(handle, KILN_DB_SLOT_CONN, scope, thread_id, err);
 }
 
@@ -203,7 +215,7 @@ int kiln_db_conn_set_impl(uint64_t handle, uint64_t scope, uint64_t thread_id, c
     if (conn->active_op) {
         return KILN_DB_BUSY;
     }
-    if (port <= 0 || port > 65535) {
+    if (port <= 0 || port > UINT16_MAX) {
         return KILN_DB_CONFIG;
     }
     if (ssl_mode != KILN_DB_SSL_VERIFY_FULL && ssl_mode != KILN_DB_SSL_DISABLE) {
@@ -295,7 +307,7 @@ int kiln_db_set_sql_impl(
     conn->sql = copy;
     conn->sql_len = sql_len;
     conn->prepared = 0;
-    if (conn->setup_phase < 2147483647) {
+    if (conn->setup_phase < INT_MAX) {
         conn->setup_phase++;
     }
     return KILN_DB_OK;
@@ -728,11 +740,61 @@ static const char *kiln_db_thread_copy(const char *src, size_t len, int *ok) {
 }
 
 static int kiln_db_pin_conn(uint64_t handle, uint64_t scope, uint64_t thread_id) {
-    return kiln_db_slot_pin(handle, KILN_DB_SLOT_CONN, scope, thread_id);
+    int err = KILN_DB_OK;
+    kiln_db_conn *conn = kiln_db_slot_acquire(handle, KILN_DB_SLOT_CONN, scope, thread_id, &err);
+    if (!conn) {
+        return err;
+    }
+    kiln_db_held_handle = handle;
+    kiln_db_held_scope = scope;
+    kiln_db_held_thread = thread_id;
+    kiln_db_held_conn = conn;
+    return KILN_DB_OK;
 }
 
 static void kiln_db_unpin_conn(uint64_t handle, uint64_t scope, uint64_t thread_id) {
-    kiln_db_slot_unpin(handle, KILN_DB_SLOT_CONN, scope, thread_id);
+    (void)scope;
+    (void)thread_id;
+    if (kiln_db_held_handle == handle) {
+        kiln_db_held_conn = NULL;
+        kiln_db_held_handle = 0;
+    }
+    kiln_db_slot_release(handle, KILN_DB_SLOT_CONN);
+}
+
+const char *kiln_db_result_rows(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    int64_t first_row, int64_t max_rows, int64_t max_bytes, int64_t *lens, int lens_cap,
+    int64_t *meta, int meta_n) {
+    static const char empty[] = "";
+    const char *out = empty;
+    kiln_db_conn *conn;
+    sp_ffi_bin_len = 0;
+    if (!meta || meta_n < 3) {
+        return empty;
+    }
+    meta[0] = -2;
+    meta[1] = 0;
+    meta[2] = 0;
+    if (!lens || lens_cap <= 0 || first_row < 0 || first_row > (int64_t)UINT32_MAX ||
+        max_rows <= 0 || max_bytes <= 0) {
+        return empty;
+    }
+    if (kiln_db_pin_conn(handle, scope, thread_id) != KILN_DB_OK) {
+        return empty;
+    }
+    conn = kiln_db_held_conn;
+    if (max_rows > (int64_t)UINT32_MAX) {
+        max_rows = (int64_t)UINT32_MAX;
+    }
+    if (conn->kind == KILN_DB_KIND_PG) {
+        out = kiln_db_pg_result_rows(conn, (uint32_t)first_row, (uint32_t)max_rows,
+            (size_t)max_bytes, lens, lens_cap, meta);
+    } else if (conn->kind == KILN_DB_KIND_MY) {
+        out = kiln_db_my_result_rows(conn, (uint32_t)first_row, (uint32_t)max_rows,
+            (size_t)max_bytes, lens, lens_cap, meta);
+    }
+    kiln_db_unpin_conn(handle, scope, thread_id);
+    return out;
 }
 
 int kiln_db_conn_set(uint64_t handle, uint64_t scope, uint64_t thread_id, const char *host,
@@ -770,6 +832,35 @@ int kiln_db_set_format(uint64_t handle, uint64_t scope, uint64_t thread_id, int 
         return pin;
     }
     value = kiln_db_set_format_impl(handle, scope, thread_id, format, chunk);
+    kiln_db_unpin_conn(handle, scope, thread_id);
+    return value;
+}
+
+static int kiln_db_set_stmt_cache_impl(
+    uint64_t handle, uint64_t scope, uint64_t thread_id, int capacity) {
+    kiln_db_conn *conn;
+    int err = KILN_DB_OK;
+    conn = kiln_db_conn_get(handle, scope, thread_id, &err);
+    if (!conn) {
+        return err;
+    }
+    if (conn->active_op) {
+        return KILN_DB_BUSY;
+    }
+    if (capacity < 0 || capacity > 256) {
+        return KILN_DB_CONFIG;
+    }
+    conn->stmt_cache = capacity;
+    return KILN_DB_OK;
+}
+
+int kiln_db_set_stmt_cache(uint64_t handle, uint64_t scope, uint64_t thread_id, int capacity) {
+    int pin = kiln_db_pin_conn(handle, scope, thread_id);
+    int value;
+    if (pin != KILN_DB_OK) {
+        return pin;
+    }
+    value = kiln_db_set_stmt_cache_impl(handle, scope, thread_id, capacity);
     kiln_db_unpin_conn(handle, scope, thread_id);
     return value;
 }

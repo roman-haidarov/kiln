@@ -102,6 +102,7 @@ int main(void) {
     assert(kiln_tls_write(&conn, payload, 10, &consumed) == KILN_TLS_FAIL);
     assert(consumed == 0 && errors == 1 && clears == 1);
 
+    last_ptr = NULL;
     puts("tls_write retry arguments and error classification: ok");
     return 0;
 }

@@ -68,7 +68,7 @@ static void check_helper(
 static void check_chunk(void) {
     long len = load("http-kind-1", "size");
     if (len >= 0)
-        expect(kiln_chunk_size(seed, len, 1024 * 1024) == 1024 * 1024, "http-kind-1", "size",
+        expect(kiln_chunk_size(seed, len, 1024L * 1024L) == 1024L * 1024L, "http-kind-1", "size",
             "chunk size differs");
 }
 
@@ -86,7 +86,7 @@ static int parse_event(const char *name, long max_body, kiln_uv_parse_result *re
 
 static void check_event(const char *name, int state, int status) {
     kiln_uv_parse_result result;
-    int got = parse_event(name, 1024 * 1024, &result);
+    int got = parse_event(name, 1024L * 1024L, &result);
     if (got == -2)
         return;
     expect(got == state, "uv-parse", name, "parse state differs");
@@ -96,19 +96,19 @@ static void check_event(const char *name, int state, int status) {
 
 static void check_event_details(void) {
     kiln_uv_parse_result result;
-    if (parse_event("request", 1024 * 1024, &result) == KILN_UV_PARSE_COMPLETE)
+    if (parse_event("request", 1024L * 1024L, &result) == KILN_UV_PARSE_COMPLETE)
         expect(result.body_len == 4 && result.has_close && result.has_keep &&
                    result.nheaders == 3 && result.total_len == result.head_len + 8,
             "uv-parse", "request", "parsed fields differ");
-    if (parse_event("expect", 1024 * 1024, &result) == KILN_UV_PARSE_INCOMPLETE)
+    if (parse_event("expect", 1024L * 1024L, &result) == KILN_UV_PARSE_INCOMPLETE)
         expect(result.expect_continue == 1, "uv-parse", "expect", "100-continue not reported");
     if (parse_event("request", 3, &result) == KILN_UV_PARSE_COMPLETE)
         expect(result.streamed && result.total_len == result.head_len + 4, "uv-parse", "request",
             "a body over max_body 3 is not streamed");
-    if (parse_event("chunked", 1024 * 1024, &result) == KILN_UV_PARSE_COMPLETE)
+    if (parse_event("chunked", 1024L * 1024L, &result) == KILN_UV_PARSE_COMPLETE)
         expect(result.streamed && result.chunked && result.body_len == -1, "uv-parse", "chunked",
             "a chunked body is not streamed");
-    if (parse_event("upgrade", 1024 * 1024, &result) == KILN_UV_PARSE_COMPLETE)
+    if (parse_event("upgrade", 1024L * 1024L, &result) == KILN_UV_PARSE_COMPLETE)
         expect(result.upgrade == 1, "uv-parse", "upgrade", "Upgrade is not reported");
 }
 

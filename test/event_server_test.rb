@@ -323,3 +323,58 @@ stream_reply = read_until_closed(stream_client, 2)
 stream_client.close
 limited_streams.shutdown(grace: 1)
 check 'a stream below max_streams completes', stream_reply.include?('streamed')
+
+drip = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+drip.start
+drip_req = "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+whole = exchange(drip.port, drip_req)
+drip_sock = TCPSocket.new('127.0.0.1', drip.port)
+drip_at = 0
+while drip_at < drip_req.bytesize
+  drip_sock.write(drip_req.byteslice(drip_at, 1))
+  Kernel.sleep 0.001
+  drip_at += 1
+end
+dripped = read_until_closed(drip_sock, 2)
+drip_sock.close
+check 'a request sent one byte at a time matches the whole request',
+      whole.start_with?('HTTP/1.1 200 ') && dripped.start_with?('HTTP/1.1 200 ') &&
+      whole.end_with?("Hello, World!\n") && dripped.end_with?("Hello, World!\n")
+split_ok = true
+split_at = 0
+while split_at < 4
+  cut = drip_req.bytesize - 4 + split_at
+  split_sock = TCPSocket.new('127.0.0.1', drip.port)
+  split_sock.write(drip_req.byteslice(0, cut))
+  Kernel.sleep 0.05
+  split_sock.write(drip_req.byteslice(cut, drip_req.bytesize - cut))
+  split_out = read_until_closed(split_sock, 2)
+  split_sock.close
+  split_ok &&= split_out.start_with?('HTTP/1.1 200 ') && split_out.end_with?("Hello, World!\n")
+  split_at += 1
+end
+check 'a write split before each of the last four header bytes matches',
+      split_ok && whole.end_with?("Hello, World!\n")
+huge = (+"GET / HTTP/1.1\r\nHost: x\r\n").b
+pad = "X-Pad: #{'a' * 40}\r\n"
+while huge.bytesize <= 16_384
+  huge << pad
+end
+huge << "\r\n"
+huge_sock = TCPSocket.new('127.0.0.1', drip.port)
+huge_off = 0
+while huge_off < huge.bytesize
+  huge_n = huge.bytesize - huge_off
+  huge_n = 64 if huge_n > 64
+  begin
+    huge_sock.write(huge.byteslice(huge_off, huge_n))
+  rescue IOError, SystemCallError
+    break
+  end
+  huge_off += huge_n
+end
+huge_out = read_until_closed(huge_sock, 2)
+huge_sock.close
+check 'a header larger than 16384 bytes sent 64 bytes at a time -> 431',
+      huge_out.start_with?('HTTP/1.1 431 ')
+drip.shutdown(grace: 0.5)

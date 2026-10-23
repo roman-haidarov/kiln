@@ -70,24 +70,37 @@ module Kiln
         end
 
         def unsigned_value(cell)
-          return cell.to_i if cell.length < 19
-          return cell.to_i if cell.length == 19 && cell <= I64_MAX_TEXT
+          return cell.to_i if cell.length < I64_MAX_TEXT.length
+          return cell.to_i if cell.length == I64_MAX_TEXT.length && cell <= I64_MAX_TEXT
 
           UInt64Value.parse(cell.force_encoding('UTF-8'))
         end
 
-        def row(raw, lens, types, width)
-          values = []
+        def rows_into(out, raw, lens, types, count)
+          stride = types.length + 1
           offset = 0
+          at = 0
+          while at < count * stride
+            out << row_values(raw, lens, at, offset, types)
+            offset += lens[at + stride - 1]
+            at += stride
+          end
+          out
+        end
+
+        def row_values(raw, lens, at, offset, types)
+          values = []
           col = 0
-          while col < width
-            len = lens[col]
+          while col < types.length
+            len = lens[at + col]
             values << (len.negative? ? nil : decode(raw.byteslice(offset, len), types[col]))
             offset += len unless len.negative?
             col += 1
           end
           values
         end
+
+        def row(raw, lens, types, _width) = row_values(raw, lens, 0, 0, types)
       end
     end
   end

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #if !defined(LIBPQ_HAS_ASYNC_CANCEL) || !defined(LIBPQ_HAS_CHUNK_MODE) || \
     !defined(LIBPQ_HAS_PIPELINING)
@@ -16,6 +17,19 @@
 #endif
 
 #define PG_PUMP_MAX 32
+#define PG_SEEN 64
+#define PG_CLOSE_MAX 8
+#define PG_NAME_MAX 24
+#define PG_GO 100
+#define PG_DONE 101
+#define PG_C_NONE 0
+#define PG_C_CLOSE 1
+#define PG_C_PREPARE 2
+#define PG_C_EXEC 3
+#define PG_C_RETRY 4
+#define PG_C_PLAIN 5
+#define PG_N_PLAIN 0
+#define PG_N_PREPARE 1
 
 typedef struct {
     int (*PQlibVersion)(void);
@@ -33,6 +47,8 @@ typedef struct {
     int (*PQsendQueryParams)(PGconn *conn, const char *command, int nParams, const Oid *paramTypes,
         const char *const *paramValues, const int *paramLengths, const int *paramFormats,
         int resultFormat);
+    int (*PQsendClosePrepared)(PGconn *conn, const char *stmt);
+    PGTransactionStatusType (*PQtransactionStatus)(const PGconn *conn);
     int (*PQflush)(PGconn *conn);
     int (*PQconsumeInput)(PGconn *conn);
     int (*PQisBusy)(PGconn *conn);
@@ -67,6 +83,15 @@ typedef struct {
 } pg_api;
 
 typedef struct {
+    uint64_t hash;
+    char *sql;
+    size_t len;
+    uint64_t stamp;
+    int stale;
+    char name[PG_NAME_MAX];
+} pg_stmt_ent;
+
+typedef struct {
     PGconn *pg;
     PGresult *held;
     PGcancelConn *cancel;
@@ -92,6 +117,22 @@ typedef struct {
     int hold_tail;
     const char *keys[12];
     const char *vals[12];
+    pg_stmt_ent *cache;
+    int cache_cap;
+    int cache_used;
+    uint64_t cache_clock;
+    uint64_t cache_serial;
+    uint64_t seen[PG_SEEN];
+    int seen_at;
+    int cstage;
+    int cnext;
+    int cretry;
+    int creset;
+    uint64_t pend_hash;
+    char pend_name[PG_NAME_MAX];
+    char run_name[PG_NAME_MAX];
+    char close_q[PG_CLOSE_MAX][PG_NAME_MAX];
+    int close_n;
 } pg_sess;
 
 typedef struct {
@@ -132,6 +173,8 @@ static int pg_bind(void) {
         pg_need((void **)&pg.PQsendPrepare, "PQsendPrepare") ||
         pg_need((void **)&pg.PQsendQueryPrepared, "PQsendQueryPrepared") ||
         pg_need((void **)&pg.PQsendQueryParams, "PQsendQueryParams") ||
+        pg_need((void **)&pg.PQsendClosePrepared, "PQsendClosePrepared") ||
+        pg_need((void **)&pg.PQtransactionStatus, "PQtransactionStatus") ||
         pg_need((void **)&pg.PQflush, "PQflush") ||
         pg_need((void **)&pg.PQconsumeInput, "PQconsumeInput") ||
         pg_need((void **)&pg.PQisBusy, "PQisBusy") ||
@@ -471,6 +514,337 @@ static void pg_note_fatal(pg_sess *sess, kiln_db_conn *conn, PGresult *res) {
     kiln_db_fail(conn, sess->fatal_code, 0, sess->fatal_state, sess->fatal_message);
 }
 
+static int pg_params(pg_sess *sess, conn_params *p);
+
+static uint64_t pg_hash(const char *sql, size_t len) {
+    uint64_t h = 14695981039346656037ull;
+    size_t i;
+    for (i = 0; i < len; i++) {
+        h ^= (unsigned char)sql[i];
+        h *= 1099511628211ull;
+    }
+    return h ? h : 1;
+}
+
+static int pg_starts(const char *sql, const char *word) {
+    size_t n = strlen(word);
+    while (*sql == ' ' || *sql == '\t' || *sql == '\n' || *sql == '\r') {
+        sql++;
+    }
+    if (strncasecmp(sql, word, n) != 0) {
+        return 0;
+    }
+    return sql[n] == 0 || sql[n] == ' ' || sql[n] == '\t' || sql[n] == '\n' || sql[n] == '\r' ||
+           sql[n] == ';';
+}
+
+static int pg_drops_names(const char *sql) {
+    return pg_starts(sql, "DEALLOCATE") || pg_starts(sql, "DISCARD");
+}
+
+static int pg_changes_schema(const char *sql) {
+    return pg_starts(sql, "ALTER") || pg_starts(sql, "CREATE") || pg_starts(sql, "DROP") ||
+           pg_starts(sql, "TRUNCATE");
+}
+
+static int pg_seen(const pg_sess *sess, uint64_t hash) {
+    int i;
+    for (i = 0; i < PG_SEEN; i++) {
+        if (sess->seen[i] == hash) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void pg_remember(pg_sess *sess, uint64_t hash) {
+    sess->seen[sess->seen_at] = hash;
+    sess->seen_at = (sess->seen_at + 1) % PG_SEEN;
+}
+
+static void pg_ent_clear(pg_sess *sess, pg_stmt_ent *ent) {
+    if (ent->sql && sess->cache_used > 0) {
+        sess->cache_used--;
+    }
+    free(ent->sql);
+    memset(ent, 0, sizeof *ent);
+}
+
+static void pg_cache_drop_all(pg_sess *sess) {
+    int i;
+    for (i = 0; i < sess->cache_cap; i++) {
+        pg_ent_clear(sess, &sess->cache[i]);
+    }
+    sess->cache_used = 0;
+    sess->close_n = 0;
+}
+
+static void pg_cache_stale_all(pg_sess *sess) {
+    int i;
+    for (i = 0; i < sess->cache_cap; i++) {
+        if (sess->cache[i].sql) {
+            sess->cache[i].stale = 1;
+        }
+    }
+}
+
+static int pg_cache_ready(pg_sess *sess, const kiln_db_conn *conn) {
+    int cap = conn->stmt_cache;
+    if (cap <= 0) {
+        return sess->cache_cap > 0;
+    }
+    if (cap > 256) {
+        cap = 256;
+    }
+    if (!sess->cache) {
+        sess->cache = calloc((size_t)cap, sizeof *sess->cache);
+        if (!sess->cache) {
+            return 0;
+        }
+        sess->cache_cap = cap;
+    }
+    return 1;
+}
+
+static pg_stmt_ent *pg_cache_find(pg_sess *sess, uint64_t hash, const char *sql, size_t len) {
+    int i;
+    for (i = 0; i < sess->cache_cap; i++) {
+        pg_stmt_ent *ent = &sess->cache[i];
+        if (ent->sql && ent->hash == hash && ent->len == len && memcmp(ent->sql, sql, len) == 0) {
+            return ent;
+        }
+    }
+    return NULL;
+}
+
+static pg_stmt_ent *pg_cache_by_name(pg_sess *sess, const char *name) {
+    int i;
+    for (i = 0; i < sess->cache_cap; i++) {
+        if (sess->cache[i].sql && strcmp(sess->cache[i].name, name) == 0) {
+            return &sess->cache[i];
+        }
+    }
+    return NULL;
+}
+
+static int pg_queue_close(pg_sess *sess, const char *name) {
+    if (sess->close_n >= PG_CLOSE_MAX) {
+        return 0;
+    }
+    snprintf(sess->close_q[sess->close_n], PG_NAME_MAX, "%s", name);
+    sess->close_n++;
+    return 1;
+}
+
+static int pg_cache_retire(pg_sess *sess, pg_stmt_ent *ent) {
+    if (!pg_queue_close(sess, ent->name)) {
+        return 0;
+    }
+    pg_ent_clear(sess, ent);
+    return 1;
+}
+
+static int pg_cache_room(pg_sess *sess) {
+    pg_stmt_ent *victim = NULL;
+    int i;
+    if (sess->cache_used < sess->cache_cap) {
+        return 1;
+    }
+    for (i = 0; i < sess->cache_cap; i++) {
+        pg_stmt_ent *ent = &sess->cache[i];
+        if (ent->sql && (!victim || ent->stamp < victim->stamp)) {
+            victim = ent;
+        }
+    }
+    return victim && pg_cache_retire(sess, victim);
+}
+
+static int pg_cache_insert(pg_sess *sess, const kiln_db_conn *conn) {
+    int i;
+    for (i = 0; i < sess->cache_cap; i++) {
+        pg_stmt_ent *ent = &sess->cache[i];
+        if (ent->sql) {
+            continue;
+        }
+        ent->sql = malloc(conn->sql_len + 1);
+        if (!ent->sql) {
+            return 0;
+        }
+        memcpy(ent->sql, conn->sql, conn->sql_len);
+        ent->sql[conn->sql_len] = 0;
+        ent->len = conn->sql_len;
+        ent->hash = sess->pend_hash;
+        ent->stamp = ++sess->cache_clock;
+        ent->stale = 0;
+        snprintf(ent->name, PG_NAME_MAX, "%s", sess->pend_name);
+        sess->cache_used++;
+        return 1;
+    }
+    return 0;
+}
+
+static int pg_chunk_mode(pg_sess *sess, const kiln_db_conn *conn) {
+    return conn->ready_hint <= 0 || pg.PQsetChunkedRowsMode(sess->pg, conn->ready_hint) == 1;
+}
+
+static int pg_send_plain(pg_sess *sess, kiln_db_conn *conn) {
+    conn_params p = {0, NULL, NULL, NULL};
+    int count = 0;
+    if (sess->bind_phase == conn->setup_phase) {
+        count = pg_params(sess, &p);
+    }
+    if (pg.PQsendQueryParams(sess->pg, conn->sql, count, NULL, count ? p.values : NULL,
+            count ? p.lengths : NULL, count ? p.formats : NULL, conn->result_format) != 1) {
+        return 0;
+    }
+    return pg_chunk_mode(sess, conn);
+}
+
+static int pg_send_named(pg_sess *sess, kiln_db_conn *conn, const char *name) {
+    conn_params p = {0, NULL, NULL, NULL};
+    int count = 0;
+    if (sess->bind_phase == conn->setup_phase) {
+        count = pg_params(sess, &p);
+    }
+    if (pg.PQsendQueryPrepared(sess->pg, name, count, count ? p.values : NULL,
+            count ? p.lengths : NULL, count ? p.formats : NULL, conn->result_format) != 1) {
+        return 0;
+    }
+    return pg_chunk_mode(sess, conn);
+}
+
+static int pg_cache_next(pg_sess *sess, kiln_db_conn *conn) {
+    if (sess->close_n > 0) {
+        sess->close_n--;
+        snprintf(sess->run_name, PG_NAME_MAX, "%s", sess->close_q[sess->close_n]);
+        sess->cstage = PG_C_CLOSE;
+        return pg.PQsendClosePrepared(sess->pg, sess->run_name) == 1;
+    }
+    if (sess->cnext == PG_N_PREPARE) {
+        sess->cnext = PG_N_PLAIN;
+        sess->cstage = PG_C_PREPARE;
+        return pg.PQsendPrepare(sess->pg, sess->pend_name, conn->sql, 0, NULL) == 1;
+    }
+    sess->cstage = sess->creset ? PG_C_PLAIN : PG_C_RETRY;
+    return pg_send_plain(sess, conn);
+}
+
+static void pg_clear_fatal(pg_sess *sess, kiln_db_conn *conn) {
+    sess->fatal = 0;
+    sess->settle = 0;
+    conn->err = KILN_DB_OK;
+    conn->vendor_errno = 0;
+    memset(conn->sqlstate, 0, sizeof conn->sqlstate);
+}
+
+static void pg_cache_settled(pg_sess *sess, const kiln_db_conn *conn) {
+    if (sess->fatal || !sess->cache) {
+        return;
+    }
+    if (sess->creset || pg_drops_names(conn->sql)) {
+        pg_cache_drop_all(sess);
+    } else if (pg_changes_schema(conn->sql)) {
+        pg_cache_stale_all(sess);
+    }
+}
+
+static int pg_cache_stale_error(pg_sess *sess, kiln_db_conn *conn) {
+    pg_stmt_ent *ent = pg_cache_by_name(sess, sess->run_name);
+    if (strcmp(sess->fatal_state, "26000") == 0) {
+        pg_cache_drop_all(sess);
+    } else if (strcmp(sess->fatal_state, "0A000") == 0) {
+        if (ent && !pg_cache_retire(sess, ent)) {
+            pg_ent_clear(sess, ent);
+        }
+    } else {
+        return PG_DONE;
+    }
+    if (!sess->cretry) {
+        return PG_DONE;
+    }
+    pg_clear_fatal(sess, conn);
+    sess->cstage = PG_C_RETRY;
+    if (!pg_send_plain(sess, conn)) {
+        return pg_fail(conn, KILN_DB_CONN, NULL, pg.PQerrorMessage(sess->pg));
+    }
+    return PG_GO;
+}
+
+static int pg_cache_after(pg_sess *sess, kiln_db_conn *conn) {
+    int stage = sess->cstage;
+    sess->cstage = PG_C_NONE;
+    if (conn->op == KILN_DB_OP_CANCEL) {
+        if (stage == PG_C_PREPARE && !sess->fatal) {
+            pg_queue_close(sess, sess->pend_name);
+        }
+        sess->cnext = PG_N_PLAIN;
+        return PG_DONE;
+    }
+    if (stage == PG_C_CLOSE || (stage == PG_C_PREPARE && !sess->fatal)) {
+        if (sess->fatal) {
+            sess->cnext = PG_N_PLAIN;
+            return PG_DONE;
+        }
+        if (stage == PG_C_PREPARE) {
+            if (!pg_cache_insert(sess, conn)) {
+                pg_queue_close(sess, sess->pend_name);
+                sess->cstage = PG_C_RETRY;
+                return pg_send_plain(sess, conn)
+                           ? PG_GO
+                           : pg_fail(conn, KILN_DB_CONN, NULL, pg.PQerrorMessage(sess->pg));
+            }
+            snprintf(sess->run_name, PG_NAME_MAX, "%s", sess->pend_name);
+            sess->cstage = PG_C_EXEC;
+            return pg_send_named(sess, conn, sess->run_name)
+                       ? PG_GO
+                       : pg_fail(conn, KILN_DB_CONN, NULL, pg.PQerrorMessage(sess->pg));
+        }
+        return pg_cache_next(sess, conn)
+                   ? PG_GO
+                   : pg_fail(conn, KILN_DB_CONN, NULL, pg.PQerrorMessage(sess->pg));
+    }
+    if (stage == PG_C_EXEC && sess->fatal) {
+        return pg_cache_stale_error(sess, conn);
+    }
+    pg_cache_settled(sess, conn);
+    return PG_DONE;
+}
+
+static int pg_cache_send(pg_sess *sess, kiln_db_conn *conn) {
+    PGTransactionStatusType tx = pg.PQtransactionStatus(sess->pg);
+    uint64_t hash = pg_hash(conn->sql, conn->sql_len);
+    pg_stmt_ent *ent;
+    sess->cretry = tx == PQTRANS_IDLE;
+    sess->creset = pg_drops_names(conn->sql);
+    sess->cnext = PG_N_PLAIN;
+    if (tx != PQTRANS_IDLE && tx != PQTRANS_INTRANS) {
+        sess->cstage = PG_C_RETRY;
+        return pg_send_plain(sess, conn);
+    }
+    ent = sess->creset ? NULL : pg_cache_find(sess, hash, conn->sql, conn->sql_len);
+    if (ent && !ent->stale) {
+        ent->stamp = ++sess->cache_clock;
+        snprintf(sess->run_name, PG_NAME_MAX, "%s", ent->name);
+        sess->cstage = PG_C_EXEC;
+        return pg_send_named(sess, conn, sess->run_name);
+    }
+    if (ent && !pg_cache_retire(sess, ent)) {
+        return pg_cache_next(sess, conn);
+    }
+    if (!ent && (sess->creset || !pg_seen(sess, hash))) {
+        pg_remember(sess, hash);
+        return pg_cache_next(sess, conn);
+    }
+    if (!pg_cache_room(sess)) {
+        return pg_cache_next(sess, conn);
+    }
+    sess->pend_hash = hash;
+    sess->cache_serial++;
+    snprintf(sess->pend_name, PG_NAME_MAX, "kiln_s%llu", (unsigned long long)sess->cache_serial);
+    sess->cnext = PG_N_PREPARE;
+    return pg_cache_next(sess, conn);
+}
+
 static int pg_pump(pg_sess *sess, kiln_db_conn *conn) {
     int fd = pg.PQsocket(sess->pg);
     sess->phase = 2;
@@ -499,6 +873,16 @@ static int pg_pump(pg_sess *sess, kiln_db_conn *conn) {
             return pg_wait(conn, fd, KILN_DB_READY_READ);
         }
         res = pg.PQgetResult(sess->pg);
+        if (!res && sess->cstage != PG_C_NONE) {
+            int next = pg_cache_after(sess, conn);
+            if (next == PG_GO) {
+                continue;
+            }
+            if (next != PG_DONE) {
+                sess->phase = 0;
+                return next;
+            }
+        }
         if (!res) {
             sess->phase = 0;
             conn->fetch_done = 1;
@@ -562,6 +946,7 @@ static int pg_pump(pg_sess *sess, kiln_db_conn *conn) {
             }
             tail = pg.PQgetResult(sess->pg);
             if (!tail) {
+                sess->cstage = PG_C_NONE;
                 conn->fetch_done = 1;
                 sess->settle = 0;
                 sess->phase = 4;
@@ -617,6 +1002,15 @@ static int pg_send(pg_sess *sess, kiln_db_conn *conn) {
     }
     if (!sql) {
         return pg_fail(conn, KILN_DB_CONFIG, NULL, "missing sql");
+    }
+    sess->cstage = PG_C_NONE;
+    if (conn->op == KILN_DB_OP_EXEC && !conn->prepared && pg_cache_ready(sess, conn)) {
+        if (!pg_cache_send(sess, conn)) {
+            sess->cstage = PG_C_NONE;
+            return pg_fail(conn, KILN_DB_CONN, NULL, pg.PQerrorMessage(sess->pg));
+        }
+        sess->pump = 0;
+        return pg_pump(sess, conn);
     }
     if (conn->op == KILN_DB_OP_PREPARE) {
         rc = pg.PQsendPrepare(sess->pg, "", sql, 0, NULL);
@@ -1128,6 +1522,8 @@ static void pg_release(kiln_db_conn *conn) {
     if (sess->pg) {
         pg.PQfinish(sess->pg);
     }
+    pg_cache_drop_all(sess);
+    free(sess->cache);
     pg_clear_params(sess);
     free(sess->values);
     free(sess->lengths);
@@ -1248,4 +1644,87 @@ const char *kiln_db_pg_result_row(kiln_db_conn *conn, uint32_t row, int64_t *len
     buf[used] = 0;
     sp_ffi_bin_len = (int)used;
     return buf;
+}
+
+static size_t pg_cell(pg_sess *sess, const kiln_db_conn *conn, int row, int col, int bytea,
+    size_t used, int64_t *len_out, int *ok) {
+    const char *value;
+    size_t len;
+    char *buf;
+    unsigned char *decoded = NULL;
+    *ok = 1;
+    if (pg.PQgetisnull(sess->held, row, col)) {
+        *len_out = -1;
+        return used;
+    }
+    value = pg.PQgetvalue(sess->held, row, col);
+    len = (size_t)pg.PQgetlength(sess->held, row, col);
+    if (bytea && conn->result_format == 0) {
+        decoded = pg.PQunescapeBytea((const unsigned char *)value, &len);
+        value = (const char *)decoded;
+    }
+    buf = value && len <= INT_MAX && used <= (size_t)INT_MAX - len ? kiln_db_thread_room(used + len + 1)
+                                                                    : NULL;
+    if (!buf) {
+        *ok = 0;
+    } else if (len) {
+        memcpy(buf + used, value, len);
+    }
+    if (decoded) {
+        pg.PQfreemem(decoded);
+    }
+    *len_out = (int64_t)len;
+    return used + len;
+}
+
+const char *kiln_db_pg_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
+    static __thread char empty[1];
+    pg_sess *sess = conn->native;
+    unsigned char bytea[KILN_DB_MAX_COLS];
+    size_t used = 0;
+    uint32_t taken = 0;
+    int ntuples;
+    int cols;
+    int c;
+    empty[0] = 0;
+    if (!sess || !sess->held) {
+        meta[0] = 0;
+        return empty;
+    }
+    ntuples = pg.PQntuples(sess->held);
+    cols = pg.PQnfields(sess->held);
+    if (cols <= 0 || cols >= lens_cap || cols > KILN_DB_MAX_COLS) {
+        return empty;
+    }
+    for (c = 0; c < cols; c++) {
+        bytea[c] = pg.PQftype(sess->held, c) == 17;
+    }
+    while ((int64_t)first + taken < ntuples && taken < max_rows &&
+           (int64_t)(taken + 1) * (cols + 1) <= lens_cap) {
+        int row = (int)(first + taken);
+        size_t start = used;
+        size_t base = (size_t)taken * (size_t)(cols + 1);
+        int ok = 1;
+        for (c = 0; c < cols && ok; c++) {
+            used = pg_cell(sess, conn, row, c, bytea[c], used, &lens[base + (size_t)c], &ok);
+        }
+        if (!ok) {
+            return empty;
+        }
+        if (taken > 0 && used > max_bytes) {
+            used = start;
+            break;
+        }
+        lens[base + (size_t)cols] = (int64_t)(used - start);
+        taken++;
+    }
+    meta[0] = taken;
+    meta[1] = (int64_t)used;
+    meta[2] = cols;
+    sp_ffi_bin_len = (int)used;
+    if (used == 0) {
+        return empty;
+    }
+    return kiln_db_thread_room(used + 1);
 }

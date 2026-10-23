@@ -203,6 +203,49 @@ int kiln_db_slot_pin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_
     return rc;
 }
 
+void *kiln_db_slot_acquire(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, int *err) {
+    uint32_t id = (uint32_t)handle;
+    uint32_t gen = (uint32_t)(handle >> 32);
+    db_slot *slot;
+    void *ptr = NULL;
+    int rc = KILN_DB_OK;
+    if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
+        *err = KILN_DB_STALE;
+        return NULL;
+    }
+    pthread_mutex_lock(&mu);
+    slot = &slots[id];
+    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
+        rc = KILN_DB_STALE;
+    } else if (slot->scope != scope || slot->thread_id != thread_id) {
+        rc = KILN_DB_OWNERSHIP;
+    } else if (slot->pins) {
+        rc = KILN_DB_BUSY;
+    } else {
+        slot->pins = 1;
+        ptr = slot->ptr;
+    }
+    pthread_mutex_unlock(&mu);
+    *err = rc;
+    return ptr;
+}
+
+void kiln_db_slot_release(uint64_t handle, int kind) {
+    uint32_t id = (uint32_t)handle;
+    uint32_t gen = (uint32_t)(handle >> 32);
+    db_slot *slot;
+    if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
+        return;
+    }
+    pthread_mutex_lock(&mu);
+    slot = &slots[id];
+    if (slot->state == KILN_DB_SLOT_LIVE && slot->generation == gen && slot->kind == kind &&
+        slot->pins == 1) {
+        slot->pins = 0;
+    }
+    pthread_mutex_unlock(&mu);
+}
+
 int kiln_db_slot_unpin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id) {
     uint32_t id = (uint32_t)handle;
     uint32_t gen = (uint32_t)(handle >> 32);

@@ -1,0 +1,8 @@
+ext/croaring/** linguist-vendored
+ext/yyjson/** linguist-vendored
+ext/libuv/** linguist-vendored
+ext/uvsrc/** linguist-vendored
+ext/picohttpparser/** linguist-vendored
+ext/zlib-ng/** linguist-vendored
+ext/zngsrc/** linguist-vendored
+*.h linguist-language=C

@@ -4,7 +4,7 @@
 
 __thread int sp_ffi_bin_len;
 
-static const long kiln_fuzz_bodies[] = {0, 1, 4, 1024, 1024 * 1024, 999999999999999999L};
+static const long kiln_fuzz_bodies[] = {0, 1, 4, 1024, 1024L * 1024L, 999999999999999999L};
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (!data || size == 0 || size > 32769)

@@ -8,6 +8,8 @@ module Kiln
       ASCTIME = /\A[A-Z][a-z]{2} ([A-Z][a-z]{2}) ([ \d]\d) (\d{2}):(\d{2}):(\d{2}) (\d{4})\z/
       FORMATS = [[IMF, 3, 2, 1, 4], [RFC850, 3, 2, 1, 4], [ASCTIME, 6, 1, 2, 3]].freeze
       FORMAT = '%a, %d %b %Y %H:%M:%S GMT'.freeze
+      RFC850_BASE_YEAR = 2000
+      RFC850_FUTURE_YEARS = 50
 
       class << self
         def value = current.dup
@@ -60,8 +62,8 @@ module Kiln
         end
 
         def century(two)
-          year = 2000 + two
-          year > Time.now.utc.year + 50 ? year - 100 : year
+          year = RFC850_BASE_YEAR + two
+          year > Time.now.utc.year + RFC850_FUTURE_YEARS ? year - 100 : year
         end
       end
     end

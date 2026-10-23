@@ -172,10 +172,10 @@ int kiln_db_idset_has_u64(uint64_t handle, uint64_t value) {
 static int grow_uuid(db_idset *set) {
     uint32_t cap = set->cap == 0 ? 1u : set->cap + 1u;
     uint8_t *next;
-    if (cap < set->cap || cap > UINT32_MAX / 16u) {
+    if (cap < set->cap || cap > UINT32_MAX / KILN_DB_UUID_BYTES) {
         return KILN_DB_CAPACITY;
     }
-    next = realloc(set->uuids, (size_t)cap * 16u);
+    next = realloc(set->uuids, (size_t)cap * KILN_DB_UUID_BYTES);
     if (!next) {
         return KILN_DB_CAPACITY;
     }
@@ -184,7 +184,7 @@ static int grow_uuid(db_idset *set) {
     return KILN_DB_OK;
 }
 
-int kiln_db_idset_add_uuid(uint64_t handle, const uint8_t key[16]) {
+int kiln_db_idset_add_uuid(uint64_t handle, const uint8_t key[KILN_DB_UUID_BYTES]) {
     db_idset *set;
     int err = KILN_DB_OK;
     uint32_t lo;
@@ -202,7 +202,7 @@ int kiln_db_idset_add_uuid(uint64_t handle, const uint8_t key[16]) {
     hi = set->n;
     while (lo < hi) {
         uint32_t mid = lo + ((hi - lo) / 2u);
-        int cmp = memcmp(set->uuids + ((size_t)mid * 16u), key, 16);
+        int cmp = memcmp(set->uuids + ((size_t)mid * KILN_DB_UUID_BYTES), key, KILN_DB_UUID_BYTES);
         if (cmp == 0) {
             pthread_mutex_unlock(&id_mu);
             return KILN_DB_OK;
@@ -220,15 +220,15 @@ int kiln_db_idset_add_uuid(uint64_t handle, const uint8_t key[16]) {
             return err;
         }
     }
-    memmove(set->uuids + ((size_t)lo + 1u) * 16u, set->uuids + (size_t)lo * 16u,
-        (size_t)(set->n - lo) * 16u);
-    memcpy(set->uuids + (size_t)lo * 16u, key, 16);
+    memmove(set->uuids + ((size_t)lo + 1u) * KILN_DB_UUID_BYTES,
+        set->uuids + (size_t)lo * KILN_DB_UUID_BYTES, (size_t)(set->n - lo) * KILN_DB_UUID_BYTES);
+    memcpy(set->uuids + (size_t)lo * KILN_DB_UUID_BYTES, key, KILN_DB_UUID_BYTES);
     set->n++;
     pthread_mutex_unlock(&id_mu);
     return KILN_DB_OK;
 }
 
-int kiln_db_idset_has_uuid(uint64_t handle, const uint8_t key[16]) {
+int kiln_db_idset_has_uuid(uint64_t handle, const uint8_t key[KILN_DB_UUID_BYTES]) {
     db_idset *set;
     int err = KILN_DB_OK;
     uint32_t lo;
@@ -246,7 +246,7 @@ int kiln_db_idset_has_uuid(uint64_t handle, const uint8_t key[16]) {
     hi = set->n;
     while (lo < hi) {
         uint32_t mid = lo + ((hi - lo) / 2u);
-        int cmp = memcmp(set->uuids + ((size_t)mid * 16u), key, 16);
+        int cmp = memcmp(set->uuids + ((size_t)mid * KILN_DB_UUID_BYTES), key, KILN_DB_UUID_BYTES);
         if (cmp == 0) {
             pthread_mutex_unlock(&id_mu);
             return 1;

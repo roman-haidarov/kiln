@@ -353,8 +353,8 @@ def check_prepared(db, conn)
     FixBig.all.where(FixBig.col('id').eq(i + 1)).count
     i += 1
   end
-  n = conn.exec('SELECT count(*) FROM pg_prepared_statements', [])[0][0]
-  line(db, 'prepared', n.to_s)
+  n = conn.exec('SELECT count(*) FROM pg_prepared_statements', [])[0][0].to_s.to_i
+  line(db, 'prepared', n <= 32 ? 'bounded' : n.to_s)
 end
 
 def check_long(db, conn)

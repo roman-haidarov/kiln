@@ -4,6 +4,8 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
 spinel_bin=${SPINEL:-spinel}
+spinel_cc=$(pwd)/ci/spinel-cc.sh
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 port=${PORT:-18421}
 connections=${CONNECTIONS:-25}
 duration=${DURATION:-10}
@@ -135,9 +137,9 @@ export default function () {
 JAVASCRIPT
 ext_links=$(./ext/build.sh)
 if [ "$sampling" -eq 1 ]; then
-  "$spinel_bin" $ext_links --profile -I . bench/regression_server.rb -o "$server_binary"
+  "$spinel_bin" "--cc=$spinel_cc" $ext_links --profile -I . bench/regression_server.rb -o "$server_binary"
 else
-  "$spinel_bin" $ext_links -I . bench/regression_server.rb -o "$server_binary"
+  "$spinel_bin" "--cc=$spinel_cc" $ext_links -I . bench/regression_server.rb -o "$server_binary"
 fi
 
 cleanup() {

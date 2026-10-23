@@ -42,6 +42,7 @@ module Kiln
 
       EMPTY_BODY = ''.b.freeze
       LIVENESS_EVERY = 1.0
+      HANDLER_WAIT = 0.25
       HEAD = 'HEAD'.freeze
       META = 8
       STREAMED = 1
@@ -454,7 +455,7 @@ module Kiln
 
         def handler_wait
           now = Kiln::Runtime.now
-          wait = active_wait(now, 0.25)
+          wait = active_wait(now, HANDLER_WAIT)
           return wait if wait <= 0 || @uploads.empty?
 
           upload_wait(now, wait)

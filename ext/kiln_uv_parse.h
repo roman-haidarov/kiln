@@ -56,6 +56,8 @@ int kiln_uv_chunk_decode(kiln_uv_chunk_state *state, const char *in, size_t in_l
 
 const char *kiln_chunk_step(const char *data, long total, long start, long max, int64_t *state);
 
+int kiln_uv_parse_request_from(const char *data, size_t len, size_t scan_from, long max_body,
+    int64_t *scan, long cap, kiln_uv_parse_result *result);
 int kiln_uv_parse_request(const char *data, size_t len, long max_body, int64_t *scan, long cap,
     kiln_uv_parse_result *result);
 

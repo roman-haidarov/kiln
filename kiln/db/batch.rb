@@ -327,6 +327,8 @@ module Kiln
     end
 
     module Import
+      MAX_PAGE_ROWS = 1000
+      MAX_PAGE_PARAMS = 32_767
       OPTION_KEYS = %i[on_duplicate_key_ignore on_duplicate_key_update returning require_exact_status validate
                        validate_uniqueness all_or_none timestamps raise_error].freeze
 
@@ -493,10 +495,10 @@ module Kiln
         def mask_key(names) = names.join(',')
 
         def page_rows(width)
-          return 1000 if width <= 0
+          return MAX_PAGE_ROWS if width <= 0
 
-          rows = 32_767 / width
-          rows = 1000 if rows > 1000
+          rows = MAX_PAGE_PARAMS / width
+          rows = MAX_PAGE_ROWS if rows > MAX_PAGE_ROWS
           raise CapacityError, 'binds' if rows < 1
 
           rows

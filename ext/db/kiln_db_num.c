@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define KILN_DB_I64_MIN_MAGNITUDE ((uint64_t)INT64_MAX + 1u)
+
 static __thread char num_text[40];
 
 static int split_i64(int64_t value, int64_t *hi, int64_t *lo) {
@@ -15,10 +17,10 @@ static int split_i64(int64_t value, int64_t *hi, int64_t *lo) {
 
 static int join_i64(int64_t hi, int64_t lo, int64_t *out) {
     uint64_t bits;
-    if (hi < (-2147483647 - 1) || hi > 2147483647) {
+    if (hi < INT32_MIN || hi > INT32_MAX) {
         return -1;
     }
-    if (lo < 0 || lo > 4294967295LL) {
+    if (lo < 0 || (uint64_t)lo > UINT32_MAX) {
         return -1;
     }
     bits = ((uint64_t)(uint32_t)(int32_t)hi << 32) | (uint32_t)lo;
@@ -27,7 +29,7 @@ static int join_i64(int64_t hi, int64_t lo, int64_t *out) {
 }
 
 static int join_u64(int64_t hi, int64_t lo, uint64_t *out) {
-    if (hi < 0 || hi > 4294967295LL || lo < 0 || lo > 4294967295LL) {
+    if (hi < 0 || (uint64_t)hi > UINT32_MAX || lo < 0 || (uint64_t)lo > UINT32_MAX) {
         return -1;
     }
     *out = ((uint64_t)(uint32_t)hi << 32) | (uint32_t)lo;
@@ -100,16 +102,16 @@ int kiln_db_i64_parse(const char *text, int64_t *out, int n) {
         return KILN_DB_ERR;
     }
     if (negative) {
-        if (mag > 9223372036854775808ull) {
+        if (mag > KILN_DB_I64_MIN_MAGNITUDE) {
             return KILN_DB_ERR;
         }
-        if (mag == 9223372036854775808ull) {
-            value = (int64_t)(-9223372036854775807LL - 1);
+        if (mag == KILN_DB_I64_MIN_MAGNITUDE) {
+            value = INT64_MIN;
         } else {
             value = -(int64_t)mag;
         }
     } else {
-        if (mag > 9223372036854775807ull) {
+        if (mag > INT64_MAX) {
             return KILN_DB_ERR;
         }
         value = (int64_t)mag;
@@ -178,7 +180,7 @@ int kiln_db_i64_apply(int op, int64_t ah, int64_t al, int64_t bh, int64_t bl, in
         return store_i64(result, out, n);
     }
     if (op == KILN_DB_NUM_NEG) {
-        if (a == (int64_t)(-9223372036854775807LL - 1)) {
+        if (a == INT64_MIN) {
             return KILN_DB_ERR;
         }
         return store_i64(-a, out, n);
@@ -189,7 +191,7 @@ int kiln_db_i64_apply(int op, int64_t ah, int64_t al, int64_t bh, int64_t bl, in
     if (b == 0) {
         return KILN_DB_ERR;
     }
-    if (a == (int64_t)(-9223372036854775807LL - 1) && b == -1) {
+    if (a == INT64_MIN && b == -1) {
         return KILN_DB_ERR;
     }
     result = a / b;
@@ -291,8 +293,8 @@ int kiln_db_i64_cmp_text(int64_t hi, int64_t lo, const char *text, int64_t *out,
     } else {
         left_mag = (uint64_t)value;
     }
-    too_wide = overflow || (negative && mag > 9223372036854775808ull) ||
-               (!negative && mag > 9223372036854775807ull);
+    too_wide =
+        overflow || (negative && mag > KILN_DB_I64_MIN_MAGNITUDE) || (!negative && mag > INT64_MAX);
     if (too_wide) {
         out[0] = negative ? 1 : -1;
         return KILN_DB_OK;
