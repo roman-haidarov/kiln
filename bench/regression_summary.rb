@@ -103,10 +103,10 @@ write_tsv.call(File.join(root, 'median.tsv'),
 
 gc_stats = lambda do |path|
   line = File.file?(path) ? File.read(path).strip : ''
-  match = %r{
+  match = /
     ^\[gc\]\s(\d+)\scollections\s\((\d+)\sfull\)\sin\s([\d.]+)s\sof\s
     ([\d.]+)s\swall\s\(([\d.]+)%\),\s([\d.]+)ms\savg;\slive\s([\d.]+)\sMB\sobj\s\+\s([\d.]+)\sMB\sstr;
-  }x.match(line)
+  /x.match(line)
   [line, match && match.captures.map { |value| Float(value) }]
 end
 
@@ -120,10 +120,12 @@ rows.each do |row|
   updated = !after_line.empty? && after_line != before_line
   if before && after
     gc_delta = [(after[0] - before[0]).to_i, (after[1] - before[1]).to_i, (after[2] - before[2]).round(6)]
-    live_obj, live_str = after[6], after[7]
+    live_obj = after[6]
+    live_str = after[7]
   else
     gc_delta = ['', '', '']
-    live_obj, live_str = ['', '']
+    live_obj = ''
+    live_str = ''
   end
   gc_share = gc_delta[2] == '' ? '' : (gc_delta[2] / window_seconds * 100).round(4)
   gc_rows << [mode, feature, client, round_number, updated ? 1 : 0, *gc_delta, gc_share, live_obj, live_str]

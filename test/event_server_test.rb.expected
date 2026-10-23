@@ -18,8 +18,8 @@ ok   inline: handler error -> 500
 ok   inline: unknown route -> 404
 ok   inline: request after Connection: close is not executed
 ok   inline: HTTP/1.0 without keep-alive stops after one request
-ok   inline: request deadline is visible to Kiln.deadline
-ok   inline: Kiln.check! after the deadline -> 504
+ok   inline: request deadline is visible to Kiln::Runtime.deadline
+ok   inline: Kiln::Runtime.check! after the deadline -> 504
 ok   inline: a late handler returns a clean 504 without interrupting the event loop
 ok   inline: unsupported Expect -> 417
 ok   inline: 100 Continue after earlier responses, then the body is served

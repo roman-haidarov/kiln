@@ -4,15 +4,15 @@ require 'kiln'
 actions = %i[index show create update destroy].freeze
 action_set = Set.new(actions).freeze
 action_hash = { index: true, show: true, create: true, update: true, destroy: true }.freeze
-routes = Kiln::Router::RESOURCE_ROUTES
+routes = Kiln::Routing::Router::RESOURCE_ROUTES
 route_set = Set.new(routes).freeze
 mode = ARGV[0] || 'array'
 seconds = (ARGV[1] || '10').to_f
-deadline = Kiln.now + seconds
+deadline = Kiln::Runtime.now + seconds
 iterations = 0
 matches = 0
 
-while Kiln.now < deadline
+while Kiln::Runtime.now < deadline
   batch = 0
   while batch < 10_000
     case mode

@@ -4,69 +4,68 @@ module Kiln
       private
 
       def linger(sock)
-        Sock.kiln_sock_shutdown(sock.fileno, 1)
-        limit = Kiln.now + @linger
+        Transport::Sock.kiln_sock_shutdown(sock.fileno, 1)
+        drain_input(sock, Kiln::Runtime.now + @linger)
+      rescue IOError, SystemCallError
+        nil
+      end
+
+      def drain_input(sock, limit)
         drained = 0
         while drained < LINGER_BYTES
           chunk = sock.read_nonblock(16_384, exception: false)
           if chunk == :wait_readable
-            left = limit - Kiln.now
-            break if left <= 0
+            break unless readable_before?(sock, limit)
+          else
+            break if chunk.nil?
 
-            ready, = IO.select([sock], nil, nil, left)
-            break unless ready
-
-            next
+            drained += chunk.bytesize
           end
-          break if chunk.nil?
-
-          drained += chunk.bytesize
         end
-      rescue IOError, SystemCallError
-        nil
+      end
+
+      def readable_before?(sock, limit)
+        left = limit - Kiln::Runtime.now
+        left.positive? && !sock.wait_readable(left).nil?
       end
 
       def log_accept_error(error, delay)
         @log.error("accept error: #{error.class}: #{error.message}; retrying in #{delay}s")
-      rescue Exception
+      rescue *Kiln::Runtime::FAILURES
         nil
       end
 
       def write_all(sock, data, deadline, body = EMPTY_BODY)
-        fd = sock.fileno
         off = 0
-        head_size = data.bytesize
-        body_size = body.bytesize
-        total = head_size + body_size
-        while off < total
-          return false if Kiln.now >= deadline
-
-          sent = HttpNative.kiln_sendv(fd, data, head_size, body, body_size, off)
-          if sent == -1
-            left = deadline - Kiln.now
-            return false if left <= 0
-
-            _, writable, = IO.select(nil, [sock], nil, left)
-            return false unless writable
-          elsif sent.negative?
-            return false
-          else
-            off += sent
-          end
-        end
-        true
+        total = data.bytesize + body.bytesize
+        off = write_step(sock, data, body, off, deadline) while off.between?(0, total - 1)
+        off == total
       rescue IOError, SystemCallError
         false
       end
 
+      def write_step(sock, data, body, off, deadline)
+        return -1 if Kiln::Runtime.now >= deadline
+
+        sent = HTTP::Native.kiln_sendv(sock.fileno, data, data.bytesize, body, body.bytesize, off)
+        return off + sent if sent >= 0
+
+        sent == -1 && writable_before?(sock, deadline) ? off : -1
+      end
+
+      def writable_before?(sock, deadline)
+        left = deadline - Kiln::Runtime.now
+        left.positive? && !sock.wait_writable(left).nil?
+      end
+
       def fixed_headers
-        headers = Headers.new
+        headers = HTTP::Headers.new
         headers.plain
         headers
       end
 
       def write_fixed(sock, status, message, deadline, version = '1.1')
-        wire = Response.build_wire(status, fixed_headers, "#{message}\n", false, version: version)
+        wire = HTTP::Response.build_wire(status, fixed_headers, "#{message}\n", false, version: version)
         write_all(sock, wire, deadline)
       end
 
@@ -79,10 +78,10 @@ module Kiln
       end
 
       def quiet_join(thread)
-        limit = Kiln.now + 0.5
-        Kernel.sleep 0.01 while thread.alive? && Kiln.now < limit
+        limit = Kiln::Runtime.now + 0.5
+        Kernel.sleep 0.01 while thread.alive? && Kiln::Runtime.now < limit
         !thread.alive?
-      rescue Exception
+      rescue *Kiln::Runtime::FAILURES
         nil
       end
 

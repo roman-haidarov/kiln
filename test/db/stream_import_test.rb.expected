@@ -1,0 +1,40 @@
+pg stream 3000 rows
+pg stream nested query Kiln::DB::Error: a streaming query is open on this connection
+pg stream nested transaction Kiln::DB::Error
+pg stream raise 10 rows, usable
+pg stream break 25 rows, usable
+pg stream error Kiln::DB::Error, usable
+pg stream cancel 100 rows, usable
+pg each nested 3 n1/429,n2/429
+pg import ignore status skipped_conflict,inserted,skipped_conflict,inserted,inserted,skipped_conflict
+pg import ignore returned 5000,5001,5002
+pg import ignore names a,,c
+pg import paged 2500 returned in input order
+pg pool closed 0 Kiln::DB::ConnectionError
+mysql stream 3000 rows
+mysql stream nested query Kiln::DB::Error: a streaming query is open on this connection
+mysql stream nested transaction Kiln::DB::Error
+mysql stream raise 10 rows, usable
+mysql stream break 25 rows, usable
+mysql stream error Kiln::DB::Error, usable
+mysql each nested 3 n1/429,n2/429
+mysql import paged 2500 returned in input order
+mysql import upsert status applied_unknown,applied_unknown,applied_unknown
+mysql import upsert returned second,new
+mysql import collation status applied_unknown,applied_unknown,applied_unknown
+mysql import collation returned ABC,X1,new case,exact,fresh
+mysql pool closed 0 Kiln::DB::ConnectionError
+mariadb stream 3000 rows
+mariadb stream nested query Kiln::DB::Error: a streaming query is open on this connection
+mariadb stream nested transaction Kiln::DB::Error
+mariadb stream raise 10 rows, usable
+mariadb stream break 25 rows, usable
+mariadb stream error Kiln::DB::Error, usable
+mariadb each nested 3 n1/429,n2/429
+mariadb import paged 2500 returned in input order
+mariadb import upsert status applied_unknown,applied_unknown,applied_unknown
+mariadb import upsert returned second,new
+mariadb import collation status applied_unknown,applied_unknown,applied_unknown
+mariadb import collation returned ABC,X1,new case,exact,fresh
+mariadb pool closed 0 Kiln::DB::ConnectionError
+ok stream import

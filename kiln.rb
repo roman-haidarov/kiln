@@ -1,31 +1,23 @@
 require 'socket'
 require 'kiln/version'
-require 'kiln/core'
-require 'kiln/check'
+
+module Kiln
+  module Runtime; end
+  module HTTP; end
+  module Transport; end
+  module Observability; end
+  module Routing; end
+  module Middleware; end
+end
+
+require 'kiln/runtime'
 require 'kiln/http'
-require 'kiln/stream'
 require 'kiln/static'
-require 'kiln/http_syntax'
-require 'kiln/http_native'
-require 'kiln/read_buffer'
-require 'kiln/path_syntax'
-require 'kiln/json'
-require 'kiln/body'
-require 'kiln/payload'
-require 'kiln/listen'
-require 'kiln/conn'
-require 'kiln/websocket'
-require 'kiln/log'
-require 'kiln/pool'
-require 'kiln/context'
-require 'kiln/router'
-require 'kiln/controller'
+require 'kiln/transport'
+require 'kiln/observability/log'
+require 'kiln/routing'
 require 'kiln/middleware'
-require 'kiln/cors'
-require 'kiln/compress'
-require 'kiln/tasks'
 require 'kiln/testing'
-require 'kiln/supervisor'
 require 'kiln/server'
 require 'kiln/server/base'
 require 'kiln/server/event'

@@ -9,8 +9,8 @@ def check(label, passed)
   puts "ok   #{label}"
 end
 
-log = Kiln::Log.new(StringIO.new)
-router = Kiln::Router.new
+log = Kiln::Observability::Log.new(StringIO.new)
+router = Kiln::Routing::Router.new
 router.get('/', ->(ctx) { ctx.res.text('ok') })
 router.post('/echo', ->(ctx) { ctx.res.text("len=#{ctx.req.body.bytesize}") })
 router.post('/ignore', ->(ctx) { ctx.res.text('ignored') })
@@ -26,17 +26,17 @@ big = 'z' * (2 << 20)
   port = server.port
 
   slow = TCPSocket.new('127.0.0.1', port)
-  started = Kiln.now
+  started = Kiln::Runtime.now
   slow.write("GET / HTTP/1.1\r\nHost: x\r\n")
   reply = read_until_closed(slow, 3)
-  elapsed = Kiln.now - started
+  elapsed = Kiln::Runtime.now - started
   check "#{backend}: a head that never ends gets 408 after header_timeout",
         reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.25 && elapsed < 2.0
 
   silent = TCPSocket.new('127.0.0.1', port)
-  started = Kiln.now
+  started = Kiln::Runtime.now
   quiet = closed_within?(silent, 3)
-  elapsed = Kiln.now - started
+  elapsed = Kiln::Runtime.now - started
   silent.close
   check "#{backend}: a connection that sends nothing is closed after header_timeout",
         quiet && elapsed >= 0.25 && elapsed < 2.0
@@ -44,9 +44,9 @@ big = 'z' * (2 << 20)
   idle = TCPSocket.new('127.0.0.1', port)
   idle.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
   head, = read_head(idle)
-  started = Kiln.now
+  started = Kiln::Runtime.now
   gone = closed_within?(idle, 3)
-  elapsed = Kiln.now - started
+  elapsed = Kiln::Runtime.now - started
   idle.close
   check "#{backend}: an idle keep-alive connection is closed after keep_alive_timeout",
         head.start_with?('HTTP/1.1 200 ') && !head.include?('Connection: close') && gone && elapsed >= 0.3 &&
@@ -63,9 +63,9 @@ big = 'z' * (2 << 20)
 
   stalled = TCPSocket.new('127.0.0.1', port)
   stalled.write("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 4096\r\n\r\nabc")
-  started = Kiln.now
+  started = Kiln::Runtime.now
   stalled_reply = read_until_closed(stalled, 4)
-  elapsed = Kiln.now - started
+  elapsed = Kiln::Runtime.now - started
   stalled.close
   check "#{backend}: a streamed body that stalls gets 408 after read_timeout",
         stalled_reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.8 && elapsed < 2.5
@@ -111,10 +111,10 @@ short = Kiln::Server.new(router, nil, log: log, backend: :event, host: '127.0.0.
                                       header_timeout: 0.04, read_timeout: 1.0, request_timeout: 1.0)
 short.start
 partial = TCPSocket.new('127.0.0.1', short.port)
-started = Kiln.now
+started = Kiln::Runtime.now
 partial.write("GET / HTTP/1.1\r\nHost: x\r\n")
 reply = read_until_closed(partial, 1)
-elapsed = Kiln.now - started
+elapsed = Kiln::Runtime.now - started
 partial.close
 check 'event header timeout wakes the pump before its handler wait expires',
       reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.03 && elapsed < 0.2

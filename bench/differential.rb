@@ -2,7 +2,7 @@ require 'open3'
 
 source = DATA.read
 path = File.join(__dir__, ".differential-#{Process.pid}.mjs")
-wasm = ENV['LLHTTP_WASM']
+wasm = ENV.fetch('LLHTTP_WASM', nil)
 ENV['LLHTTP_WASM'] = File.expand_path(wasm) if wasm && !wasm.start_with?('/')
 File.write(path, source)
 begin

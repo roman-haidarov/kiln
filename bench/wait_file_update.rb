@@ -6,9 +6,9 @@ stable = 0
 
 while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
   state = if File.file?(path)
-    stat = File.stat(path)
-    [stat.mtime.to_r * 1_000_000_000, stat.size]
-  end
+            stat = File.stat(path)
+            [stat.mtime.to_r * 1_000_000_000, stat.size]
+          end
   if state && state[0] != previous_mtime && state[1].positive?
     if state == last_state
       stable += 1

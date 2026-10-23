@@ -1,0 +1,66 @@
+configured
+pg17 tx rollback
+pg17 join 3
+pg17 left 4
+pg17 group 1=2,2=1
+pg17 pluck ada,bea,cy
+pg17 exists 2
+pg17 from 1
+pg17 full 1:1,2:,3:,:4
+pg17 rolled 3
+pg17 return inserted 8
+pg17 schema id,name
+pg17 pk id
+pg17 gen yes
+pg17 empty COMMITTED 0
+pg17 option rejected
+pg17 ignore skipped_conflict ada
+pg18 tx rollback
+pg18 join 3
+pg18 left 4
+pg18 group 1=2,2=1
+pg18 pluck ada,bea,cy
+pg18 exists 2
+pg18 from 1
+pg18 full 1:1,2:,3:,:4
+pg18 rolled 3
+pg18 return inserted 8
+pg18 schema id,name
+pg18 pk id
+pg18 gen yes
+pg18 empty COMMITTED 0
+pg18 option rejected
+pg18 ignore skipped_conflict ada
+mysql84 tx rollback
+mysql84 join 3
+mysql84 left 4
+mysql84 group 1=2,2=1
+mysql84 pluck ada,bea,cy
+mysql84 exists 2
+mysql84 from 1
+mysql84 full 1:1,2:,3:,:4
+mysql84 rolled 3
+mysql84 return inserted 8
+mysql84 schema id,name
+mysql84 pk id
+mysql84 gen yes
+mysql84 empty COMMITTED 0
+mysql84 option rejected
+mysql84 ignore blocked
+mariadb114 tx rollback
+mariadb114 join 3
+mariadb114 left 4
+mariadb114 group 1=2,2=1
+mariadb114 pluck ada,bea,cy
+mariadb114 exists 2
+mariadb114 from 1
+mariadb114 full 1:1,2:,3:,:4
+mariadb114 rolled 3
+mariadb114 return inserted 8
+mariadb114 schema id,name
+mariadb114 pk id
+mariadb114 gen yes
+mariadb114 empty COMMITTED 0
+mariadb114 option rejected
+mariadb114 ignore blocked
+ok gate-c

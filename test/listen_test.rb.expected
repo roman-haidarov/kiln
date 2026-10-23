@@ -19,8 +19,8 @@ ok   base also refuses ephemeral reuse_port
 ok   workers option is no longer available
 ok   buffer_body cannot exceed max_body on event
 ok   buffer_body cannot exceed max_body on base
-ok   Listen.systemd is empty without LISTEN_FDS
-ok   Listen.parse reads an IPv6 address
+ok   Transport::Listen.systemd is empty without LISTEN_FDS
+ok   Transport::Listen.parse reads an IPv6 address
 ok   listen needs a port
 ok   backlog must be positive
 ok   max_connection_rate must not be negative

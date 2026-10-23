@@ -1,0 +1,13 @@
+pg17 exact blocked 1
+pg17 loose applied_unknown ADA
+pg17 mail pg 0
+pg18 exact blocked 1
+pg18 loose applied_unknown ADA
+pg18 mail pg 0
+mysql84 exact blocked 1
+mysql84 loose applied_unknown ADA
+mysql84 mail blocked 0
+mariadb114 exact blocked 1
+mariadb114 loose applied_unknown ADA
+mariadb114 mail blocked 0
+ok exact

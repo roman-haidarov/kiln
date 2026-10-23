@@ -1,0 +1,27 @@
+pg17 g1 1
+pg17 g2 22012
+pg17 g3 2
+pg17 syncs sync,sync,sync
+pg17 published 0
+pg17 idle 1
+pg17 first 22012
+pg17 after-first 9
+pg17 last-left 8
+pg17 last-mid 22012
+pg17 last-right 1
+pg17 preload failed
+pg17 preload-left 1
+pg18 g1 1
+pg18 g2 22012
+pg18 g3 2
+pg18 syncs sync,sync,sync
+pg18 published 0
+pg18 idle 1
+pg18 first 22012
+pg18 after-first 9
+pg18 last-left 8
+pg18 last-mid 22012
+pg18 last-right 1
+pg18 preload failed
+pg18 preload-left 1
+ok pipeline-group

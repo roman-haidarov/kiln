@@ -7,7 +7,7 @@ abort('usage: cpu_compare.rb BASELINE CANDIDATE [--runs N] [--iterations N] [--o
   unless baseline && candidate
 runs = 3
 iterations = 300_000
-output = File.join(ENV.fetch('KILN_VALIDATION_DIR', '/tmp/kiln-validation'), 'cpu-compare.json')
+output = File.join(ENV.fetch('KILN_VALIDATION_DIR') { '/tmp/kiln-validation' }, 'cpu-compare.json')
 until ARGV.empty?
   option = ARGV.shift
   value = ARGV.shift
@@ -48,5 +48,6 @@ summary = %w[baseline candidate].to_h do |name|
   [name, median.call(times)]
 end
 FileUtils.mkdir_p(File.dirname(output))
-File.write(output, JSON.pretty_generate(workers: ENV['SPINEL_WORKERS'], rows: rows, median_us: summary) + "\n")
+File.write(output,
+           "#{JSON.pretty_generate(workers: ENV.fetch('SPINEL_WORKERS', nil), rows: rows, median_us: summary)}\n")
 puts JSON.generate(summary)

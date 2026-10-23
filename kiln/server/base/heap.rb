@@ -30,42 +30,38 @@ module Kiln
         node = heap[idx]
         while idx.positive?
           parent = (idx - 1) / 2
-          up = heap[parent]
-          break if up.deadline <= node.deadline
+          break if heap[parent].deadline <= node.deadline
 
-          heap[idx] = up
-          up.hidx = idx
-          idx = parent
+          idx = heap_move(heap, parent, idx)
         end
-        heap[idx] = node
-        node.hidx = idx
+        heap_place(heap, idx, node)
       end
 
       def heap_down(heap, idx)
         node = heap[idx]
-        size = heap.size
         loop do
-          child = (2 * idx) + 1
-          break if child >= size
+          child = lower_child(heap, idx)
+          break if child.negative? || node.deadline <= heap[child].deadline
 
-          right = child + 1
-          low = heap[child]
-          mark = low.deadline
-          if right < size
-            other = heap[right]
-            other_mark = other.deadline
-            if other_mark < mark
-              child = right
-              low = other
-              mark = other_mark
-            end
-          end
-          break if node.deadline <= mark
-
-          heap[idx] = low
-          low.hidx = idx
-          idx = child
+          idx = heap_move(heap, child, idx)
         end
+        heap_place(heap, idx, node)
+      end
+
+      def lower_child(heap, idx)
+        child = (2 * idx) + 1
+        return -1 if child >= heap.size
+
+        right = child + 1
+        right < heap.size && heap[right].deadline < heap[child].deadline ? right : child
+      end
+
+      def heap_move(heap, from, to)
+        heap_place(heap, to, heap[from])
+        from
+      end
+
+      def heap_place(heap, idx, node)
         heap[idx] = node
         node.hidx = idx
       end

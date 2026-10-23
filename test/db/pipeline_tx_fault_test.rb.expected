@@ -1,0 +1,11 @@
+pg17 g1 3
+pg17 g2 22012
+pg17 g3 25P02
+pg17 tx 25P02
+pg17 left 1
+pg18 g1 3
+pg18 g2 22012
+pg18 g3 25P02
+pg18 tx 25P02
+pg18 left 1
+ok pipeline-tx

@@ -27,8 +27,8 @@ static kiln_raise_fn volatile kiln_raise = (kiln_raise_fn)sp_raise_cls;
 #define KILN_NORETURN SP_NORETURN
 #endif
 
-#define KILN_JSON_ERROR     "Kiln::JsonError"
-#define KILN_JSON_GEN_ERROR "Kiln::JsonGenerateError"
+#define KILN_JSON_ERROR     "Kiln::HTTP::JsonError"
+#define KILN_JSON_GEN_ERROR "Kiln::HTTP::JsonGenerateError"
 
 #define KILN_KEY_SLOTS 256
 #define KILN_KEY_MAX   64

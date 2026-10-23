@@ -4,8 +4,8 @@ require 'stringio'
 
 class StressHandler
   def initialize
-    @pool = Kiln::Pool.new(16) { Object.new }
-    @cpu = Kiln::CpuPool.new(2, queue: 8)
+    @pool = Kiln::Runtime::Pool.new(16) { Object.new }
+    @cpu = Kiln::Runtime::CpuPool.new(2, queue: 8)
   end
 
   def call(ctx)
@@ -15,9 +15,9 @@ class StressHandler
       ctx.res.text('late')
     when '/cpu'
       @cpu.run(timeout: 1) do
-        due = Kiln.now + 0.04
+        due = Kiln::Runtime.now + 0.04
         value = 0
-        while Kiln.now < due
+        while Kiln::Runtime.now < due
           1000.times { value = (value + 1) & 65_535 }
         end
         value
@@ -34,8 +34,8 @@ class StressHandler
 end
 
 handler = StressHandler.new
-log = Kiln::Log.new(StringIO.new)
-router = Kiln::Router.new
+log = Kiln::Observability::Log.new(StringIO.new)
+router = Kiln::Routing::Router.new
 %w[/health /hang /cpu /big].each { |path| router.get(path, handler) }
 router.seal!
 server = Kiln::Server::Base.new(router, nil, log: log, port: 0, host: '127.0.0.1',

@@ -183,11 +183,11 @@ long kiln_sock_kind(long fd) {
     struct sockaddr_storage addr;
     memset(&addr, 0, sizeof addr);
     socklen_t len = sizeof addr;
-    int accepting = 0;
-    socklen_t flag_len = sizeof accepting;
     if (getsockname((int)fd, (struct sockaddr *)&addr, &len) < 0)
         return ksock_errno();
 #ifdef SO_ACCEPTCONN
+    int accepting = 0;
+    socklen_t flag_len = sizeof accepting;
     if (getsockopt((int)fd, SOL_SOCKET, SO_ACCEPTCONN, &accepting, &flag_len) == 0 && !accepting)
         return -EINVAL;
 #endif

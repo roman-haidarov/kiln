@@ -6,33 +6,35 @@ require 'tmpdir'
 require 'timeout'
 
 project = File.expand_path('..', __dir__)
-compiler = ENV.fetch('SPINEL', 'spinel')
-timeout_seconds = Integer(ENV.fetch('MUTATION_TIMEOUT', '30'))
-result_path = File.join(ENV.fetch('KILN_VALIDATION_DIR', '/tmp/kiln-validation'), 'mutations.json')
+compiler = ENV.fetch('SPINEL') { 'spinel' }
+timeout_seconds = Integer(ENV.fetch('MUTATION_TIMEOUT') { '30' })
+result_path = File.join(ENV.fetch('KILN_VALIDATION_DIR') { '/tmp/kiln-validation' }, 'mutations.json')
 FileUtils.mkdir_p(File.dirname(result_path))
 mutations = [
-  ['stale_double_close', 'kiln/pool.rb', 'test/lifecycle_test.rb', 'stale_quarantine', 'nil',
+  ['stale_double_close', 'kiln/runtime/pool.rb', 'test/lifecycle_test.rb', 'held.quarantine = true', 'held.quarantine = false',
    'FAIL kill during stale resource close does not close twice'],
-  ['expired_cpu_start', 'kiln/cpu_pool.rb', 'test/lifecycle_test.rb', 'if Kiln.now >= expires', 'if false',
+  ['expired_cpu_start', 'kiln/runtime/cpu_pool.rb', 'test/lifecycle_test.rb', 'if Kiln::Runtime.now >= job.expires', 'if false',
    'wait timeout'],
-  ['connection_cleanup_lock', 'kiln/server.rb', 'test/lifecycle_test.rb', "def finish(slot)\n      @finished << slot",
-   "def finish(slot)\n      @lock.synchronize { @finished << slot }",
+  ['connection_cleanup_lock', 'kiln/server/base/server.rb', 'test/lifecycle_test.rb',
+   "def finish(slot)\n          @finished << slot",
+   "def finish(slot)\n          @lock.synchronize { @finished << slot }",
    'FAIL connection ensure completes while server mutex is held'],
-  ['header_overlap', 'kiln/server/base/request.rb', 'test/server_test.rb', 'from = buf.size - marker.bytesize + 1',
+  ['header_overlap', 'kiln/server/base/request.rb', 'test/server_test.rb', 'from = [buf.size - marker_size + 1, 0].max',
    'from = buf.size', 'FAIL header terminator split across three reads is found'],
   ['chunk_extensions', 'kiln/server/base/request.rb', 'bench/chunk_extension_probe.rb',
-   'size = HttpNative.kiln_chunk_size(line, line.bytesize, @max_body - body.bytesize)',
-   'size = line == "3;".b ? 3 : HttpNative.kiln_chunk_size(line, line.bytesize, @max_body - body.bytesize)',
+   'size = HTTP::Native.kiln_chunk_size(line, line.bytesize, @max_body - body.bytesize)',
+   'size = line == "3;".b ? 3 : HTTP::Native.kiln_chunk_size(line, line.bytesize, @max_body - body.bytesize)',
    'FAIL invalid extension "3;" -> 400'],
-  ['spawn_after_close', 'kiln/cpu_pool.rb', 'test/lifecycle_test.rb', 'return false if @closed', 'nil',
+  ['spawn_after_close', 'kiln/runtime/cpu_pool.rb', 'test/lifecycle_test.rb', 'return false if @closed', 'nil',
    'FAIL replacement after close does not call Thread.new'],
-  ['constructor_leak', 'kiln/cpu_pool.rb', 'test/lifecycle_test.rb', 'shutdown(grace: 0) unless initialized', 'nil',
+  ['constructor_leak', 'kiln/runtime/cpu_pool.rb', 'test/lifecycle_test.rb', 'shutdown(grace: 0) unless initialized',
+   'nil',
    'FAIL constructor failure closes workers already started'],
-  ['batch_handoff', 'kiln/pool.rb', 'test/lifecycle_test.rb',
-   'if granted && (!@idle.empty? || @open < @size) && @wake.empty?', 'if false',
+  ['batch_handoff', 'kiln/runtime/pool.rb', 'test/lifecycle_test.rb',
+   'wake_idle if held.granted && (!@idle.empty? || @open < @size)', 'nil',
    'FAIL batched returns wake all waiters without polling']
 ]
-selected = ENV.fetch('MUTATIONS', '').split(',')
+selected = ENV.fetch('MUTATIONS') { '' }.split(',')
 rows = []
 mutations.each do |name, relative, test, old, replacement, expected|
   next unless selected.empty? || selected.include?(name)
@@ -61,7 +63,7 @@ mutations.each do |name, relative, test, old, replacement, expected|
     if old == 'stale_quarantine'
       pattern = /(?m)^([ \t]*)quarantine = true\n\1entry = nil$/
       count = source.scan(pattern).length
-      source = source.sub(pattern) { "#{$1}nil" }
+      source = source.sub(pattern) { "#{Regexp.last_match(1)}nil" }
     else
       count = source.scan(old).length
       source = source.gsub(old, replacement)
@@ -98,5 +100,5 @@ end
 previous = File.file?(result_path) ? JSON.parse(File.read(result_path)) : []
 merged = previous.to_h { |row| [row.fetch('name'), row] }
 rows.each { |row| merged[row.fetch(:name)] = row }
-File.write(result_path, JSON.pretty_generate(merged.values) + "\n")
+File.write(result_path, "#{JSON.pretty_generate(merged.values)}\n")
 abort('mutation was not detected') unless rows.all? { |row| row[:detected] }

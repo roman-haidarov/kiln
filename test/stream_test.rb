@@ -52,7 +52,7 @@ GONE = Queue.new
 TRACE = Queue.new
 
 def build_router
-  router = Kiln::Router.new
+  router = Kiln::Routing::Router.new
   router.get('/chunks', lambda do |ctx|
     ctx.res.stream(type: 'text/plain') do |out|
       out.write('a')
@@ -73,7 +73,7 @@ def build_router
       out.write('one')
       out.flush
       Kernel.sleep 0.5
-      Kiln.check!
+      Kiln::Runtime.check!
       out.write('two')
     end
   end)
@@ -83,7 +83,7 @@ def build_router
         out.event('tick')
         Kernel.sleep 0.02
       end
-    rescue Kiln::ClientGone
+    rescue Kiln::Runtime::ClientGone
       GONE << :gone
       raise
     end
@@ -94,7 +94,7 @@ def build_router
       begin
         4096.times { out.write(chunk) }
         GONE << :finished
-      rescue Kiln::ClientGone
+      rescue Kiln::Runtime::ClientGone
         GONE << :gone
         raise
       end
@@ -109,7 +109,7 @@ def build_router
   end)
   router.get('/replaced', lambda do |ctx|
     ctx.res.stream { |out| out.write('secret') }
-    raise Kiln::BadRequest, 'invalid input'
+    raise Kiln::HTTP::BadRequest, 'invalid input'
   end)
   router.get('/watch', lambda do |ctx|
     ctx.res.sse do |out|
@@ -125,21 +125,22 @@ def build_router
 end
 
 puts '-- writer'
-check 'first chunk head', Kiln::Stream.chunk_head(5, false) == "5\r\n"
-check 'later chunk head closes the previous chunk, size in hex', Kiln::Stream.chunk_head(26, true) == "\r\n1a\r\n"
-check 'sse event fields', Kiln::Stream.sse("a\r\nb", 'e', 3, 10) == "event: e\nid: 3\nretry: 10\ndata: a\ndata: b\n\n"
-check 'sse empty data', Kiln::Stream.sse('', nil, nil, nil) == "data: \n\n"
+check 'first chunk head', Kiln::HTTP::Stream.chunk_head(5, false) == "5\r\n"
+check 'later chunk head closes the previous chunk, size in hex', Kiln::HTTP::Stream.chunk_head(26, true) == "\r\n1a\r\n"
+check 'sse event fields',
+      Kiln::HTTP::Stream.sse("a\r\nb", 'e', 3, 10) == "event: e\nid: 3\nretry: 10\ndata: a\ndata: b\n\n"
+check 'sse empty data', Kiln::HTTP::Stream.sse('', nil, nil, nil) == "data: \n\n"
 sink = []
-writer = Kiln::Stream.new(->(prefix, bytes) { sink << (prefix + bytes) }, -> { false }, true)
+writer = Kiln::HTTP::Stream.new(->(prefix, bytes) { sink << (prefix + bytes) }, -> { false }, true)
 writer.write('ab')
 check 'write buffers until flush', sink.empty?
 writer.flush
 check 'flush sends one chunk head and its data', sink == ["2\r\nab"]
-writer.write('x' * Kiln::Stream::FLUSH_AT)
+writer.write('x' * Kiln::HTTP::Stream::FLUSH_AT)
 check 'a large write goes out at once, its head carrying the previous CRLF',
       sink.size == 2 && sink[1].start_with?("\r\n4000\r\n")
 check 'ending closes the last chunk', writer.ending == "\r\n0\r\n\r\n"
-check 'ending with nothing sent', Kiln::Stream.new(->(_p, _b) {}, -> { false }, true).ending == "0\r\n\r\n"
+check 'ending with nothing sent', Kiln::HTTP::Stream.new(->(_p, _b) {}, -> { false }, true).ending == "0\r\n\r\n"
 writer.flush
 check 'empty flush sends nothing', sink.size == 2
 writer.write('')
@@ -148,7 +149,7 @@ check 'empty write sends nothing', sink.size == 2
 raises('event name with a line break', ArgumentError, 'event') { writer.event('x', event: "a\nb") }
 raises('id with a line break', ArgumentError, 'id') { writer.event('x', id: "1\r2") }
 raises('comment with a line break', ArgumentError, 'comment') { writer.comment("a\nb") }
-raises('stream needs a block', ArgumentError, 'block') { Kiln::Response.new.stream }
+raises('stream needs a block', ArgumentError, 'block') { Kiln::HTTP::Response.new.stream }
 
 puts '-- testing helper'
 helper_app = build_router
@@ -163,12 +164,12 @@ check 'a mapped error cancels an earlier stream', replaced.status == 400 && repl
                                                   !replaced.streaming?
 
 log_io = StringIO.new
-log = Kiln::Log.new(log_io)
+log = Kiln::Observability::Log.new(log_io)
 [[:event, 0], [:event, 2], [:base, 0]].each do |backend, handlers|
   name = backend == :event ? "event/#{handlers}" : 'base'
   options = { log:, port: 0, host: '127.0.0.1', backend:, request_timeout: 0.3, write_timeout: 0.5 }
   options[:handlers] = handlers if backend == :event
-  server = Kiln::Server.new(Kiln::Rescue.new(build_router, log), nil, **options)
+  server = Kiln::Server.new(Kiln::Middleware::Rescue.new(build_router, log), nil, **options)
   server.start
   port = server.port
 
@@ -222,10 +223,10 @@ log = Kiln::Log.new(log_io)
   watcher = TCPSocket.new('127.0.0.1', port)
   watcher.write("GET /watch HTTP/1.1\r\nHost: t\r\n\r\n")
   watcher.readpartial(4096)
-  started = Kiln.now
+  started = Kiln::Runtime.now
   server.shutdown(grace: 3.0)
   check "#{name}: shutdown ends an SSE loop through closed?",
-        TRACE.pop(timeout: 3) == :closed && Kiln.now - started < 2.0
+        TRACE.pop(timeout: 3) == :closed && Kiln::Runtime.now - started < 2.0
   watcher.close
 end
 log.close

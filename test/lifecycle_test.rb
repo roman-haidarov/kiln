@@ -7,7 +7,7 @@ def check(label, passed)
   puts "ok   #{label}"
 end
 
-class FailingSpawn < Kiln::CpuPool
+class FailingSpawn < Kiln::Runtime::CpuPool
   attr_accessor :failures
 
   def spawn_one?
@@ -23,14 +23,14 @@ retry_pool = FailingSpawn.new(1)
 retry_pool.failures = 2
 r = begin
   retry_pool.run { raise SystemExit }
-rescue Kiln::WorkerLost
+rescue Kiln::Runtime::WorkerLost
   :lost
 end
 wait_for { retry_pool.alive_workers == 1 && retry_pool.spawn_failures == 2 && retry_pool.respawned == 1 }
 check 'spawn failure retries and restores worker', r == :lost && retry_pool.respawned == 1 && retry_pool.run { 42 }
 retry_pool.shutdown(grace: 0.1)
 
-class GatedSpawn < Kiln::CpuPool
+class GatedSpawn < Kiln::Runtime::CpuPool
   attr_accessor :gate, :entered, :results
 
   def spawn_one?
@@ -54,16 +54,16 @@ gated.results = spawn_results
 begin
   gated.run { raise SystemExit }
 rescue StandardError
-  Kiln::WorkerLost
+  Kiln::Runtime::WorkerLost
 end
 check 'replacement reached the gate', gate_entered.pop(timeout: 1) == true
 gated.close
 gate << true
 check 'replacement after close does not call Thread.new', spawn_results.pop(timeout: 1) == false
 check 'close during replacement leaves no new worker',
-      gated.await_workers(1) && gated.alive_workers.zero? && gated.instance_variable_get(:@threads).empty?
+      gated.wait_stopped?(1) && gated.alive_workers.zero? && gated.instance_variable_get(:@threads).empty?
 
-queued_pool = Kiln::CpuPool.new(1, queue: 4)
+queued_pool = Kiln::Runtime::CpuPool.new(1, queue: 4)
 entered = Queue.new
 running = run_lost(queued_pool) do
   entered << true
@@ -73,13 +73,14 @@ end
 entered.pop
 queued = run_lost(queued_pool) { 8 }
 wait_for { queued_pool.queued == 1 }
-started = Kiln.now
+started = Kiln::Runtime.now
 check 'shutdown rejects both running and queued tasks',
-      queued_pool.shutdown(grace: 0) && running.value == :lost && queued.value == :lost && Kiln.now - started < 1
+      queued_pool.shutdown(grace: 0).zero? && running.value == :lost && queued.value == :lost &&
+      Kiln::Runtime.now - started < 1
 check 'shutdown is safe to call again',
-      queued_pool.shutdown(grace: 0) && queued_pool.busy.zero? && queued_pool.alive_workers.zero?
+      queued_pool.shutdown(grace: 0).zero? && queued_pool.busy.zero? && queued_pool.alive_workers.zero?
 
-lock_pool = Kiln::CpuPool.new(1)
+lock_pool = Kiln::Runtime::CpuPool.new(1)
 lock = lock_pool.instance_variable_get(:@lock)
 entered = Queue.new
 waiter = run_lost(lock_pool, timeout: 3) do
@@ -98,7 +99,7 @@ lock_pool.shutdown(grace: 0)
 
 stale_closes = Queue.new
 stale_entered = Queue.new
-stale_pool = Kiln::Pool.new(1, validate: ->(_resource) { false }, close: lambda { |_resource|
+stale_pool = Kiln::Runtime::Pool.new(1, validate: ->(_resource) { false }, close: lambda { |_resource|
   stale_closes << true
   stale_entered << true
   Kernel.sleep 5
@@ -112,10 +113,10 @@ check 'kill during stale resource close does not close twice',
       stale_closes.size == 1 && stale_pool.consistent? && stale_pool.close_failures == 1 &&
       stale_pool.quarantined == 1 && stale_pool.available.zero? && stale_pool.checked_out.zero?
 
-invalid_pool = Kiln::CpuPool.new(1)
+invalid_pool = Kiln::Runtime::CpuPool.new(1)
 [Float::INFINITY, 0.0 / 0.0, -2].each do |value|
   rejected = begin
-    invalid_pool.await_workers(value)
+    invalid_pool.wait_stopped?(value)
     false
   rescue ArgumentError
     true
@@ -146,7 +147,8 @@ class ClosedFlagSocket
   end
 end
 
-server = Kiln::Server::Base.new(nil, nil, log: Kiln::Log.new(StringIO.new), port: 0, host: '127.0.0.1', max_conns: 1)
+server = Kiln::Server::Base.new(nil, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
+                                          max_conns: 1)
 server.instance_variable_set(:@finished, Queue.new)
 server.instance_variable_set(:@reap_wake, SizedQueue.new(1))
 reader = ClosedFlagSocket.new
@@ -172,12 +174,12 @@ server.send(:settle_finished?)
 check 'connection cleanup closes socket and returns exactly one slot', reader.closed? && server.in_flight.zero?
 
 check 'Content-Length at int64 boundary is compared without overflow',
-      Kiln::HttpSyntax.content_length({ 'content-length' => '9999999999999999999' },
-                                      9_223_372_036_854_775_807) == :too_long
+      Kiln::HTTP::Syntax.content_length({ 'content-length' => '9999999999999999999' },
+                                        9_223_372_036_854_775_807) == :too_long
 check 'int64 Content-Length accepted without a hidden limit',
-      Kiln::HttpSyntax.content_length({ 'content-length' => '9223372036854775807' },
-                                      9_223_372_036_854_775_807) == 9_223_372_036_854_775_807
-class FailingConstructor < Kiln::CpuPool
+      Kiln::HTTP::Syntax.content_length({ 'content-length' => '9223372036854775807' },
+                                        9_223_372_036_854_775_807) == 9_223_372_036_854_775_807
+class FailingConstructor < Kiln::Runtime::CpuPool
   def spawn_one?
     @attempt = (@attempt || 0) + 1
     raise ThreadError, 'constructor spawn failure' if @attempt == 2
@@ -195,7 +197,7 @@ end
 Kernel.sleep 0.05
 check 'constructor failure closes workers already started', rejected && Thread.list.size == before
 
-expiry_pool = Kiln::CpuPool.new(1)
+expiry_pool = Kiln::Runtime::CpuPool.new(1)
 lock = expiry_pool.instance_variable_get(:@lock)
 ran = Queue.new
 lock.lock
@@ -204,7 +206,7 @@ caller = Thread.new do
     ran << true
     1
   end
-rescue Kiln::PoolTimeout
+rescue Kiln::Runtime::PoolTimeout
   :timeout
 end
 Kernel.sleep 0.08
@@ -215,15 +217,15 @@ check 'task does not start after deadline while waiting for mutex', ran.empty? &
 expiry_pool.shutdown(grace: 0)
 
 check 'Connection close takes precedence over HTTP/1.0 keep-alive',
-      !Kiln::HttpSyntax.persistent?('1.0', 'keep-alive, close')
+      !Kiln::HTTP::Syntax.persistent?('1.0', 'keep-alive, close')
 
-overrun_pool = Kiln::CpuPool.new(1)
+overrun_pool = Kiln::Runtime::CpuPool.new(1)
 begin
   overrun_pool.run(timeout: 0.05) do
     Kernel.sleep 0.15
     1
   end
-rescue Kiln::PoolTimeout
+rescue Kiln::Runtime::PoolTimeout
   nil
 end
 wait_for { overrun_pool.overran == 1 }
@@ -231,7 +233,7 @@ check 'overran_seconds reports work time beyond deadline',
       overrun_pool.overran_seconds > 0.04 && overrun_pool.busy.zero?
 overrun_pool.shutdown(grace: 0)
 
-batch_pool = Kiln::Pool.new(2) { Object.new }
+batch_pool = Kiln::Runtime::Pool.new(2) { Object.new }
 held = Queue.new
 release_holders = Queue.new
 holders = 2.times.map do
@@ -251,7 +253,7 @@ users = 2.times.map do
       entered << true
       release_users.pop
     end
-  rescue Kiln::PoolTimeout
+  rescue Kiln::Runtime::PoolTimeout
     entered << false
   end
 end
@@ -275,9 +277,9 @@ join_victim = Thread.new do
   join_gate.pop
 end
 join_entered.pop
-started = Kiln.now
+started = Kiln::Runtime.now
 joined = server.send(:quiet_join, join_victim)
-check 'server wait is bounded while thread is alive', !joined && join_victim.alive? && Kiln.now - started < 1.0
+check 'server wait is bounded while thread is alive', !joined && join_victim.alive? && Kiln::Runtime.now - started < 1.0
 join_gate << true
 join_victim.join
 check 'server wait recognizes an exited thread', server.send(:quiet_join, join_victim)

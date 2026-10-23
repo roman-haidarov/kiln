@@ -2,10 +2,11 @@
 set -eu
 
 spinel_bin=${SPINEL:-spinel}
-spinel_cc=${SPINEL_CC:-}
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 limit=${TEST_TIMEOUT:-120}
 results_dir=${KILN_VALIDATION_DIR:-/tmp/kiln-validation}/tests
 cd "$(dirname "$0")"
+spinel_cc=$(pwd)/ci/spinel-cc.sh
 mkdir -p build/test
 mkdir -p "$results_dir"
 ext_links=$(./ext/build.sh)
@@ -21,13 +22,7 @@ for source in test/*_test.rb; do
     failed=$((failed + 1))
     continue
   fi
-  if [ -n "$spinel_cc" ]; then
-    if ! "$spinel_bin" "--cc=$spinel_cc" $ext_links -I . "$source" -o "$binary"; then
-      printf 'FAIL %s: compilation\n' "$name" >&2
-      failed=$((failed + 1))
-      continue
-    fi
-  elif ! "$spinel_bin" $ext_links -I . "$source" -o "$binary"; then
+  if ! "$spinel_bin" "--cc=$spinel_cc" $ext_links -I . "$source" -o "$binary"; then
     printf 'FAIL %s: compilation\n' "$name" >&2
     failed=$((failed + 1))
     continue

@@ -1,0 +1,49 @@
+pg utf8 16 blob 6
+pg wide 51 cols 20
+pg in100 51
+pg big 10000 sum 29994 limit 3 offset 2 distinct 7
+pg types Integer ExactDecimal Float true nil
+pg bool [1] [2] warnings 0
+pg errors UniqueViolation:23505 NotNullViolation:23502 CheckViolation:23514 ForeignKeyViolation:23503
+pg nested ["outer"]
+pg auto id-integer renamed
+pg import PENDING_COMMIT 0 COMMITTED
+pg commit-fail UniqueViolation depth 0 after 1
+pg inline Unsupported
+pg prepared 0
+pg longtext 1000000
+pg deadline Timeout 42
+pg pool isolated pinned 100
+mysql utf8 16 blob 6
+mysql wide 51 cols 20
+mysql in100 51
+mysql big 10000 sum 29994 limit 3 offset 2 distinct 7
+mysql types UInt64Value ExactDecimal Float 1 nil
+mysql bool [1] [2] warnings 0
+mysql errors UniqueViolation:23000 NotNullViolation:23000 CheckViolation:HY000 ForeignKeyViolation:23000
+mysql nested ["outer"]
+mysql auto id-integer renamed
+mysql import PENDING_COMMIT 0 COMMITTED
+mysql commit-fail n/a
+mysql inline Unsupported
+mysql prepared n/a
+mysql longtext 1000000
+mysql deadline Timeout broken
+mysql pool isolated pinned 100
+mariadb utf8 16 blob 6
+mariadb wide 51 cols 20
+mariadb in100 51
+mariadb big 10000 sum 29994 limit 3 offset 2 distinct 7
+mariadb types UInt64Value ExactDecimal Float 1 nil
+mariadb bool [1] [2] warnings 0
+mariadb errors UniqueViolation:23000 NotNullViolation:23000 CheckViolation:23000 ForeignKeyViolation:23000
+mariadb nested ["outer"]
+mariadb auto id-integer renamed
+mariadb import PENDING_COMMIT 0 COMMITTED
+mariadb commit-fail n/a
+mariadb inline Unsupported
+mariadb prepared n/a
+mariadb longtext 1000000
+mariadb deadline Timeout broken
+mariadb pool isolated pinned 100
+ok fix regression

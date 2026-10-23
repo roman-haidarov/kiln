@@ -24,13 +24,13 @@ heads = {
                'Cookie: session=abc123def456; theme=dark; cart=9f8e7d6c'.b
 }
 n = (ARGV[0] || '300000').to_i
-out = Kiln::HttpNative.scratch
+out = Kiln::HTTP::Native.scratch
 heads.each do |name, head|
-  t = Kiln.now
-  n.times { Kiln::HttpSyntax.parse_head(head) }
-  ruby = Kiln.now - t
-  t = Kiln.now
-  n.times { Kiln::HttpNative.parse_head(head, out) }
-  native = Kiln.now - t
+  t = Kiln::Runtime.now
+  n.times { Kiln::HTTP::Syntax.parse_head(head) }
+  ruby = Kiln::Runtime.now - t
+  t = Kiln::Runtime.now
+  n.times { Kiln::HTTP::Native.parse_head(head, out) }
+  native = Kiln::Runtime.now - t
   puts "#{name} parses=#{n} ruby_us=#{(ruby / n * 1e6).round(2)} native_us=#{(native / n * 1e6).round(2)}"
 end

@@ -7,7 +7,7 @@ baseline, candidate = ARGV.shift(2)
 abort('usage: compare.rb BASELINE CANDIDATE [--seconds N] [--runs N] [--output PATH]') unless baseline && candidate
 seconds = 3.0
 runs = 5
-output = File.join(ENV.fetch('KILN_VALIDATION_DIR', '/tmp/kiln-validation'), 'compare.json')
+output = File.join(ENV.fetch('KILN_VALIDATION_DIR') { '/tmp/kiln-validation' }, 'compare.json')
 until ARGV.empty?
   option = ARGV.shift
   value = ARGV.shift
@@ -106,5 +106,5 @@ summary = %w[rps cpu_us].to_h do |key|
   [key, values]
 end
 FileUtils.mkdir_p(File.dirname(output))
-File.write(output, JSON.pretty_generate(workers: ENV['SPINEL_WORKERS'], rows: rows, summary: summary) + "\n")
+File.write(output, "#{JSON.pretty_generate(workers: ENV.fetch('SPINEL_WORKERS', nil), rows: rows, summary: summary)}\n")
 puts JSON.generate(summary)

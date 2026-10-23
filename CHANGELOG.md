@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.0.8
+
+### Added
+
+- Kiln::DB (experimental) for PostgreSQL through libpq 17+ and for MySQL and
+  MariaDB through MariaDB Connector/C 3.4+: connections, a per-thread connection
+  pool, models, relations, transactions with savepoints, and bulk import. See
+  [DB.md](DB.md).
+- Kiln::DB is opt-in: `spin build` and `ext/build.sh` build Kiln without it and
+  need no database headers. `KILN_DB=1 ./ext/build.sh` builds it.
+
+### Changed
+
+- The code passes RuboCop with the project configuration. Large classes are split
+  into nested modules; methods with long parameter lists take small value objects.
+- Breaking: `Runtime::CpuPool#await_workers` is now `wait_stopped?`.
+  `Runtime::CpuPool#shutdown`, `Runtime::Pool#shutdown` and `DB::Pool#close` return
+  the number of workers or resources still running (`0` on a clean stop) instead
+  of `true`/`false`.
+- Breaking: `HTTP::Request.new(verb, target, headers, body, wire)` takes an
+  `HTTP::Request::Wire` (version, payload, ALPN) instead of keywords.
+  `Transport::Listen.new(kind, tls)` is configured with `use_tcp`, `use_unix` or
+  `use_fd`; the `tcp`, `unix`, `fd` and `parse` factories are unchanged.
+  `HTTP::Cookies.serialize` takes an `HTTP::Cookies::Cookie`.
+- Kiln::DB: `Col#null` (with `is_null` as an alias), `Model.one_to_many` (with
+  `has_many` as an alias). The low-level `DB::Native.connect_params` takes a
+  `DB::Endpoint`; `bind_str`, `bind_bytes`, `block_import` and `block_text` take
+  grouped arguments.
+- Fixed `DB::ExactDecimal#<=>` for values whose digit strings differ in length.
+- The event backend marks inline handlers so that Kiln::DB can refuse to block
+  the event loop.
+- Breaking: the code is grouped into namespaces, one file per class under
+  `kiln/<namespace>/`. `Kiln::Server`, `Kiln::Static` and `Kiln::Testing` keep
+  their names; everything else moved:
+
+  | Namespace | Was `Kiln::…` |
+  | --- | --- |
+  | `Kiln::Routing` | `Router`, `Context`, `Controller` |
+  | `Kiln::HTTP` | `Request`, `Response`, `Headers`, `Json`, `Media`, `Form`, `Cookies`, `Payload`, `Stream`, `WebSocket`, `Conditional`, `PathSyntax`, `ReadBuffer`, `BadRequest`, `UnsupportedMediaType`, `PayloadTooLarge`, `RequestTimeout`, `TrailersTooLarge`, `JsonError`, `JsonGenerateError`; `HttpDate`, `HttpSyntax`, `HttpNative` are now `HTTP::Date`, `HTTP::Syntax`, `HTTP::Native` |
+  | `Kiln::Middleware` | `Compress`, `Cors`, `DefaultHeaders`, `RequestId`, `AccessLog`, `Rescue`, `CompressError` |
+  | `Kiln::Runtime` | `Pool`, `CpuPool`, `Tasks`, `Token`, `Supervisor`, `DeadlineExceeded`, `PoolTimeout`, `WorkerLost`, `ClientGone`; `Kiln.now`, `Kiln.pause`, `Kiln.pop`, `Kiln.check!` and the other deadline helpers are now `Kiln::Runtime.*` |
+  | `Kiln::Transport` | `Listen`, `Tls`, `Sock` |
+  | `Kiln::Observability` | `Log` |
+
 ## 0.0.7
 
 ### Changed

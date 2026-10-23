@@ -5,7 +5,7 @@
 #include "spinel/runtime.h"
 #include "zlib-ng/zlib-ng.h"
 
-#define KILN_GZIP_ERROR  "Kiln::CompressError"
+#define KILN_GZIP_ERROR  "Kiln::Middleware::CompressError"
 #define KILN_GZIP_WINDOW 31
 #define KILN_GZIP_MEMORY 8
 

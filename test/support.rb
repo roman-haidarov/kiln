@@ -16,8 +16,8 @@ def read_until_closed(sock, seconds)
       data << chunk
     end
   end
-  deadline = Kiln.now + seconds
-  Kernel.sleep 0.01 while reader.alive? && Kiln.now < deadline
+  deadline = Kiln::Runtime.now + seconds
+  Kernel.sleep 0.01 while reader.alive? && Kiln::Runtime.now < deadline
   if reader.alive?
     begin
       sock.close
@@ -25,16 +25,16 @@ def read_until_closed(sock, seconds)
       nil
     end
     reader.kill
-    cleanup_deadline = Kiln.now + 0.5
-    Kernel.sleep 0.001 while reader.alive? && Kiln.now < cleanup_deadline
+    cleanup_deadline = Kiln::Runtime.now + 0.5
+    Kernel.sleep 0.001 while reader.alive? && Kiln::Runtime.now < cleanup_deadline
   end
   data
 end
 
 def wait_for
-  limit = Kiln.now + 3
+  limit = Kiln::Runtime.now + 3
   until yield
-    raise 'wait timeout' if Kiln.now >= limit
+    raise 'wait timeout' if Kiln::Runtime.now >= limit
 
     Kernel.sleep 0.01
   end
@@ -43,7 +43,7 @@ end
 def run_lost(pool, timeout: 5, &work)
   Thread.new do
     pool.run(timeout: timeout, &work)
-  rescue Kiln::WorkerLost
+  rescue Kiln::Runtime::WorkerLost
     :lost
   end
 end
@@ -63,9 +63,9 @@ def exchange(port, data, seconds = 2.0)
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write(data)
   out = (+'').b
-  limit = Kiln.now + seconds
-  while Kiln.now < limit
-    ready, = IO.select([sock], nil, nil, limit - Kiln.now)
+  limit = Kiln::Runtime.now + seconds
+  while Kiln::Runtime.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln::Runtime.now)
     break unless ready
 
     chunk = begin
@@ -84,8 +84,8 @@ end
 
 def collect_until(sock, seconds)
   out = (+'').b
-  limit = Kiln.now + seconds
-  until yield(out) || Kiln.now > limit
+  limit = Kiln::Runtime.now + seconds
+  until yield(out) || Kiln::Runtime.now > limit
     IO.select([sock], nil, nil, 0.2)
     chunk = sock.read_nonblock(4096, exception: false)
     out << chunk if chunk.is_a?(String)
@@ -96,9 +96,9 @@ end
 def exchange_on(sock, data, seconds = 2.0)
   sock.write(data)
   out = (+'').b
-  limit = Kiln.now + seconds
-  while Kiln.now < limit
-    ready, = IO.select([sock], nil, nil, limit - Kiln.now)
+  limit = Kiln::Runtime.now + seconds
+  while Kiln::Runtime.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln::Runtime.now)
     break unless ready
 
     chunk = begin
@@ -122,9 +122,9 @@ def read_head(sock, seconds = 2.0)
 end
 
 def closed_within?(sock, seconds)
-  limit = Kiln.now + seconds
-  while Kiln.now < limit
-    ready, = IO.select([sock], nil, nil, limit - Kiln.now)
+  limit = Kiln::Runtime.now + seconds
+  while Kiln::Runtime.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln::Runtime.now)
     next unless ready
 
     chunk = begin
