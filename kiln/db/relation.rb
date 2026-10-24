@@ -291,10 +291,11 @@ module Kiln
         end
 
         def pluck(*cols)
-          rows = project(cols).run(:rows)
-          return rows unless cols.length == 1
+          rel = project(cols)
+          return rel.run(:rows) unless cols.length == 1
 
-          rows.map { |row| row[0] }
+          compiled = rel.compile(:rows)
+          Scope.lease { |conn| conn.pluck_column(compiled[0], compiled[1]) }
         end
 
         def pick(col)

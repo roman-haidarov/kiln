@@ -47,12 +47,17 @@ if independent processes or rolling upgrades are required.
 
 `backend: :base` selects the thread-per-connection engine. The event backend
 runs handlers inline by default. `handlers: N` runs handlers on N worker
-threads; `handlers: 0` keeps them on the event loop. With `handlers: N`, a
-handler that passes its `request_timeout` gets a 504 response, and its worker
-is replaced so other requests can continue. Inline handlers share the event
-loop: blocking calls delay all connections and cannot be forcibly timed out
-without interrupting the loop itself. Work already done by a handler cannot
-be rolled back.
+threads; `handlers: 0` keeps them on the event loop. A free handler takes the
+next request of any connection, and requests of one connection run in order.
+With `handlers: N`, a handler that passes its `request_timeout` gets a 504
+response, and its worker is replaced so other requests can continue. Inline
+handlers share the event loop: blocking calls delay all connections and cannot
+be forcibly timed out without interrupting the loop itself. Work already done
+by a handler cannot be rolled back.
+
+With `handlers >= SPINEL_WORKERS - 1`, the event pump shares a worker with a
+handler because worker 0 runs the main thread. Set `handlers` to at most
+`SPINEL_WORKERS - 2` to keep the pump on its own worker.
 
 ## Listeners
 
@@ -118,6 +123,12 @@ needs the event backend.
 | `request_timeout` | 2.0 | the handler deadline (`ctx.deadline`) |
 | `write_timeout` | 10.0 | a response write that makes no progress |
 | `client_disconnect_timeout` | 1.0 (base: 0.5) | after a response that closes the connection, how long kiln keeps reading and discarding before it closes, so the client sees the response and not a reset |
+
+A connection takes up to 16 pipelined requests ahead of its responses. When
+256 KiB of its responses are still unsent, the event server stops reading,
+parsing, and starting handlers for that connection until less than 64 KiB is
+left. A request the server rejects (400 or 501) is answered after the
+responses to the requests before it, and the connection then closes.
 
 ## Routes
 

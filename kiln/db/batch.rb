@@ -68,7 +68,7 @@ module Kiln
 
           @state = 'PENDING_COMMIT' if conn.depth > 1
           alias_rows = @model.dialect != :postgres && !conn.mariadb?
-          prove_mysql(conn) if @model.dialect != :postgres
+          prove_writes(conn)
           i = 0
           while i < masks.length
             write_part(conn, masks[i], alias_rows)
@@ -77,17 +77,45 @@ module Kiln
           nil
         end
 
+        def prove_writes(conn)
+          prove_mysql(conn) if @model.dialect != :postgres
+          Schema.prove_stable_keys(conn, @model.table_name, @update) if @returning
+        end
+
         def prove_mysql(conn)
           Import.prove_session(conn)
           Schema.prove_update_key(conn, @model) if @update
         end
 
         def write_part(conn, part, alias_rows)
+          shape = copy_shape_for(conn, part[2])
+          return write_copy(conn, part, shape.positive? ? Import.copy_stamp(conn) : nil) unless shape.negative?
+
           step = Import.page_rows(part[1].length)
           offset = 0
           while offset < part[2].length
             write_page(conn, part, offset, step, alias_rows)
             offset += step
+          end
+        end
+
+        def copy_shape_for(conn, rows)
+          shape = Import.copy_shape(@model.dialect, @mode, rows)
+          return shape if shape.negative?
+
+          @copy_table = Schema.copy_table?(conn, @model.table_name) ? 1 : -1 if @copy_table.zero?
+          @copy_table.positive? ? shape : -1
+        end
+
+        def write_copy(conn, part, stamp)
+          rows = part[2]
+          offset = 0
+          sql = Import.copy_sql(@model, part[1])
+          while offset < rows.length
+            payload, count = Import.copy_chunk(rows, offset, Import::COPY_LIMIT, stamp)
+            conn.copy_in(sql, payload, count)
+            mark_inserted(ImportPage.new(part[3], offset, offset + count))
+            offset += count
           end
         end
 
@@ -97,6 +125,7 @@ module Kiln
           raise Error, 'warnings' if @model.dialect != :postgres && conn.warning_count.positive?
 
           page = ImportPage.new(part[3], offset, [offset + step, part[2].length].min)
+          check_affected(conn, page)
           @returning ? record_returned(conn, got, page) : mark_inserted(page)
         end
 
@@ -113,7 +142,7 @@ module Kiln
           got = read_back(conn, page) if @model.dialect != :postgres
           page.base = @found_rows.length
           store_found(got)
-          match_page(page, got)
+          match_page(conn, page, got)
         end
 
         def store_found(got)
@@ -147,15 +176,85 @@ module Kiln
         end
       end
 
+      module Canonical
+        private
+
+        def check_affected(conn, page)
+          return unless @model.dialect == :postgres && !@ignore && !@update && !@returning
+
+          raise InvariantViolation, 'import affected rows' if conn.affected_rows != page.upto - page.from
+        end
+
+        def input_keys(page)
+          keys = []
+          j = page.from
+          while j < page.upto
+            keys << Import.input_key(@model, @rows[page.originals[j]])
+            j += 1
+          end
+          keys
+        end
+
+        def resolved_keys(conn, page, keys, got)
+          return {} if got.empty?
+
+          returned = {}
+          got.each { |row| returned[Import.output_key(@model, row)] = true }
+          firsts = unmatched_inputs(page, keys, returned)
+          firsts.empty? ? {} : lookup_keys(conn, firsts)
+        end
+
+        def unmatched_inputs(page, keys, returned)
+          firsts = {}
+          i = 0
+          while i < keys.length
+            key = keys[i]
+            firsts[key] = page.originals[page.from + i] unless returned.key?(key) || firsts.key?(key)
+            i += 1
+          end
+          firsts
+        end
+
+        def lookup_keys(conn, firsts)
+          texts = firsts.keys
+          binds = []
+          parts = []
+          texts.each_with_index { |text, at| parts << lookup_part(at, Import.row_hash(@rows[firsts[text]]), binds) }
+          resolved = {}
+          conn.exec(parts.join(' UNION ALL '), binds).each { |found| resolve_found(resolved, texts, found) }
+          resolved
+        end
+
+        def resolve_found(resolved, texts, found)
+          text = texts[found[0].to_s.to_i]
+          raise UnsupportedReturn, 'returning: non-unique key' if resolved.key?(text)
+
+          resolved[text] = found.drop(1).map { |value| Import.sized_text(value.to_s) }.join
+        end
+
+        def lookup_part(at, row, binds)
+          dialect = @model.dialect
+          keys = @model.primary_key
+          terms = keys.map do |key|
+            binds << Import.field(row, key)[1]
+            "#{Sql.quote(dialect, key)} = #{Sql.placeholder(dialect, binds)}"
+          end
+          names = keys.map { |key| Sql.quote(dialect, key) }.join(', ')
+          "(SELECT #{at} AS kiln_at, #{names} FROM #{Sql.quote(dialect, @model.table_name)} " \
+            "WHERE #{terms.join(' AND ')} LIMIT 2)"
+        end
+      end
+
       module Matching
         private
 
-        def match_page(page, got)
-          chain = key_chain(page)
+        def match_page(conn, page, got)
+          chain = key_chain(conn, page, got)
           orphans = claim_rows(page, chain, got)
           left = unpicked(page)
-          paired = paired?(orphans, left)
-          raise InvariantViolation, 'returning' if @model.dialect == :postgres && !@ignore && !paired
+          paired = orphans.length == 1 && left.length == 1
+          uneven = orphans.length != left.length
+          raise InvariantViolation, 'returning' if uneven && @model.dialect == :postgres && !@ignore
 
           settle_left(page, left, orphans, paired, chain)
           mark_orphans(page, orphans) unless paired
@@ -163,11 +262,14 @@ module Kiln
           nil
         end
 
-        def key_chain(page)
+        def key_chain(conn, page, got)
           chain = KeyChain.new(page.from, page.upto - page.from, @update)
+          keys = input_keys(page)
+          resolved = resolved_keys(conn, page, keys, got)
           j = page.from
           while j < page.upto
-            chain.link(Import.input_key(@model, @rows[page.originals[j]]), j)
+            key = keys[j - page.from]
+            chain.link(resolved.key?(key) ? resolved[key] : key, j)
             j += 1
           end
           chain
@@ -193,10 +295,6 @@ module Kiln
             j += 1
           end
           left
-        end
-
-        def paired?(orphans, left)
-          orphans.length == left.length && (orphans.length == 1 || (@model.dialect == :postgres && !@ignore))
         end
 
         def settle_left(page, left, orphans, paired, chain)
@@ -241,6 +339,7 @@ module Kiln
       end
 
       include Writing
+      include Canonical
       include Matching
 
       def initialize(model, rows, mode)
@@ -265,6 +364,7 @@ module Kiln
         @status = Array.new(count, 'validation_invalid')
         @found_rows = []
         @orphaned = []
+        @copy_table = 0
         @state = 'COMMITTED'
       end
 
@@ -329,6 +429,7 @@ module Kiln
     module Import
       MAX_PAGE_ROWS = 1000
       MAX_PAGE_PARAMS = 32_767
+      COPY_LIMIT = 16 * 1024 * 1024
       OPTION_KEYS = %i[on_duplicate_key_ignore on_duplicate_key_update returning require_exact_status validate
                        validate_uniqueness all_or_none timestamps raise_error].freeze
 
@@ -579,6 +680,12 @@ module Kiln
 
         def returning_list(dialect, model) = quoted_names(dialect, model.columns)
 
+        def copy_sql(model, names)
+          dialect = model.dialect
+          table = Sql.quote(dialect, model.table_name)
+          "COPY #{table} (#{quoted_names(dialect, names)}) FROM STDIN"
+        end
+
         private
 
         def quoted_names(dialect, names) = names.map { |name| Sql.quote(dialect, name) }.join(', ')
@@ -630,10 +737,130 @@ module Kiln
         end
       end
 
+      module Copy
+        COPY_NULL = '\\N'.b.freeze
+        COPY_TAB = "\t".b.freeze
+        COPY_EOL = "\n".b.freeze
+        COPY_STAMP_SQL = 'SELECT CAST(CURRENT_TIMESTAMP AS text)'.freeze
+        COPY_ESCAPES = Array.new(256).tap do |codes|
+          codes[9] = 116
+          codes[10] = 110
+          codes[13] = 114
+          codes[92] = 92
+        end.freeze
+
+        def copy_eligible?(dialect, mode, encoded_rows) = !copy_shape(dialect, mode, encoded_rows).negative?
+
+        def copy_shape(dialect, mode, encoded_rows)
+          return -1 unless dialect == :postgres
+          return -1 if mode.skip_conflicts || mode.update_conflicts || mode.return_rows
+
+          copy_rows_shape(encoded_rows)
+        end
+
+        def copy_rows_shape(encoded_rows)
+          shape = 0
+          r = 0
+          while r < encoded_rows.length
+            row = copy_row_shape(encoded_rows[r])
+            return -1 if row.negative?
+
+            shape = row if row.positive?
+            r += 1
+          end
+          shape
+        end
+
+        def copy_stamp(conn) = conn.exec(COPY_STAMP_SQL, [])[0][0].to_s.b
+
+        def copy_text(encoded_rows, stamp = nil)
+          copy_chunk(encoded_rows, 0, encoded_rows.length * COPY_LIMIT, stamp)[0]
+        end
+
+        def copy_chunk(encoded_rows, offset, limit, stamp = nil)
+          chunk = (+'').b
+          i = offset
+          while i < encoded_rows.length
+            row = copy_row(encoded_rows[i], stamp)
+            break if i > offset && chunk.bytesize + row.bytesize > limit
+
+            chunk << row
+            i += 1
+          end
+          [chunk, i - offset]
+        end
+
+        private
+
+        def copy_row_shape(row)
+          shape = 0
+          c = 0
+          while c < row.length
+            value = row[c]
+            return -1 if Codec.binary_text?(value)
+            raise ArgumentError, 'bind String: NUL byte in text' if value.is_a?(String) && value.include?(Codec::NUL)
+
+            shape = 1 if value == :timestamp
+            c += 1
+          end
+          shape
+        end
+
+        def copy_row(values, stamp)
+          out = (+'').b
+          c = 0
+          while c < values.length
+            out << COPY_TAB if c.positive?
+            out << copy_cell(values[c], stamp)
+            c += 1
+          end
+          out << COPY_EOL
+        end
+
+        def copy_cell(value, stamp)
+          return COPY_NULL if value.nil?
+          return value.to_s if value.is_a?(Integer)
+          return copy_escaped(value) if value.is_a?(String)
+          return copy_stamp_text(stamp) if value == :timestamp
+
+          copy_escaped(Codec.encode(:postgres, value)[0])
+        end
+
+        def copy_stamp_text(stamp)
+          raise InvariantViolation, 'copy timestamp' if stamp.nil?
+
+          stamp
+        end
+
+        def copy_escaped(text)
+          raw = text.b
+          return raw unless copy_special?(raw)
+
+          escape_copy(raw)
+        end
+
+        def copy_special?(raw)
+          raw.include?('\\') || raw.include?("\t") || raw.include?("\n") || raw.include?("\r")
+        end
+
+        def escape_copy(raw)
+          out = (+'').b
+          i = 0
+          while i < raw.bytesize
+            byte = raw.getbyte(i)
+            escaped = COPY_ESCAPES[byte]
+            escaped ? out << 92 << escaped : out << byte
+            i += 1
+          end
+          out
+        end
+      end
+
       extend Checks
       extend Rows
       extend Keys
       extend Statements
+      extend Copy
     end
   end
 end

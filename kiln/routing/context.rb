@@ -120,7 +120,7 @@ module Kiln
       include Tasks
 
       attr_reader :req, :res, :app, :id, :deadline
-      attr_accessor :gone
+      attr_accessor :gone, :prepared
 
       def initialize(req, res, app, id, deadline)
         @req = req
@@ -129,6 +129,7 @@ module Kiln
         @id = id
         @deadline = deadline
         @gone = false
+        @prepared = false
       end
 
       def remaining = @deadline - Kiln::Runtime.now

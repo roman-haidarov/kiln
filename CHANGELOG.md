@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.0.10
+
+### Changed
+
+- Server settings are one `Settings` object over a defaults table and a rules table; each reader returns its own type (`Integer`, `Float`, `String`, `Tls`, `Log`). The handler and the application are passed to the engine as arguments and are never stored in settings.
+- Gzip compresses response bodies larger than 256 KB in 64 KB pieces, so a large response no longer holds up garbage collection in other threads for the whole compression.
+- An idle keep-alive connection returns its read and write buffers to a small shared pool and holds about 1 KB instead of about 9 KB.
+- With `handlers: N`, a free handler takes the next request of any connection. Requests of one connection still run in order, and a slow handler delays only its own connection.
+- Integer, boolean, and `DOUBLE`/`float8` columns reach Ruby without a text round trip. PostgreSQL asks for binary results for cached statements whose columns all have such types or `text`, `varchar`, or `bytea`. `pluck` of one column builds no row arrays.
+- A PostgreSQL `import` without `returning` or conflict options uses `COPY` on tables where `COPY` writes the same as `INSERT`.
+- Driver calls on different connections no longer wait for one registry lock.
+- Status by item: P10-00, P10-01, P10-02, P10-03, P10-04 PASS; P10-05 DEVIATION (PostgreSQL and MySQL pass; MariaDB is 10% faster than the baseline, outside the literal ±5% band); P10-06, P10-07, P10-09 BLOCKED (need a Linux host with at least 6 cores); P10-08 BLOCKED by contract requirement 3, with a per-slot lock shipped outside the contract instead of the lock-free protocol; P10-10 PASS. See VALIDATION.md.
+
+### Fixed
+
+- On Spinel `2e5295be4` the server lost its handler and logger types when they went through `Data` options built from merged hashes: every request answered `NoMethodError: undefined method 'call' for Kiln::Routing::Router`. `log:` must now be a `Kiln::Observability::Log` or nil.
+- Request registration during base-server shutdown returns an integer sentinel instead of a nil/integer union; static routing uses a local parameter key accepted by the updated compiler.
+- The backpressure regression drains its socket without blocking Spinel's only worker and fails on a bounded deadline.
+- Linux and macOS toolchain builds install Ruby and Prism for the updated Spinel build-time generators.
+- A PostgreSQL `import` uses `COPY` only for a plain or partitioned table without rules, row-level security, or statement-level `INSERT` triggers. Before, `COPY` skipped `ON INSERT` rules and failed on tables with row-level security, so adding `returning: true` changed what a write did.
+- A binary String with a NUL byte and no byte above 0x7F is sent to PostgreSQL as binary data; it was cut at the NUL. Any other String with a NUL byte raises `ArgumentError` on PostgreSQL instead of being cut.
+- The event server stops reading, parsing, and starting handlers for a connection while 256 KiB of its responses are unsent, and resumes below 64 KiB. A client that pipelined requests without reading could make the server queue every response.
+- The PostgreSQL driver reads from the server while it waits to send (`COPY`, queries, pipeline flushes), as libpq requires. A `COPY` into a table whose trigger sends notices could wait on the server until the timeout.
+- A request the event server rejects with 400 or 501 is answered after the responses to the requests before it on the same connection, and the requests after it are not run. Before, the error went out first, closed the connection, and the earlier response was lost.
+- `DISCARD PLANS`, `DISCARD SEQUENCES`, and `DISCARD TEMP` keep the PostgreSQL statement cache, `DEALLOCATE <name>` forgets one statement, and a missing statement (`26000`) forgets only itself. Before, any `DISCARD` or `DEALLOCATE` emptied the cache while the server kept the statements, so they piled up on the server.
+- `import(returning: true)` raises `UnsupportedReturn` before writing when a `BEFORE` row trigger (or a PostgreSQL rule) could change the key used to match returned rows, and no longer pairs several unmatched rows with inputs by position.
+- `tls: :disable` on MySQL and MariaDB turns off Connector/C 3.4's default TLS and certificate check, so it connects to a local server without TLS.
+- A binary String with a backslash is sent to PostgreSQL as binary data; as text, `bytea` input read the backslash as an escape (`"\\x41".b` was stored as `A`). Binary strings with only ASCII bytes and no backslash or NUL stay text, so they still bind to numbers, dates, and `jsonb`.
+- A PostgreSQL `import` uses `INSERT` instead of `COPY` for tables with a `GENERATED ALWAYS` identity column (on the table or its partition root), where `COPY` writes given values that `INSERT` refuses.
+- A plain PostgreSQL `import` compares the affected row count of every `INSERT` page with the rows sent, as `COPY` already did, and rolls back with `InvariantViolation` when a `BEFORE` trigger skipped rows.
+- An `import` takes `ROW EXCLUSIVE` on the table before it inspects rules, policies, and triggers, so they cannot change before the write. In `REPEATABLE READ` and `SERIALIZABLE` PostgreSQL transactions `import` uses `INSERT` and `returning: true` raises `UnsupportedReturn`, because their catalog snapshot can miss a concurrent change.
+- On MySQL and MariaDB, `returning: true` requires a directly granted `TRIGGER` privilege, because `information_schema.triggers` hides triggers from other users, and requires a base table. Trigger and unique-index checks use the current database (`DATABASE()`) after `USE`.
+- Returned rows whose key text differs from the input (padding, collation, numeric formatting) are matched with one primary-key lookup per page inside the import transaction.
+- `DEALLOCATE` with comments, a quoted name right after the keyword, or form feeds is recognised by the PostgreSQL statement cache.
+- The event server closes a connection on a read error other than end of input, and drops the queued requests of a connection that has gone instead of running their handlers.
+
 ## 0.0.9
 
 ### Changed

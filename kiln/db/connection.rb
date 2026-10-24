@@ -207,34 +207,42 @@ module Kiln
           run_sql(text, binds)
         end
 
-        def run_sql(sql, binds)
+        def pluck_column(sql, binds)
+          assert_owner!
+          raise ArgumentError, 'sql' unless sql.is_a?(String)
+          raise PoisonedTransaction, 'transaction was rolled back by the server' if @poisoned && @depth.positive?
+
+          run_sql(sql.to_s, binds, column: true)
+        end
+
+        def run_sql(sql, binds, column: false)
           cursor_free!
           claim!
           begin
             binds = [] if binds.nil?
             usable!
-            return run_pg(sql, binds) if @kind == Native::KIND_PG
+            return run_pg(sql, binds, column: column) if @kind == Native::KIND_PG
 
-            run_my(sql, binds)
+            run_my(sql, binds, column: column)
           ensure
             release_claim!
           end
         end
 
-        def run_pg(sql, binds)
+        def run_pg(sql, binds, column: false)
           load_sql(sql)
           bind_all(binds)
           drive(Native::OP_EXEC, 'exec')
-          take_rows('exec')
+          column ? take_column('exec') : take_rows('exec')
         end
 
-        def run_my(sql, binds)
+        def run_my(sql, binds, column: false)
           load_sql(sql)
-          return run_unprepared(sql) unless prepared?(binds)
+          return run_unprepared(sql, column: column) unless prepared?(binds)
 
           bind_all(binds)
           drive(Native::OP_EXEC, 'exec')
-          take_rows('exec')
+          column ? take_column('exec') : take_rows('exec')
         end
 
         def prepared?(binds)
@@ -246,10 +254,10 @@ module Kiln
           false
         end
 
-        def run_unprepared(sql)
+        def run_unprepared(sql, column: false)
           load_sql(sql)
           drive(Native::OP_EXEC, 'exec')
-          take_rows('exec')
+          column ? take_column('exec') : take_rows('exec')
         end
 
         def load_sql(sql, chunk = 0)
@@ -271,7 +279,9 @@ module Kiln
           raise CapacityError.new("bind #{index}", code: rc) if rc == Native::CAPACITY
           raise ConnectionError.new("bind #{index}", code: rc) if rc != Native::OK
         end
+      end
 
+      module Fetching
         def take_rows(label)
           rows = []
           loop do
@@ -284,12 +294,19 @@ module Kiln
           rows
         end
 
+        def row_batch(lens)
+          size = lens.length
+          @row_batch = RowBatch.new(lens, size) if @row_batch.nil? || @row_batch.nums.length < size
+          @row_batch
+        end
+
         def fetch_rows(first, lens, meta)
-          raw = Native.kiln_db_result_rows(@handle, 1, 1, first, BATCH_ROWS, BATCH_BYTES, lens, lens.length, meta,
-                                           meta.length)
+          batch = row_batch(lens)
+          raw = Native.kiln_db_result_rows_typed(@handle, 1, 1, first, BATCH_ROWS, BATCH_BYTES, lens, lens.length,
+                                                 batch.nums, batch.floats, meta, meta.length)
           raise ConnectionError, 'database rows unavailable or invalid' unless meta[0].positive?
 
-          raw
+          batch.load(raw, lens)
         end
 
         def append_rows(rows, width, count)
@@ -300,10 +317,64 @@ module Kiln
           meta = [0, 0, 0]
           r = 0
           while r < count
-            raw = fetch_rows(r, lens, meta)
-            Codec.rows_into(rows, raw, lens, types, meta[0])
+            Codec.rows_into(rows, fetch_rows(r, lens, meta), types, meta[0])
             r += meta[0]
           end
+        end
+
+        def take_column(label)
+          values = []
+          loop do
+            meta = Native.result_meta(@handle, 1, 1)
+            append_column(values, meta[0], meta[1])
+            break if meta[2] == 1
+
+            drive(Native::OP_DRAIN, label)
+          end
+          values
+        end
+
+        def append_column(values, width, count)
+          return unless count.positive? && width.positive?
+
+          types = Native.result_types(@handle, 1, 1, width)
+          lens = Array.new(BATCH_ROWS * (width + 1), 0)
+          meta = [0, 0, 0]
+          r = 0
+          while r < count
+            Codec.column_into(values, fetch_rows(r, lens, meta), types, meta[0])
+            r += meta[0]
+          end
+        end
+      end
+
+      module Copying
+        def copy_in(sql, payload, rows)
+          assert_owner!
+          raise ArgumentError, 'sql' unless sql.is_a?(String)
+          raise PoisonedTransaction, 'transaction was rolled back by the server' if @poisoned && @depth.positive?
+
+          cursor_free!
+          claim!
+          begin
+            copy_payload(sql, payload, rows)
+          ensure
+            release_claim!
+          end
+        end
+
+        def copy_payload(sql, payload, rows)
+          usable!
+          raise ConnectionError, 'sql' if Native.set_sql(@handle, 1, 1, sql) != Native::OK
+
+          rc = Native.set_copy(@handle, 1, 1, payload)
+          raise CapacityError.new('copy', code: rc) if rc == Native::CAPACITY
+          raise ConnectionError.new('copy', code: rc) if rc != Native::OK
+
+          out = drive(Native::OP_COPY_IN, 'copy')
+          raise InvariantViolation, 'copy' unless out[7] == rows
+
+          nil
         end
       end
 
@@ -401,6 +472,10 @@ module Kiln
 
         def warning_count
           Native.result_meta(@handle, 1, 1)[4]
+        end
+
+        def affected_rows
+          Native.result_meta(@handle, 1, 1)[3]
         end
 
         def pipeline_begin
@@ -622,7 +697,7 @@ module Kiln
         def next_streamed
           load_stream_batch if @cursor_left.zero?
           at = @cursor_at * (@cursor_width + 1)
-          values = Codec.row_values(@cursor_raw, @cursor_lens, at, @cursor_off, @cursor_types)
+          values = Codec.row_values(@cursor_batch, at, @cursor_off, @cursor_types)
           @cursor_off += @cursor_lens[at + @cursor_width]
           @cursor_at += 1
           @cursor_row += 1
@@ -632,7 +707,7 @@ module Kiln
 
         def load_stream_batch
           meta = [0, 0, 0]
-          @cursor_raw = fetch_rows(@cursor_row, @cursor_lens, meta)
+          @cursor_batch = fetch_rows(@cursor_row, @cursor_lens, meta)
           @cursor_off = @cursor_at = 0
           @cursor_left = meta[0]
         end
@@ -729,6 +804,8 @@ module Kiln
       extend Opening
       include Ownership
       include Running
+      include Fetching
+      include Copying
       include Transactions
       include Pipeline
       include Driving
@@ -821,7 +898,7 @@ module Kiln
         @cursor_types = Array.new(1, 0)
         @cursor_lens = Array.new(1, 0)
         @cursor_left = 0
-        @cursor_raw = ''.b
+        @cursor_batch = RowBatch.new(@cursor_lens, 1)
         @cursor_off = @cursor_at = 0
       end
     end

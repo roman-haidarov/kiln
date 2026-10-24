@@ -30,6 +30,8 @@ long kiln_sock_nosigpipe(long fd);
 #define KUV_BODY_HIGH     ((size_t)256 * 1024)
 #define KUV_BODY_LOW      ((size_t)64 * 1024)
 #define KUV_DRAIN_MAX     (256L * 1024)
+#define KUV_OUT_HIGH      ((size_t)256 * 1024)
+#define KUV_OUT_LOW       ((size_t)64 * 1024)
 #define KUV_TLS_SCRATCH   ((size_t)64 * 1024)
 #define KUV_TLS_READ      16384
 #define KUV_CONFIG_SIZE   10
@@ -141,6 +143,8 @@ typedef struct kuv_conn {
     int tunnel;
     int lingering;
     int resume_parse;
+    int out_paused;
+    int refused;
     size_t head_scanned;
 } kuv_conn;
 
@@ -229,6 +233,10 @@ static uv_stream_t *kuv_stream(kuv_conn *c) {
     return (uv_stream_t *)&c->h;
 }
 
+static size_t kuv_out_bytes(const kuv_conn *c) {
+    return c->out_len + c->sending + c->tls_pending_len - c->tls_pending_off;
+}
+
 static int kuv_wants_read(const kuv_conn *c) {
     if (c->closing || c->read_eof) {
         return 0;
@@ -242,7 +250,7 @@ static int kuv_wants_read(const kuv_conn *c) {
     if (c->body_active) {
         return !c->body_done && !c->body_paused && !c->body_error;
     }
-    return !c->stop_parse && !c->hold && !c->read_paused;
+    return !c->stop_parse && !c->hold && !c->read_paused && !c->out_paused;
 }
 
 static void kuv_sync_read(kuv_conn *c) {
@@ -391,6 +399,43 @@ static void kuv_queue_flush(kuv_conn *c) {
     kuv_flush_list[kuv_flush_count++] = c;
 }
 
+#define KUV_SPARE_MAX 64
+#define KUV_IN_FIRST  32768
+#define KUV_OUT_FIRST 4096
+
+static char *kuv_spare_in[KUV_SPARE_MAX];
+static int kuv_spare_in_count;
+static char *kuv_spare_out[KUV_SPARE_MAX];
+static int kuv_spare_out_count;
+
+static void kuv_spare_put(char *buf, size_t cap) {
+    if (!buf) {
+        return;
+    }
+    if (cap == KUV_IN_FIRST && kuv_spare_in_count < KUV_SPARE_MAX) {
+        kuv_spare_in[kuv_spare_in_count++] = buf;
+        return;
+    }
+    if (cap == KUV_OUT_FIRST && kuv_spare_out_count < KUV_SPARE_MAX) {
+        kuv_spare_out[kuv_spare_out_count++] = buf;
+        return;
+    }
+    free(buf);
+}
+
+static void kuv_release_idle(kuv_conn *c) {
+    if (c->closing || c->tls || c->tunnel || c->body_active || c->hold || c->in_len != 0 ||
+        c->out_len != 0 || c->writes != 0) {
+        return;
+    }
+    kuv_spare_put(c->in, c->in_cap);
+    c->in = NULL;
+    c->in_cap = 0;
+    kuv_spare_put(c->out, c->out_cap);
+    c->out = NULL;
+    c->out_cap = 0;
+}
+
 static int kuv_reserve(char **buf, size_t len, size_t *cap, size_t n) {
     if (n > UINT_MAX || len > UINT_MAX - n) {
         return -1;
@@ -399,7 +444,12 @@ static int kuv_reserve(char **buf, size_t len, size_t *cap, size_t n) {
     if (required <= *cap) {
         return 0;
     }
-    size_t want = *cap ? *cap : 4096;
+    if (*cap == 0 && required <= KUV_OUT_FIRST && kuv_spare_out_count > 0) {
+        *buf = kuv_spare_out[--kuv_spare_out_count];
+        *cap = KUV_OUT_FIRST;
+        return 0;
+    }
+    size_t want = *cap ? *cap : KUV_OUT_FIRST;
     while (want < required) {
         if (want > UINT_MAX / 2U) {
             want = required;
@@ -700,6 +750,10 @@ static void kuv_parse(kuv_conn *c) {
             c->read_paused = 1;
             break;
         }
+        if (kuv_out_bytes(c) >= KUV_OUT_HIGH) {
+            c->out_paused = 1;
+            break;
+        }
         const char *start = c->in + pos;
         size_t avail = c->in_len - pos;
         int64_t scan[KILN_UV_SCAN_CAP];
@@ -763,6 +817,19 @@ static void kuv_parse(kuv_conn *c) {
     kuv_sync_read(c);
 }
 
+static void kuv_out_resume(kuv_conn *c) {
+    if (!c->out_paused || c->closing || kuv_out_bytes(c) >= KUV_OUT_LOW) {
+        return;
+    }
+    c->out_paused = 0;
+    if (!c->stop_parse && !c->hold && !c->body_active && !kuv_draining) {
+        kuv_track_head(c);
+        kuv_parse(c);
+    } else {
+        kuv_sync_read(c);
+    }
+}
+
 static void kuv_ingest(kuv_conn *c) {
     if (c->body_active) {
         kuv_body_pump(c);
@@ -785,8 +852,12 @@ static void kuv_alloc(uv_handle_t *handle, size_t suggested, uv_buf_t *buf) {
         buf->len = sizeof(kuv_tls_scratch);
         return;
     }
+    if (c->in_cap == 0 && kuv_spare_in_count > 0) {
+        c->in = kuv_spare_in[--kuv_spare_in_count];
+        c->in_cap = KUV_IN_FIRST;
+    }
     if (c->in_cap - c->in_len < 16384) {
-        size_t want = c->in_cap ? c->in_cap * 2 : 32768;
+        size_t want = c->in_cap ? c->in_cap * 2 : KUV_IN_FIRST;
         char *grown = realloc(c->in, want);
         if (!grown) {
             buf->base = NULL;
@@ -904,7 +975,11 @@ static void kuv_on_read_end(kuv_conn *c) {
 static void kuv_on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf) {
     kuv_conn *c = (kuv_conn *)stream->data;
     if (nread < 0) {
-        kuv_on_read_end(c);
+        if (nread == UV_EOF) {
+            kuv_on_read_end(c);
+        } else {
+            kuv_close(c);
+        }
         return;
     }
     if (nread == 0) {
@@ -1213,25 +1288,56 @@ long kiln_uv_timeout(void) {
     return kuv_loop ? uv_backend_timeout(kuv_loop) : -1;
 }
 
+static int kuv_out_blocked(const kuv_conn *c) {
+    return c->out_paused || kuv_out_bytes(c) >= KUV_OUT_HIGH;
+}
+
+static kuv_req *kuv_take_ready(void) {
+    kuv_req *prev = NULL;
+    kuv_req *r = kuv_head;
+    while (r) {
+        kuv_conn *c = kuv_slots[r->slot];
+        int live = c && c->gen == r->gen && !c->closing;
+        if (!live || !kuv_out_blocked(c)) {
+            if (prev) {
+                prev->next = r->next;
+            } else {
+                kuv_head = r->next;
+            }
+            if (kuv_tail == r) {
+                kuv_tail = prev;
+            }
+            r->next = NULL;
+            kuv_ready--;
+            return r;
+        }
+        uint32_t slot = r->slot;
+        uint32_t gen = r->gen;
+        while (r && r->slot == slot && r->gen == gen) {
+            prev = r;
+            r = r->next;
+        }
+    }
+    return NULL;
+}
+
 const char *kiln_uv_next(int64_t *scan, long cap, int64_t *meta) {
     if (kuv_current) {
         free(kuv_current);
         kuv_current = NULL;
     }
     while (kuv_head && cap >= KILN_UV_SCAN_CAP) {
-        kuv_req *r = kuv_head;
-        kuv_head = r->next;
-        if (!kuv_head) {
-            kuv_tail = NULL;
+        kuv_req *r = kuv_take_ready();
+        if (!r) {
+            break;
         }
-        kuv_ready--;
         kuv_conn *c = kuv_slots[r->slot];
         int live = c && c->gen == r->gen;
         if (live) {
             c->pending--;
         }
-        if (!live || c->closing || c->close_after_flush) {
-            if (kuv_draining) {
+        if (!live || c->closing || c->close_after_flush || c->refused) {
+            if (kuv_draining && !(live && c->refused)) {
                 kuv_aborted++;
             }
             free(r);
@@ -1286,10 +1392,12 @@ static void kuv_after_write(uv_write_t *req, int status) {
             }
         }
     }
+    kuv_out_resume(c);
     if (!c->closing && c->close_after_flush && c->writes == 0 && c->out_len == 0 &&
         !c->tls_pending) {
         kuv_end(c);
     }
+    kuv_release_idle(c);
 }
 
 static int kuv_queue_write(kuv_conn *c, char *owned, char *from, size_t len) {
@@ -1519,7 +1627,18 @@ long kiln_uv_part(long slot, long gen, const char *data, long len) {
 
 long kiln_uv_backlog(long slot, long gen) {
     const kuv_conn *c = kuv_live(slot, gen);
-    return c ? (long)(c->out_len + c->sending + c->tls_pending_len - c->tls_pending_off) : -1;
+    return c ? (long)kuv_out_bytes(c) : -1;
+}
+
+long kiln_uv_refuse(long slot, long gen) {
+    kuv_conn *c = kuv_live(slot, gen);
+    if (!c) {
+        return -1;
+    }
+    c->refused = 1;
+    c->stop_parse = 1;
+    kuv_sync_read(c);
+    return 0;
 }
 
 long kiln_uv_abort(long slot, long gen) {
@@ -1785,6 +1904,9 @@ static void kuv_flush_plain(kuv_conn *c) {
         }
     }
     c->out_len = 0;
+    if (rest == 0) {
+        kuv_release_idle(c);
+    }
 }
 
 long kiln_uv_flush(void) {
@@ -1804,6 +1926,7 @@ long kiln_uv_flush(void) {
             if (c->closing) {
                 continue;
             }
+            kuv_out_resume(c);
         }
         if (c->close_after_flush && c->writes == 0 && !c->tls_pending) {
             kuv_end(c);

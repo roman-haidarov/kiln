@@ -217,7 +217,8 @@ module Kiln
     end
 
     def respond(ctx, opened)
-      path = start_path(ctx.req.params[@param].to_s)
+      param = @param
+      path = start_path(ctx.req.params[param].to_s)
       file = path ? track(opened, open_path(path)) : nil
       return missing(ctx) unless file
 

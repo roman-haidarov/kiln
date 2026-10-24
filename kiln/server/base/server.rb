@@ -63,22 +63,21 @@ module Kiln
       module Setup
         private
 
-        def init_endpoints(config)
-          @handler = config.handler
-          @app = config.app
+        def init_endpoints(config, handler, app)
+          @handler = handler
+          @app = app
           @log = config.log
           @port = config.port
-          @host = config.host
-          @listen = Transport::Listen.resolve(config.listen, config.host, config.port, nil)
+          @listen = config.listen
           @backlog = config.backlog
-          @reuse_port = config.reuse_port
-          @nodelay = config.tcp_nodelay ? 1 : 0
+          @reuse_port = config.reuse_port?
+          @nodelay = config.tcp_nodelay? ? 1 : 0
         end
 
         def init_timeouts(config)
           @read_timeout = config.read_timeout
-          @header_timeout = config.header_timeout || config.read_timeout
-          @keep_alive_timeout = config.keep_alive_timeout || config.read_timeout
+          @header_timeout = config.header_timeout
+          @keep_alive_timeout = config.keep_alive_timeout
           @keep_alive = @keep_alive_timeout.positive?
           @linger = config.client_disconnect_timeout
           @request_timeout = config.request_timeout
@@ -88,7 +87,7 @@ module Kiln
 
         def init_limits(config)
           @max_body = config.max_body
-          @buffer_body = config.buffer_body.nil? ? config.max_body : config.buffer_body
+          @buffer_body = config.buffer_body
           @coop_budget = config.coop_budget
           limit = config.max_conns
           @slots = SizedQueue.new(limit)
@@ -533,7 +532,7 @@ module Kiln
           req = msg[1]
           deadline = msg[2]
           id = begin_handling(slot, deadline)
-          return refuse_request(slot, box, req) unless id
+          return refuse_request(slot, box, req) if id.zero?
 
           box.mark(!buf.empty? && !buf.index(HEADER_END).nil?)
           serve(req, slot, deadline, id, box)
@@ -610,9 +609,9 @@ module Kiln
       include Reaping
       include Connections
 
-      def initialize(config, app = nil, **)
-        config = BaseOptions.new(handler: config, app: app, **) unless config.is_a?(BaseOptions)
-        init_endpoints(config)
+      def initialize(handler, app = nil, **options)
+        config = Settings.base(options)
+        init_endpoints(config, handler, app)
         init_timeouts(config)
         init_limits(config)
         init_shards(config.shards)

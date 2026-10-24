@@ -15,6 +15,9 @@
 
 #define MY_RUNTIME_FLOOR 30400
 #define MY_CELL_START    256
+#define MY_STORE_TEXT    0
+#define MY_STORE_I64     1
+#define MY_STORE_F64     2
 static void my_arm_socket(MYSQL *mysql);
 
 #define MY_IDLE     0
@@ -119,6 +122,9 @@ typedef struct {
     char *rerr;
     char **rbuf;
     int *rtype;
+    int *rstore;
+    char *runsigned;
+    int has_store;
     char *big;
     size_t big_cap;
     char *batch;
@@ -462,6 +468,8 @@ static void my_free_results(my_sess *sess) {
     free(sess->rerr);
     free(sess->rbuf);
     free(sess->rtype);
+    free(sess->rstore);
+    free(sess->runsigned);
     sess->rbinds = NULL;
     sess->rlen = NULL;
     sess->rcap = NULL;
@@ -469,6 +477,9 @@ static void my_free_results(my_sess *sess) {
     sess->rerr = NULL;
     sess->rbuf = NULL;
     sess->rtype = NULL;
+    sess->rstore = NULL;
+    sess->runsigned = NULL;
+    sess->has_store = 0;
     sess->ncols = 0;
     sess->rows = 0;
     sess->rows_cap = 0;
@@ -625,8 +636,26 @@ static int my_alloc_cols(my_sess *sess, unsigned int n) {
     sess->rerr = calloc(n, 1);
     sess->rbuf = calloc(n, sizeof *sess->rbuf);
     sess->rtype = calloc(n, sizeof *sess->rtype);
+    sess->rstore = calloc(n, sizeof *sess->rstore);
+    sess->runsigned = calloc(n, sizeof *sess->runsigned);
     return sess->rbinds && sess->rlen && sess->rcap && sess->rnull && sess->rerr && sess->rbuf &&
-           sess->rtype;
+           sess->rtype && sess->rstore && sess->runsigned;
+}
+
+static int my_field_store(const MYSQL_FIELD *f) {
+    switch (f->type) {
+    case MYSQL_TYPE_TINY:
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_LONG:
+        return MY_STORE_I64;
+    case MYSQL_TYPE_LONGLONG:
+        return (f->flags & UNSIGNED_FLAG) ? MY_STORE_TEXT : MY_STORE_I64;
+    case MYSQL_TYPE_DOUBLE:
+        return MY_STORE_F64;
+    default:
+        return MY_STORE_TEXT;
+    }
 }
 
 static int my_take_meta(my_sess *sess, kiln_db_conn *conn) {
@@ -672,6 +701,12 @@ static int my_take_meta(my_sess *sess, kiln_db_conn *conn) {
             len = MY_CELL_START;
         }
         sess->rtype[i] = my_field_type(&fields[i]);
+        sess->rstore[i] = my_field_store(&fields[i]);
+        sess->runsigned[i] = (fields[i].flags & UNSIGNED_FLAG) ? 1 : 0;
+        if (sess->rstore[i] != MY_STORE_TEXT) {
+            len = 8;
+            sess->has_store = 1;
+        }
         sess->rbuf[i] = malloc(len);
         if (!sess->rbuf[i]) {
             my.mysql_free_result(meta);
@@ -679,9 +714,21 @@ static int my_take_meta(my_sess *sess, kiln_db_conn *conn) {
             return my_fail(sess, conn, KILN_DB_CAPACITY, 0, NULL, "field buffer");
         }
         sess->rcap[i] = len;
-        kiln_db_my_bind_set(&sess->rbinds[i], sess->rbuf[i], len, &sess->rlen[i], &sess->rnull[i],
-            &sess->rerr[i],
-            sess->rtype[i] == KILN_DB_T_BINARY ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING);
+        {
+            int btype = MYSQL_TYPE_STRING;
+            if (sess->rstore[i] == MY_STORE_I64) {
+                btype = MYSQL_TYPE_LONGLONG;
+            } else if (sess->rstore[i] == MY_STORE_F64) {
+                btype = MYSQL_TYPE_DOUBLE;
+            } else if (sess->rtype[i] == KILN_DB_T_BINARY) {
+                btype = MYSQL_TYPE_BLOB;
+            }
+            kiln_db_my_bind_set(&sess->rbinds[i], sess->rbuf[i], len, &sess->rlen[i],
+                &sess->rnull[i], &sess->rerr[i], btype);
+            if (sess->rstore[i] == MY_STORE_I64) {
+                sess->rbinds[i].is_unsigned = sess->runsigned[i] ? 1 : 0;
+            }
+        }
     }
     my.mysql_free_result(meta);
     if (my.mysql_stmt_bind_result(sess->stmt, sess->rbinds) != 0) {
@@ -766,7 +813,18 @@ static int my_take_row(my_sess *sess) {
     size_t row_bytes = 0;
     int i;
     for (i = 0; i < sess->ncols; i++) {
-        size_t len = sess->rnull[i] ? 0 : sess->rlen[i];
+        size_t len;
+        if (sess->rnull[i]) {
+            continue;
+        }
+        if (sess->rstore[i] != MY_STORE_TEXT) {
+            if (sess->rerr[i]) {
+                return KILN_DB_ERR;
+            }
+            len = 8;
+        } else {
+            len = sess->rlen[i];
+        }
         if (len > max_cell || len > max_cell - row_bytes) {
             return KILN_DB_CAPACITY;
         }
@@ -787,25 +845,30 @@ static int my_take_row(my_sess *sess) {
             sess->cell_len[at] = -1;
             continue;
         }
-        len = sess->rlen[i];
-        if (len > max_cell) {
-            return KILN_DB_CAPACITY;
-        }
-        if (len > sess->rcap[i]) {
-            MYSQL_BIND whole;
-            unsigned long got = 0;
-            char is_null = 0;
-            char err = 0;
-            if (!my_room(&sess->big, &sess->big_cap, len)) {
+        if (sess->rstore[i] != MY_STORE_TEXT) {
+            len = 8;
+            src = sess->rbuf[i];
+        } else {
+            len = sess->rlen[i];
+            if (len > max_cell) {
                 return KILN_DB_CAPACITY;
             }
-            kiln_db_my_bind_set(&whole, sess->big, (unsigned long)len, &got, &is_null, &err,
-                sess->rtype[i] == KILN_DB_T_BINARY ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING);
-            if (my.mysql_stmt_fetch_column(sess->stmt, &whole, (unsigned int)i, 0) != 0 ||
-                got != len) {
-                return KILN_DB_ERR;
+            if (len > sess->rcap[i]) {
+                MYSQL_BIND whole;
+                unsigned long got = 0;
+                char is_null = 0;
+                char err = 0;
+                if (!my_room(&sess->big, &sess->big_cap, len)) {
+                    return KILN_DB_CAPACITY;
+                }
+                kiln_db_my_bind_set(&whole, sess->big, (unsigned long)len, &got, &is_null, &err,
+                    sess->rtype[i] == KILN_DB_T_BINARY ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING);
+                if (my.mysql_stmt_fetch_column(sess->stmt, &whole, (unsigned int)i, 0) != 0 ||
+                    got != len) {
+                    return KILN_DB_ERR;
+                }
+                src = sess->big;
             }
-            src = sess->big;
         }
         if (!my_batch_room(sess, sess->batch_len + len + 1, max_cell)) {
             return KILN_DB_CAPACITY;
@@ -1108,6 +1171,14 @@ static void my_arm_socket(MYSQL *mysql) {
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
+static int my_plain(my_sess *sess) {
+    sess->verify = 0;
+    if (my.mysql_options(sess->mysql, MYSQL_OPT_SSL_ENFORCE, &sess->verify) != 0) {
+        return 1;
+    }
+    return my.mysql_options(sess->mysql, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &sess->verify);
+}
+
 static int my_begin_connect(my_sess *sess, kiln_db_conn *conn) {
     const char *host;
     unsigned long flags = 0;
@@ -1151,6 +1222,8 @@ static int my_begin_connect(my_sess *sess, kiln_db_conn *conn) {
         if (my.mysql_options(sess->mysql, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &sess->verify) != 0) {
             return my_conn_fail(sess, conn);
         }
+    } else if (my_plain(sess) != 0) {
+        return my_conn_fail(sess, conn);
     }
     sess->connect_ret = NULL;
     sess->phase = MY_CONNECT;
@@ -1701,6 +1774,9 @@ static int my_step(kiln_db_conn *conn, int ready_bits, int64_t deadline_ms) {
     if (conn->op == KILN_DB_OP_ROLLBACK) {
         return my_begin_commit(sess, conn, 1);
     }
+    if (conn->op == KILN_DB_OP_COPY_IN) {
+        return my_fail(sess, conn, KILN_DB_UNSUPPORTED, 0, NULL, "copy");
+    }
     return my_fail(sess, conn, KILN_DB_UNSUPPORTED, 0, NULL, "mysql op");
 }
 
@@ -1832,10 +1908,218 @@ int kiln_db_my_result_types(kiln_db_conn *conn, int64_t *out, int n) {
     return sess->ncols > n ? KILN_DB_CAPACITY : KILN_DB_OK;
 }
 
+static int my_format_store(
+    int store, const char *raw, char *tmp, size_t tmp_n, const char **out, size_t *out_n) {
+    int n;
+    if (!raw || !tmp || tmp_n < 2) {
+        return 0;
+    }
+    if (store == MY_STORE_I64) {
+        int64_t value;
+        memcpy(&value, raw, 8);
+        n = kiln_db_format_i64(value, tmp, tmp_n);
+    } else if (store == MY_STORE_F64) {
+        double value;
+        memcpy(&value, raw, 8);
+        n = kiln_db_format_f64(value, tmp, tmp_n);
+    } else {
+        return 0;
+    }
+    if (n <= 0) {
+        return 0;
+    }
+    *out = tmp;
+    *out_n = (size_t)n;
+    return 1;
+}
+
+static const char *my_row_text(kiln_db_conn *conn, uint32_t row, int64_t *lens, int n) {
+    static __thread char empty[1];
+    my_sess *sess = conn->native;
+    char *buf = NULL;
+    size_t used = 0;
+    size_t off;
+    int i;
+    empty[0] = 0;
+    sp_ffi_bin_len = 0;
+    if (!sess || !lens || row >= sess->rows || sess->ncols <= 0 || sess->ncols > n) {
+        if (lens && n > 0) {
+            lens[0] = -2;
+        }
+        return empty;
+    }
+    off = sess->row_start[row];
+    for (i = 0; i < sess->ncols; i++) {
+        int64_t clen = sess->cell_len[((size_t)row * (size_t)sess->ncols) + (size_t)i];
+        char tmp[64];
+        const char *src;
+        size_t len;
+        int store = sess->rstore ? sess->rstore[i] : MY_STORE_TEXT;
+        if (clen < 0) {
+            lens[i] = -1;
+            continue;
+        }
+        if (store != MY_STORE_TEXT) {
+            if (!sess->batch ||
+                !my_format_store(store, sess->batch + off, tmp, sizeof tmp, &src, &len)) {
+                lens[0] = -2;
+                return empty;
+            }
+        } else {
+            len = (size_t)clen;
+            src = sess->batch ? sess->batch + off : NULL;
+            if (len && !src) {
+                lens[0] = -2;
+                return empty;
+            }
+        }
+        if (len > INT_MAX || used > (size_t)INT_MAX - len) {
+            lens[0] = -2;
+            return empty;
+        }
+        buf = kiln_db_thread_room(used + len + 1);
+        if (!buf) {
+            lens[0] = -2;
+            return empty;
+        }
+        if (len) {
+            memcpy(buf + used, src, len);
+        }
+        lens[i] = (int64_t)len;
+        used += len;
+        off += (size_t)clen;
+    }
+    if (used == 0) {
+        return empty;
+    }
+    buf = kiln_db_thread_room(used + 1);
+    if (!buf) {
+        lens[0] = -2;
+        return empty;
+    }
+    buf[used] = 0;
+    sp_ffi_bin_len = (int)used;
+    return buf;
+}
+
+static const char *my_rows_emit(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta,
+    int typed) {
+    static __thread char empty[1];
+    my_sess *sess = conn ? conn->native : NULL;
+    uint32_t taken = 0;
+    size_t used = 0;
+    empty[0] = 0;
+    if (!meta) {
+        return empty;
+    }
+    if (!sess || first >= sess->rows || sess->ncols <= 0 || !lens) {
+        meta[0] = 0;
+        return empty;
+    }
+    if (sess->ncols >= lens_cap) {
+        return empty;
+    }
+    while (first + taken < sess->rows && taken < max_rows &&
+           (int64_t)(taken + 1) * (sess->ncols + 1) <= lens_cap) {
+        uint32_t row = first + taken;
+        size_t base = (size_t)taken * (size_t)(sess->ncols + 1);
+        size_t start = used;
+        size_t off = sess->row_start[row];
+        int c;
+        int ok = 1;
+        for (c = 0; c < sess->ncols; c++) {
+            size_t slot = base + (size_t)c;
+            int64_t clen = sess->cell_len[((size_t)row * (size_t)sess->ncols) + (size_t)c];
+            char tmp[64];
+            const char *src;
+            size_t len;
+            int store = sess->rstore ? sess->rstore[c] : MY_STORE_TEXT;
+            if (clen < 0) {
+                lens[slot] = -1;
+                continue;
+            }
+            if (typed && store == MY_STORE_I64) {
+                int64_t value;
+                if (!sess->batch || clen < 8 || !nums) {
+                    ok = 0;
+                    break;
+                }
+                memcpy(&value, sess->batch + off, 8);
+                lens[slot] = -3;
+                nums[slot] = value;
+                off += (size_t)clen;
+                continue;
+            }
+            if (typed && store == MY_STORE_F64) {
+                double value;
+                if (!sess->batch || clen < 8 || !floats) {
+                    ok = 0;
+                    break;
+                }
+                memcpy(&value, sess->batch + off, 8);
+                lens[slot] = -4;
+                floats[slot] = value;
+                off += (size_t)clen;
+                continue;
+            }
+            if (store != MY_STORE_TEXT) {
+                if (!sess->batch ||
+                    !my_format_store(store, sess->batch + off, tmp, sizeof tmp, &src, &len)) {
+                    ok = 0;
+                    break;
+                }
+            } else {
+                len = (size_t)clen;
+                src = sess->batch ? sess->batch + off : NULL;
+                if (len && !src) {
+                    ok = 0;
+                    break;
+                }
+            }
+            if (len > INT_MAX || used > (size_t)INT_MAX - len) {
+                ok = 0;
+                break;
+            }
+            if (len) {
+                char *buf = kiln_db_thread_room(used + len + 1);
+                if (!buf) {
+                    ok = 0;
+                    break;
+                }
+                memcpy(buf + used, src, len);
+            }
+            lens[slot] = (int64_t)len;
+            used += len;
+            off += (size_t)clen;
+        }
+        if (!ok) {
+            return empty;
+        }
+        if (taken > 0 && used > max_bytes) {
+            used = start;
+            break;
+        }
+        lens[base + (size_t)sess->ncols] = (int64_t)(used - start);
+        taken++;
+    }
+    meta[0] = taken;
+    meta[1] = (int64_t)used;
+    meta[2] = sess->ncols;
+    sp_ffi_bin_len = (int)used;
+    if (used == 0) {
+        return empty;
+    }
+    return kiln_db_thread_room(used + 1);
+}
+
 const char *kiln_db_my_result_row(kiln_db_conn *conn, uint32_t row, int64_t *lens, int n) {
     static __thread char empty[1];
     my_sess *sess = conn->native;
     int i;
+    if (sess && sess->has_store) {
+        return my_row_text(conn, row, lens, n);
+    }
     empty[0] = 0;
     sp_ffi_bin_len = 0;
     if (!sess || !lens || row >= sess->rows || sess->ncols > n || !sess->batch) {
@@ -1880,6 +2164,30 @@ const char *kiln_db_my_result_bytes(
     if (len < 0) {
         return empty;
     }
+    if (sess->has_store && sess->rstore && sess->rstore[col] != MY_STORE_TEXT) {
+        char tmp[64];
+        const char *text;
+        size_t ntext;
+        char *room;
+        if (!my_format_store(
+                sess->rstore[col], sess->batch + off, tmp, sizeof tmp, &text, &ntext)) {
+            return empty;
+        }
+        room = kiln_db_thread_room(ntext + 1);
+        if (!room) {
+            return empty;
+        }
+        memcpy(room, text, ntext);
+        room[ntext] = 0;
+        if (meta && meta_n > 0) {
+            meta[0] = 0;
+        }
+        if (meta && meta_n > 1) {
+            meta[1] = (int64_t)ntext;
+        }
+        sp_ffi_bin_len = (int)ntext;
+        return room;
+    }
     if (meta && meta_n > 0) {
         meta[0] = 0;
     }
@@ -1898,6 +2206,9 @@ const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
     uint32_t row;
     size_t bytes;
     char *buf;
+    if (sess && sess->has_store) {
+        return my_rows_emit(conn, first, max_rows, max_bytes, lens, lens_cap, NULL, NULL, meta, 0);
+    }
     empty[0] = 0;
     if (!sess || first >= sess->rows || sess->ncols <= 0 || !sess->batch) {
         meta[0] = 0;
@@ -1934,4 +2245,13 @@ const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
     meta[2] = sess->ncols;
     sp_ffi_bin_len = (int)bytes;
     return buf;
+}
+
+const char *kiln_db_my_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta) {
+    my_sess *sess = conn ? conn->native : NULL;
+    if (!sess || !sess->has_store) {
+        return kiln_db_my_result_rows(conn, first, max_rows, max_bytes, lens, lens_cap, meta);
+    }
+    return my_rows_emit(conn, first, max_rows, max_bytes, lens, lens_cap, nums, floats, meta, 1);
 }

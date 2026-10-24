@@ -1,0 +1,9 @@
+copy_text ok
+copy_values match
+copy_duplicate UniqueViolation 23505 0
+copy_outer_tx PENDING_COMMIT 0
+copy_split 40000 18000000
+copy_fallback insert
+copy_timestamps 2
+copy_timeout Timeout broken=true
+ok copy_import

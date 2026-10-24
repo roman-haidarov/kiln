@@ -48,6 +48,7 @@ module Kiln
       OP_PIPELINE_EXIT = 18
       OP_PIPELINE_QUERY = 19
       OP_PIPELINE_TAKE = 20
+      OP_COPY_IN = 21
       SSL_VERIFY_FULL = 1
       SSL_DISABLE = 2
       NUM_ADD = 1
@@ -55,7 +56,9 @@ module Kiln
       NUM_MUL = 3
       NUM_DIV = 4
       NUM_NEG = 6
+    end
 
+    module Native
       ffi_func :kiln_db_configure_values, %i[int_array int], :int
       ffi_func :kiln_db_now_ms, [], :long
       ffi_func :kiln_db_load_kind, [:int], :int
@@ -65,12 +68,15 @@ module Kiln
       ffi_func :kiln_db_conn_set, %i[long long long str long int str long str long str long int str long int str long],
                :int
       ffi_func :kiln_db_set_sql, %i[long long long str long], :int
+      ffi_func :kiln_db_set_copy, %i[long long long str long], :int
       ffi_func :kiln_db_set_format, %i[long long long int int], :int
       ffi_func :kiln_db_set_stmt_cache, %i[long long long int], :int
       ffi_func :kiln_db_bind_str, %i[long long long int str long int int], :int
       ffi_func :kiln_db_result_types, %i[long long long int_array int], :int
       ffi_func :kiln_db_result_row, %i[long long long long int_array int], :binstr
       ffi_func :kiln_db_result_rows, %i[long long long long long long int_array int int_array int], :binstr
+      ffi_func :kiln_db_result_rows_typed,
+               %i[long long long long long long int_array int int_array float_array int_array int], :binstr
       ffi_func :kiln_db_conn_broken, %i[long long long], :int
       ffi_func :kiln_db_os_thread_token, [], :long
       ffi_func :kiln_db_dns_submit, %i[str long int_array int], :int
@@ -163,6 +169,10 @@ module Kiln
 
         def set_sql(handle, scope, thread_id, sql)
           Native.kiln_db_set_sql(handle, scope, thread_id, sql, sql.bytesize)
+        end
+
+        def set_copy(handle, scope, thread_id, data)
+          Native.kiln_db_set_copy(handle, scope, thread_id, data, data.bytesize)
         end
 
         def set_format(handle, scope, thread_id, format, chunk)

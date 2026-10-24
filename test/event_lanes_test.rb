@@ -10,13 +10,16 @@ def check(label, passed)
 end
 
 CALLS = Queue.new
+LANE_GATE = Queue.new
+LANE_STARTED = Queue.new
 SHUTDOWN_CALLS = Queue.new
 LONG_STARTED = Queue.new
 log = Kiln::Observability::Log.new(StringIO.new)
 router = Kiln::Routing::Router.new
                               .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
                               .get('/sleep', lambda { |ctx|
-                                               ctx.sleep(0.3)
+                                               LANE_STARTED << 1
+                                               LANE_GATE.pop(timeout: 30)
                                                ctx.res.text("slept\n")
                                              })
                               .get('/long', lambda { |ctx|
@@ -40,13 +43,13 @@ lanes.start
 lp = lanes.port
 slow_result = Queue.new
 slow = Thread.new { slow_result << exchange(lp, "GET /sleep HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n") }
-Kernel.sleep 0.05
-started = Kiln::Runtime.now
+LANE_STARTED.pop(timeout: 10)
 fast = exchange(lp, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-fast_took = Kiln::Runtime.now - started
+slow_pending = slow_result.empty?
+LANE_GATE << 1
 slow.join
 check 'lanes: a waiting handler does not block another connection',
-      fast.end_with?("Hello, World!\n") && fast_took < 0.2 && slow_result.pop.end_with?("slept\n")
+      fast.end_with?("Hello, World!\n") && slow_pending && slow_result.pop.end_with?("slept\n")
 batch = (+'').b
 15.times { batch << "GET / HTTP/1.1\r\nHost: x\r\n\r\n" }
 batch << "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
@@ -133,3 +136,108 @@ late_replies = Array.new(20) { exchange(expired.port, "GET / HTTP/1.1\r\nHost: x
 expired.shutdown(grace: 0.5)
 late_ok = late_replies.all? { |reply| reply.start_with?('HTTP/1.1 504 ') && reply.end_with?("deadline exceeded\n") }
 check 'lanes: a job taken after its deadline is answered with 504, never with its untouched response', late_ok
+
+def response_count(buf)
+  count = 0
+  offset = 0
+  while offset < buf.bytesize
+    cut = buf.index("\r\n\r\n", offset)
+    break unless cut
+
+    head = buf.byteslice(offset, cut - offset)
+    mark = head.index('Content-Length: ')
+    break unless mark
+
+    start = head.getbyte(mark + 16)
+    break unless start && start >= 48 && start <= 57
+
+    length = head.byteslice(mark + 16, 16).to_i
+    body_end = cut + 4 + length
+    break if body_end > buf.bytesize
+
+    count += 1
+    offset = body_end
+  end
+  count
+end
+
+def read_responses(sock, count, seconds = 10.0)
+  out = (+'').b
+  limit = Kiln::Runtime.now + seconds
+  while response_count(out) < count && Kiln::Runtime.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln::Runtime.now)
+    break unless ready
+
+    chunk = begin
+      sock.read_nonblock(65_536, exception: false)
+    rescue IOError, SystemCallError
+      nil
+    end
+    next if chunk == :wait_readable
+    break unless chunk.is_a?(String)
+
+    out << chunk
+  end
+  out
+end
+
+SLOW_GATE = Queue.new
+SLOW_STARTED = Queue.new
+SLOW_DONE = Queue.new
+order_router = Kiln::Routing::Router.new
+                                    .get('/slow', lambda { |ctx|
+                                                    SLOW_STARTED << 1
+                                                    SLOW_GATE.pop(timeout: 30)
+                                                    SLOW_DONE << 1
+                                                    ctx.res.text('slow')
+                                                  })
+                                    .get('/nap', lambda { |ctx|
+                                                   Kernel.sleep 0.2
+                                                   ctx.res.text('nap')
+                                                 })
+                                    .get('/fast', ->(ctx) { ctx.res.text('fast') })
+                                    .seal!
+order_server = Kiln::Server::Event.new(order_router, nil, log: log, port: 0, handlers: 2, request_timeout: 60)
+order_server.start
+slow_sock = TCPSocket.new('127.0.0.1', order_server.port)
+slow_sock.write("GET /slow HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+slow_started = !SLOW_STARTED.pop(timeout: 10).nil?
+fast_results = Queue.new
+fast_threads = Array.new(4) do
+  Thread.new do
+    sock = TCPSocket.new('127.0.0.1', order_server.port)
+    served = 0
+    while served < 20
+      sock.write("GET /fast HTTP/1.1\r\nHost: x\r\n\r\n")
+      got = read_responses(sock, 1)
+      break unless got.start_with?('HTTP/1.1 200 ') && got.end_with?('fast')
+
+      served += 1
+    end
+    sock.close
+    fast_results << served
+  end
+end
+fast_threads.each(&:join)
+fast_served = 0
+4.times { fast_served += fast_results.pop }
+slow_waiting = SLOW_DONE.empty?
+SLOW_GATE << 1
+slow_body = read_until_closed(slow_sock, 10)
+slow_sock.close
+check 'hol_slow_handler',
+      slow_started && slow_waiting && fast_served == 80 && slow_body.start_with?('HTTP/1.1 200 ') &&
+      slow_body.end_with?('slow')
+mixed_sock = TCPSocket.new('127.0.0.1', order_server.port)
+mixed_sock.write("GET /nap HTTP/1.1\r\nHost: x\r\n\r\nGET /fast HTTP/1.1\r\nHost: x\r\n\r\nGET /fast HTTP/1.1\r\nHost: x\r\n\r\n")
+mixed = read_responses(mixed_sock, 3)
+mixed_sock.close
+slow_at = mixed.index('nap')
+fast_at = mixed.index('fast')
+second_fast = mixed.index('fast', fast_at + 4) if fast_at
+check 'pipelined_order_mixed',
+      mixed.scan('HTTP/1.1 200 ').size == 3 && slow_at && fast_at && second_fast &&
+      slow_at < fast_at && fast_at < second_fast
+wait_for { order_server.in_flight.zero? }
+check 'busy_cleanup', order_server.in_flight.zero?
+order_server.shutdown(grace: 1)

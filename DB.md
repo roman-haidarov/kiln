@@ -52,7 +52,9 @@ Kiln::DB::Scope.pool = pool
   `ca: :system` (libpq's `sslrootcert=system`); MySQL and MariaDB need a CA file.
   An empty CA is a `ConfigError` before any network I/O.
 - `tls: :disable` is an explicit opt-in and is accepted only for `127.0.0.1` or
-  `::1`. Unix sockets are not supported.
+  `::1`. Unix sockets are not supported. The connection is plaintext: on
+  MySQL and MariaDB Kiln turns off Connector/C's default TLS and certificate
+  checks, so it also reaches a local server without TLS.
 - PostgreSQL connects to `host` and verifies the certificate against
   `tls_name`. A host name is resolved off the calling thread (libuv
   `getaddrinfo`, bounded by `timeout:`); libpq gets up to 8 resolved addresses
@@ -75,14 +77,17 @@ Kiln::DB::Scope.pool = pool
   - PostgreSQL prepares a named statement (`kiln_s<N>`) the second time the
     same text runs outside pipeline mode; the first run uses the unnamed
     statement as before. The least recently used statement is closed when the
-    cache is full. `DEALLOCATE` and `DISCARD` run through `exec` empty the
-    cache, and `ALTER`, `CREATE`, `DROP` or `TRUNCATE` run through `exec` make
+    cache is full. `DISCARD ALL` and `DEALLOCATE ALL` run through `exec` empty
+    the cache, `DEALLOCATE <name>` forgets that one statement, and `DISCARD
+    PLANS`, `DISCARD SEQUENCES` and `DISCARD TEMP` keep it, because the server
+    keeps the statements. `ALTER`, `CREATE`, `DROP` or `TRUNCATE` run through `exec` make
     the next use prepare again. When another session changes a table so that a
     cached statement returns different columns, PostgreSQL reports `0A000`
     (`cached plan must not change result type`); outside a transaction Kiln
     drops the statement and runs the query again unprepared, inside a
     transaction the error is raised and the transaction rolls back. A missing
-    statement (`26000`) is handled the same way. The server chooses custom or
+    statement (`26000`) is handled the same way; only that statement is
+    forgotten. The server chooses custom or
     generic plans for cached statements (`plan_cache_mode`). PgBouncer in
     transaction pooling needs `max_prepared_statements` (version 1.21 or
     later) or `statement_cache: 0`.
@@ -138,6 +143,15 @@ Relations start with `Model.all`. Conditions use column expressions, and values
 are bound separately from SQL. Identifiers come from declared columns or
 validated aliases. Relations can also be composed with `distinct`, `from`,
 `group`, `having`, `order`, `limit`, and `offset`.
+
+Some column types reach Ruby without a text round trip. On MySQL and MariaDB
+these are the integer types except `BIGINT UNSIGNED`, and `DOUBLE`. On
+PostgreSQL they are `int2`, `int4`, `int8`, `bool`, and `float8`, and only for
+a statement served from the statement cache: once a cached statement has run,
+later runs ask for a binary result when every result column is one of those
+types or `text`, `varchar`, or `bytea`. `FLOAT`, `float4`, `numeric`,
+decimals, `YEAR`, `BIT`, dates, and times arrive as text. The Ruby values,
+classes, and encodings are the same either way.
 
 The results below are PostgreSQL's; `test/db/docs_examples_test.rb` runs every
 example on PostgreSQL and MySQL. On MySQL the `active` column is `TINYINT(1)`
@@ -522,7 +536,13 @@ column type:
 Bind values may be `nil`, `true`/`false` (sent as `t`/`f` to PostgreSQL and
 `1`/`0` to MySQL), `Integer`, finite `Float`, `String`, `Symbol`,
 `ExactDecimal`, `Int64Value` and `UInt64Value`. A binary (`ASCII-8BIT`) string
-with non-ASCII bytes is sent as binary data. Any other object, including `Time`,
+with non-ASCII bytes, a NUL byte, or a backslash is sent as binary data, so a
+`bytea` value reaches PostgreSQL unchanged (the `bytea` text input would read a
+backslash as an escape). Such a value then has to fit the column's binary
+format: `bytea`, `text`, `varchar` and `json` take it, `jsonb`, numbers, dates
+and UUIDs do not; pass `UTF-8` strings for those. Other binary strings are sent
+as text. On PostgreSQL any other `String` with a NUL byte raises
+`ArgumentError`, because the text protocol cannot carry it. Any other object, including `Time`,
 raises `ArgumentError`: format it as a string the database accepts. A statement
 takes up to 65535 bound values; `import` splits its statements at 32767 values
 and `preload` accepts up to 32767 parent keys.
@@ -563,13 +583,50 @@ result.input_status(0)
 and returned rows. Import options include `timestamps:`, `all_or_none:`,
 `returning:`, `on_duplicate_key_ignore:`, and `on_duplicate_key_update:`.
 
+A PostgreSQL import without `returning` or conflict options uses `COPY` when
+the table is a plain or partitioned table without rules, row-level security,
+`GENERATED ALWAYS` identity columns (on the table or its partition root), or
+statement-level `INSERT` triggers: `COPY` skips rules, fails under row-level
+security, writes given identity values that `INSERT` refuses, and fires
+statement triggers once per `COPY`. Any other table, and a group of rows that
+holds a binary String, uses `INSERT`. Before the check the import takes `ROW
+EXCLUSIVE` on the table (the lock `INSERT` takes anyway), so rules, policies
+and triggers cannot change until the transaction ends. `REPEATABLE READ` and
+`SERIALIZABLE` transactions use `INSERT`, because their catalog snapshot can
+predate a concurrent schema change. With `timestamps: true`, `COPY` writes the server's `CURRENT_TIMESTAMP`, the same
+value `INSERT` writes. A `COPY` interrupted by a timeout breaks the connection,
+and the pool discards it.
+
+A plain PostgreSQL import compares the affected row count with the rows sent,
+for `COPY` and for every `INSERT` page. When a `BEFORE` trigger skips rows it
+raises `InvariantViolation` and the import rolls back instead of reporting
+those inputs as inserted.
+
 A new model whose single primary key is missing gets the generated key back
 after `save` (`RETURNING` on PostgreSQL, `LAST_INSERT_ID()` on MySQL).
 `import` writes up to 1000 rows per `INSERT`, also with `returning: true`.
 Returned rows are matched to inputs by primary key and listed in input order.
-When the database treats two keys as equal that differ as text (a
-case-insensitive collation, `citext`, decimal formatting) and the match is not
-certain, the input gets `applied_unknown` and its row is listed after the
+`returning: true` raises `UnsupportedReturn` before anything is written when
+the table (or one of its partitions) has a `BEFORE` row trigger on `INSERT`,
+or on `UPDATE` together with `on_duplicate_key_update:`, and on PostgreSQL
+when it has a rule: a trigger or rule can change the key that the match relies
+on. It also rejects views, PostgreSQL transactions in `REPEATABLE READ` or
+`SERIALIZABLE` (their catalog snapshot can miss a new trigger), and, on MySQL
+and MariaDB, users without a directly granted `TRIGGER` privilege on the
+table, database, or server: without it `information_schema.triggers` hides
+the table's triggers. A grant through a role counts as missing. The trigger
+check covers the partitions that exist when it runs; a partition that another
+session attaches during the import is not checked, because blocking `ATTACH
+PARTITION` would need a lock that also serializes concurrent imports. Inputs whose
+key text differs from every returned key are resolved with one primary-key
+lookup per page inside the import transaction, so the database's own
+comparison (padding, collation, numeric formatting) decides the match;
+equivalent inputs keep first-writer matching with `on_duplicate_key_ignore:`
+and last-writer matching with `on_duplicate_key_update:`. If a key still
+cannot be resolved, a single unmatched
+input is paired with a single unmatched row; with more than one, no row is
+assigned to an input by position: each such input keeps its write status
+(`applied_unknown` with conflict options) and the rows are listed after the
 matched ones. Inside an outer transaction
 `ImportResult#state` is `PENDING_COMMIT`: the outer transaction decides the
 outcome. On MySQL, `on_duplicate_key_update:` uses the row alias form

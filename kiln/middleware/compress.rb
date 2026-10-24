@@ -78,6 +78,8 @@ module Kiln
       CONTENT_ENCODING = 'content-encoding'.freeze
       CONTENT_RANGE = 'content-range'.freeze
       ETAG = 'etag'.freeze
+      PACK_LIMIT = 262_144
+      PACK_CHUNK = 65_536
 
       module Matching
         def compressible?(content_type)
@@ -105,7 +107,30 @@ module Kiln
           end
         end
 
+        def pack(raw, level)
+          return Gzip.once(raw, level) if raw.bytesize <= PACK_LIMIT
+
+          handle = Gzip.open_handle(level)
+          raise CompressError, 'cannot start gzip' if handle.zero?
+
+          begin
+            pack_pieces(handle, raw)
+          ensure
+            Gzip.close_handle(handle)
+          end
+        end
+
         private
+
+        def pack_pieces(handle, raw)
+          out = (+'').b
+          offset = 0
+          while offset < raw.bytesize
+            out << Gzip.push(handle, raw.byteslice(offset, PACK_CHUNK), 0)
+            offset += PACK_CHUNK
+          end
+          out << Gzip.push(handle, GzipStream::EMPTY, 2)
+        end
 
         def media_bounds(value)
           limit = value.index(';') || value.bytesize
@@ -192,7 +217,7 @@ module Kiln
         return if reject_match(req, res)
 
         headers[ENCODING_NAME] = GZIP_VALUE
-        raw ? res.body = Gzip.once(raw, @level) : wrap(res)
+        raw ? res.body = Compress.pack(raw, @level) : wrap(res)
       end
 
       def gzip_wanted?(req)

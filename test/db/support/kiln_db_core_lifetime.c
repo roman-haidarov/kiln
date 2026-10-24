@@ -97,6 +97,24 @@ const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
     return kiln_db_pg_result_rows(conn, first, max_rows, max_bytes, lens, lens_cap, meta);
 }
+const char *kiln_db_pg_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta) {
+    (void)nums;
+    (void)floats;
+    return kiln_db_pg_result_rows(conn, first, max_rows, max_bytes, lens, lens_cap, meta);
+}
+const char *kiln_db_my_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta) {
+    (void)nums;
+    (void)floats;
+    return kiln_db_pg_result_rows(conn, first, max_rows, max_bytes, lens, lens_cap, meta);
+}
+int kiln_db_pg_set_copy(kiln_db_conn *conn, const char *data, long len) {
+    (void)conn;
+    (void)data;
+    (void)len;
+    return KILN_DB_UNSUPPORTED;
+}
 const char *kiln_db_pg_result_bytes(
     kiln_db_conn *conn, uint32_t row, uint32_t col, int64_t *meta, int n) {
     (void)row;
