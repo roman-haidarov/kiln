@@ -81,6 +81,7 @@ extern int sp_ffi_bin_len;
 #define KILN_DB_OP_PIPELINE_EXIT  18
 #define KILN_DB_OP_PIPELINE_QUERY 19
 #define KILN_DB_OP_PIPELINE_TAKE  20
+#define KILN_DB_OP_COPY_IN        21
 
 #define KILN_DB_SSL_VERIFY_FULL 1
 #define KILN_DB_SSL_DISABLE     2
@@ -239,6 +240,10 @@ const char *kiln_db_pg_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta);
 const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta);
+const char *kiln_db_pg_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta);
+const char *kiln_db_my_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
+    size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta);
 int kiln_db_pg_result_meta(kiln_db_conn *conn, int64_t *out, int n);
 int kiln_db_my_result_meta(kiln_db_conn *conn, int64_t *out, int n);
 const char *kiln_db_pg_result_bytes(
@@ -254,6 +259,9 @@ int kiln_db_conn_set(uint64_t handle, uint64_t scope, uint64_t thread_id, const 
     int allow_insecure, const char *tls_name, size_t tls_name_len);
 int kiln_db_set_sql(
     uint64_t handle, uint64_t scope, uint64_t thread_id, const char *sql, size_t sql_len);
+int kiln_db_set_copy(
+    uint64_t handle, uint64_t scope, uint64_t thread_id, const char *data, long len);
+int kiln_db_pg_set_copy(kiln_db_conn *conn, const char *data, long len);
 int kiln_db_step(uint64_t handle, uint64_t scope, uint64_t thread_id, int op, int ready_bits,
     int64_t deadline_ms, int64_t *out, int out_n);
 int kiln_db_take_error(uint64_t handle, uint64_t scope, uint64_t thread_id, char *buf, size_t cap,
@@ -323,6 +331,8 @@ int kiln_db_conn_set_hostaddr(
     uint64_t handle, uint64_t scope, uint64_t thread_id, const char *addr, long n);
 int kiln_db_configure_values(const int64_t *values, int n);
 char *kiln_db_thread_room(size_t need);
+int kiln_db_format_i64(int64_t value, char *out, size_t cap);
+int kiln_db_format_f64(double value, char *out, size_t cap);
 int64_t kiln_db_now_ms(void);
 int kiln_db_set_format(uint64_t handle, uint64_t scope, uint64_t thread_id, int format, int chunk);
 int kiln_db_set_stmt_cache(uint64_t handle, uint64_t scope, uint64_t thread_id, int capacity);
@@ -334,6 +344,9 @@ const char *kiln_db_result_row(
 const char *kiln_db_result_rows(uint64_t handle, uint64_t scope, uint64_t thread_id,
     int64_t first_row, int64_t max_rows, int64_t max_bytes, int64_t *lens, int lens_cap,
     int64_t *meta, int meta_n);
+const char *kiln_db_result_rows_typed(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    int64_t first_row, int64_t max_rows, int64_t max_bytes, int64_t *lens, int lens_cap,
+    int64_t *nums, double *floats, int64_t *meta, int meta_n);
 int kiln_db_conn_broken(uint64_t handle, uint64_t scope, uint64_t thread_id);
 int64_t kiln_db_os_thread_token(void);
 int kiln_db_result_meta(uint64_t handle, uint64_t scope, uint64_t thread_id, int64_t *out, int n);

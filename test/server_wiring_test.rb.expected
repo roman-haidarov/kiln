@@ -1,0 +1,9 @@
+ok wiring facade_base
+ok wiring facade_inline
+ok wiring facade_workers
+ok wiring direct_base
+ok wiring direct_inline
+ok wiring direct_workers
+ok signal logger
+ok strict options event
+ok strict options base

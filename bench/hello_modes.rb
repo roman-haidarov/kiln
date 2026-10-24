@@ -10,6 +10,7 @@ mode = ENV['KILN_MODE'] || 'server'
 worker_count = ENV['SPINEL_WORKERS'] || '1'
 cpu_count = (ENV['KILN_CPUS'] || worker_count).to_i
 shard_count = cpu_count < 1 ? 1 : cpu_count
-server = kiln_mode_server(mode, router, log, port, shard_count: shard_count)
+handler_count = (ENV['KILN_HANDLERS'] || '4').to_i
+server = kiln_mode_server(mode, router, log, port, lane_count: handler_count, shard_count: shard_count)
 server.start
 loop { Kiln::Runtime.pause(3600) }

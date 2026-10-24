@@ -1,49 +1,102 @@
 module Kiln
   class Server
-    module Rules
+    class Settings
       include Runtime::Check
 
-      REQUIRED = %i[handler app log].freeze
+      SHARED = {
+        log: nil, host: '0.0.0.0', port: 0, listen: nil, tls: nil, max_conns: 10_000, max_body: 1 << 20,
+        buffer_body: nil, backlog: 1024, tcp_nodelay: true, reuse_port: false, max_connection_rate: 256,
+        read_timeout: 5.0, request_timeout: 2.0, write_timeout: 10.0, header_timeout: nil, keep_alive_timeout: nil
+      }.freeze
+      EVENT = SHARED.merge(host: '127.0.0.1', handlers: 0, max_streams: 1024, client_disconnect_timeout: 1.0).freeze
+      BASE = SHARED.merge(kill_grace: 1.0, coop_budget: 4, shards: 1, client_disconnect_timeout: 0.5).freeze
+      RULES = [
+        [:max_conns, 'max_conns', :int_at_least_one], [:max_body, 'max_body', :int_at_least_zero],
+        [:read_timeout, 'read_timeout', :seconds_above], [:request_timeout, 'request_timeout', :seconds_above],
+        [:write_timeout, 'write_timeout', :seconds_above], [:handlers, 'handlers', :int_at_least_zero],
+        [:max_streams, 'max_streams', :int_at_least_one], [:kill_grace, 'kill_grace', :seconds_at_least],
+        [:coop_budget, 'cooperative budget', :int_at_least_zero], [:shards, 'shards', :int_at_least_one],
+        [:backlog, 'backlog', :int_at_least_one], [:max_connection_rate, 'max_connection_rate', :int_at_least_zero],
+        [:client_disconnect_timeout, 'client_disconnect_timeout', :seconds_at_least],
+        [:header_timeout, 'header_timeout', :seconds_above],
+        [:keep_alive_timeout, 'keep_alive_timeout', :seconds_at_least],
+        [:buffer_body, 'buffer_body', :int_at_least_zero]
+      ].freeze
 
-      def reject_unknown(options, defaults)
-        unknown = options.keys - defaults.keys - REQUIRED
+      class << self
+        def event(options) = new(options, EVENT)
+
+        def base(options)
+          settings = new(options, BASE)
+          raise ArgumentError, 'tls needs the event backend' unless settings.tls.nil? && settings.listen.none?(&:tls?)
+
+          settings
+        end
+
+        def log(value)
+          return value if value.nil? || value.is_a?(Observability::Log)
+
+          raise ArgumentError, 'log must be a Kiln::Observability::Log'
+        end
+      end
+
+      def initialize(options, defaults)
+        unknown = options.keys - defaults.keys
         raise ArgumentError, "unknown keyword: :#{unknown.first}" unless unknown.empty?
+
+        @raw = defaults.merge(options)
+        validate(defaults)
       end
 
-      def transport_rules(timeouts)
-        check_rules(timeouts + transport_rows)
-        check_buffer_body
-        check_reuse_port
-        raise ArgumentError, 'tls must be a Transport::Tls' unless tls.nil? || tls.is_a?(Transport::Tls)
-      end
+      def log = Settings.log(@raw[:log])
+      def host = @raw[:host].to_s
+      def port = @raw[:port].to_i
+      def tls = @raw[:tls].is_a?(Transport::Tls) ? @raw[:tls] : nil
+      def listen = Transport::Listen.resolve(@raw[:listen], host, port, tls)
+      def max_conns = @raw[:max_conns].to_i
+      def max_body = @raw[:max_body].to_i
+      def buffer_body = (@raw[:buffer_body] || @raw[:max_body]).to_i
+      def backlog = @raw[:backlog].to_i
+      def tcp_nodelay? = @raw[:tcp_nodelay] ? true : false
+      def reuse_port? = @raw[:reuse_port] ? true : false
+      def max_connection_rate = @raw[:max_connection_rate].to_i
+      def read_timeout = @raw[:read_timeout].to_f
+      def request_timeout = @raw[:request_timeout].to_f
+      def write_timeout = @raw[:write_timeout].to_f
+      def header_timeout = (@raw[:header_timeout] || @raw[:read_timeout]).to_f
+      def keep_alive_timeout = (@raw[:keep_alive_timeout] || @raw[:read_timeout]).to_f
+      def client_disconnect_timeout = @raw[:client_disconnect_timeout].to_f
+      def handlers = @raw[:handlers].to_i
+      def max_streams = @raw[:max_streams].to_i
+      def kill_grace = @raw[:kill_grace].to_f
+      def coop_budget = @raw[:coop_budget].to_i
+      def shards = @raw[:shards].to_i
 
       private
 
-      def transport_rows
-        rows = [
-          ['backlog', backlog, :int_at_least_one],
-          ['max_connection_rate', max_connection_rate, :int_at_least_zero],
-          ['client_disconnect_timeout', client_disconnect_timeout, :seconds_at_least]
-        ]
-        rows << ['header_timeout', header_timeout, :seconds_above] unless header_timeout.nil?
-        rows << ['keep_alive_timeout', keep_alive_timeout, :seconds_at_least] unless keep_alive_timeout.nil?
-        rows << ['buffer_body', buffer_body, :int_at_least_zero] unless buffer_body.nil?
-        rows
-      end
-
-      def check_buffer_body
-        return if buffer_body.nil? || buffer_body <= max_body
+      def validate(defaults)
+        check_rules(rule_rows(defaults))
+        raise ArgumentError, 'port' unless valid_port?
+        raise ArgumentError, 'tls must be a Transport::Tls' unless @raw[:tls].nil? || tls
+        raise ArgumentError, 'reuse_port needs a fixed TCP port (port: 0 cannot share one port)' if shared_port_zero?
+        return unless buffer_body > max_body
 
         raise ArgumentError, 'buffer_body must not exceed max_body (route limits can be larger)'
       end
 
-      def check_reuse_port
-        return unless reuse_port
+      def rule_rows(defaults)
+        rows = []
+        RULES.each do |key, name, kind|
+          value = @raw[key]
+          rows << [name, value, kind] if defaults.key?(key) && !(value.nil? && defaults[key].nil?)
+        end
+        rows
+      end
 
-        specs = Transport::Listen.resolve(listen, host, port, tls)
-        return unless specs.any? { |spec| spec.kind == :tcp && spec.port.zero? }
+      def valid_port? = @raw[:port].is_a?(Integer) && @raw[:port].between?(0, 65_535)
 
-        raise ArgumentError, 'reuse_port needs a fixed TCP port (port: 0 cannot share one port)'
+      def shared_port_zero?
+        reuse_port? && listen.any? { |spec| spec.kind == :tcp && spec.port.zero? }
       end
     end
 
@@ -120,65 +173,6 @@ module Kiln
       end
     end
 
-    SHARED_DEFAULTS = {
-      port: 0, host: '0.0.0.0', max_conns: 10_000, read_timeout: 5.0, request_timeout: 2.0,
-      write_timeout: 10.0, max_body: 1 << 20, listen: nil, tls: nil, backlog: 1024, tcp_nodelay: true,
-      max_connection_rate: 256, header_timeout: nil, keep_alive_timeout: nil, buffer_body: nil, reuse_port: false
-    }.freeze
-    EVENT_DEFAULTS = SHARED_DEFAULTS.merge(handlers: 0, max_streams: 1024, client_disconnect_timeout: 1.0).freeze
-    BASE_DEFAULTS = SHARED_DEFAULTS.merge(kill_grace: 1.0, coop_budget: 4, shards: 1,
-                                          client_disconnect_timeout: 0.5).freeze
-
-    EventOptions = Data.define(:handler, :app, :log, :host, :port, :max_conns,
-                               :read_timeout, :request_timeout, :write_timeout,
-                               :max_body, :handlers, :max_streams, :listen, :tls, :backlog,
-                               :tcp_nodelay, :max_connection_rate, :header_timeout,
-                               :keep_alive_timeout, :client_disconnect_timeout, :buffer_body,
-                               :reuse_port) do
-      include Rules
-
-      def initialize(**options)
-        reject_unknown(options, EVENT_DEFAULTS)
-        super(**EVENT_DEFAULTS, **options)
-        transport_rules(event_rows)
-      end
-
-      private
-
-      def event_rows
-        [['max_conns', max_conns, :int_at_least_one], ['max_body', max_body, :int_at_least_zero],
-         ['read_timeout', read_timeout, :seconds_above], ['request_timeout', request_timeout, :seconds_above],
-         ['write_timeout', write_timeout, :seconds_above], ['handlers', handlers, :int_at_least_zero],
-         ['max_streams', max_streams, :int_at_least_one]]
-      end
-    end
-
-    BaseOptions = Data.define(:handler, :app, :log, :host, :port, :max_conns,
-                              :read_timeout, :request_timeout, :write_timeout,
-                              :kill_grace, :max_body, :coop_budget, :shards, :listen, :tls, :backlog,
-                              :tcp_nodelay, :max_connection_rate, :header_timeout,
-                              :keep_alive_timeout, :client_disconnect_timeout, :buffer_body,
-                              :reuse_port) do
-      include Rules
-
-      def initialize(**options)
-        reject_unknown(options, BASE_DEFAULTS)
-        super(**BASE_DEFAULTS, **options)
-        transport_rules(base_rows)
-        tcp_only = Transport::Listen.resolve(listen, host, port, nil).none?(&:tls?)
-        raise ArgumentError, 'tls needs the event backend' unless tls.nil? && tcp_only
-      end
-
-      private
-
-      def base_rows
-        [['max_conns', max_conns, :int_at_least_one], ['max_body', max_body, :int_at_least_zero],
-         ['read_timeout', read_timeout, :seconds_above], ['request_timeout', request_timeout, :seconds_above],
-         ['write_timeout', write_timeout, :seconds_above], ['kill_grace', kill_grace, :seconds_at_least],
-         ['cooperative budget', coop_budget, :int_at_least_zero], ['shards', shards, :int_at_least_one]]
-      end
-    end
-
     SIGNALS = %w[INT TERM].freeze
 
     include Signals
@@ -187,7 +181,7 @@ module Kiln
 
     def initialize(handler, app, **options)
       @backend = take_backend(options)
-      @log = options[:log]
+      @log = Settings.log(options[:log])
       @engine = build_engine(@backend, handler, app, options)
     end
 
@@ -218,16 +212,14 @@ module Kiln
     end
 
     def build_engine(backend, handler, app, options)
+      options[:host] = Settings::SHARED[:host] unless options.key?(:host)
       case backend
-      in :event
-        Event.new(EventOptions.new(handler: handler, app: app, **options))
-      in :base
-        Base.new(BaseOptions.new(handler: handler, app: app, **options))
-      else
-        raise ArgumentError, 'backend must be :event or :base'
+      in :event then Event.new(handler, app, **options)
+      in :base then Base.new(handler, app, **options)
+      else raise ArgumentError, 'backend must be :event or :base'
       end
     end
 
-    private_constant :EventOptions, :BaseOptions, :SHARED_DEFAULTS, :EVENT_DEFAULTS, :BASE_DEFAULTS
+    private_constant :Settings
   end
 end

@@ -94,6 +94,12 @@ safety() {
     -DSP_THREADS -Iext/db test/db/support/kiln_db_core_lifetime.c ext/db/kiln_db_arena.c \
     ext/db/kiln_db_core.c -pthread -o "$out/core"
   "$out/core"
+  "$cc_bin" -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=thread -fno-omit-frame-pointer \
+    -DSP_THREADS -Iext/db bench/db_pin_stress.c ext/db/kiln_db_arena.c -pthread -o "$out/pin_tsan"
+  "$out/pin_tsan" 2
+  "$cc_bin" -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+    -DSP_THREADS -Iext/db bench/db_pin_stress.c ext/db/kiln_db_arena.c -pthread -o "$out/pin_asan"
+  "$out/pin_asan" 2
   "$cc_bin" -std=c11 -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
     -DSP_THREADS -Iext/db test/db/support/kiln_db_null_words.c -o "$out/words"
   "$out/words"

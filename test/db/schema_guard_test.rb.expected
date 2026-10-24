@@ -1,0 +1,7 @@
+ok schema lock lifetime
+ok partition guard
+ok partition INSERT privilege
+ok snapshot schema guard
+ok hidden trigger guard
+ok canonical upsert mapping
+ok current database conflict guard

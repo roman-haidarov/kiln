@@ -148,9 +148,10 @@ check 'ALPN without http/1.1 fails the handshake', refused.include?('no applicat
                                                    refused.include?('alert number 120')
 server.shutdown(grace: 1.0)
 
-gated = Kiln::Server.new(router, nil, log: log, host: '127.0.0.1', port: 0,
-                                      tls: Kiln::Transport::Tls.new(cert: CERT, key: KEY),
-                                      max_connection_rate: 1, header_timeout: 0.6)
+gated_options = { log: log, host: '127.0.0.1', port: 0,
+                  tls: Kiln::Transport::Tls.new(cert: CERT, key: KEY),
+                  max_connection_rate: 1, header_timeout: 0.6 }
+gated = Kiln::Server.new(router, nil, **gated_options)
 gated.start
 idle = TCPSocket.new('127.0.0.1', gated.port)
 wait_for { gated.handshakes == 1 }

@@ -1110,32 +1110,32 @@ non-zero, 9 warnings, all in functions this release did not edit
 above. Exit 0. Raw output:
 
 ```
- Container kilndb_800a532e1706-pg18-1 Stopping 
- Container kilndb_800a532e1706-mysql84-1 Stopping 
- Container kilndb_800a532e1706-pg17-1 Stopping 
- Container kilndb_800a532e1706-mariadb114-1 Stopping 
- Container kilndb_800a532e1706-pg18-1 Stopped 
- Container kilndb_800a532e1706-pg18-1 Removing 
- Container kilndb_800a532e1706-pg18-1 Removed 
- Container kilndb_800a532e1706-pg17-1 Stopped 
- Container kilndb_800a532e1706-pg17-1 Removing 
- Container kilndb_800a532e1706-pg17-1 Removed 
- Container kilndb_800a532e1706-mariadb114-1 Stopped 
- Container kilndb_800a532e1706-mariadb114-1 Removing 
- Container kilndb_800a532e1706-mariadb114-1 Removed 
- Container kilndb_800a532e1706-mysql84-1 Stopped 
- Container kilndb_800a532e1706-mysql84-1 Removing 
- Container kilndb_800a532e1706-mysql84-1 Removed 
- Volume kilndb_800a532e1706_pg18-data Removing 
- Volume kilndb_800a532e1706_pg17-data Removing 
- Volume kilndb_800a532e1706_mariadb114-data Removing 
- Volume kilndb_800a532e1706_mysql84-data Removing 
- Network kilndb_800a532e1706_default Removing 
- Volume kilndb_800a532e1706_pg18-data Removed 
- Volume kilndb_800a532e1706_pg17-data Removed 
- Volume kilndb_800a532e1706_mariadb114-data Removed 
- Volume kilndb_800a532e1706_mysql84-data Removed 
- Network kilndb_800a532e1706_default Removed 
+ Container kilndb_800a532e1706-pg18-1 Stopping
+ Container kilndb_800a532e1706-mysql84-1 Stopping
+ Container kilndb_800a532e1706-pg17-1 Stopping
+ Container kilndb_800a532e1706-mariadb114-1 Stopping
+ Container kilndb_800a532e1706-pg18-1 Stopped
+ Container kilndb_800a532e1706-pg18-1 Removing
+ Container kilndb_800a532e1706-pg18-1 Removed
+ Container kilndb_800a532e1706-pg17-1 Stopped
+ Container kilndb_800a532e1706-pg17-1 Removing
+ Container kilndb_800a532e1706-pg17-1 Removed
+ Container kilndb_800a532e1706-mariadb114-1 Stopped
+ Container kilndb_800a532e1706-mariadb114-1 Removing
+ Container kilndb_800a532e1706-mariadb114-1 Removed
+ Container kilndb_800a532e1706-mysql84-1 Stopped
+ Container kilndb_800a532e1706-mysql84-1 Removing
+ Container kilndb_800a532e1706-mysql84-1 Removed
+ Volume kilndb_800a532e1706_pg18-data Removing
+ Volume kilndb_800a532e1706_pg17-data Removing
+ Volume kilndb_800a532e1706_mariadb114-data Removing
+ Volume kilndb_800a532e1706_mysql84-data Removing
+ Network kilndb_800a532e1706_default Removing
+ Volume kilndb_800a532e1706_pg18-data Removed
+ Volume kilndb_800a532e1706_pg17-data Removed
+ Volume kilndb_800a532e1706_mariadb114-data Removed
+ Volume kilndb_800a532e1706_mysql84-data Removed
+ Network kilndb_800a532e1706_default Removed
 image_removed sha256:0336095afa072c685c93021dcfa4a5fee9cbce25ecd65121b58226c787afc0d0
 image_removed sha256:b568b36c40dcaf1c2967403fa404be8d5f5ce7df967dd305153facee1a34cb87
 image_removed sha256:bda4b1b9fe14bfeb66d66efe69119b573f1ec450b0bcaab3ac9a2e6f299cec7a
@@ -1413,3 +1413,1921 @@ received, the same RuboCop also reported `Metrics/ModuleLength` on
 limit now. `ext/db/kiln_db_pg.c`, `kiln_db_my.c`, `kiln_db_core.c` and
 `kiln_db_arena.c` compile without warnings under
 `-std=c11 -Wall -Wextra -DSP_THREADS`.
+
+## 0.0.10
+
+P10-00 measurement base, taken on the released 0.0.9 tree before any 0.0.10
+product change. Status: PASS. Median is the middle of three sorted runs.
+
+Machine: Darwin 24.6.0 arm64, macOS 15.7.9 (24G830), 8 cores, 16 GiB,
+Apple clang 17.0.0, wrk 4.2.0. Spinel commit
+`519280dc9edd136186c0b0767fb73766b6e45aba`. This checkout has no release
+tags, so `spinel --version` prints
+`spinel unreleased (519280dc9) [apple clang 17.0.0 (cc)]`. libpq prefix
+`/opt/homebrew/opt/libpq`, `pg_config` PostgreSQL 18.4, `PQlibVersion`
+180004. MariaDB Connector/C 3.4.8 (`MARIADB_PACKAGE_VERSION_ID` 30408).
+DB stand: `ci/db-services.sh up` under Docker Desktop (linux/arm64
+containers, published on loopback). PostgreSQL 17.11 on 127.0.0.1:49700,
+PostgreSQL 18.6 on 127.0.0.1:49699, MySQL 8.4.11 on 127.0.0.1:49697,
+MariaDB 11.4.13-MariaDB-ubu2404 on 127.0.0.1:49698. Project
+`kilndb_af58fb077499`. This is not a Linux loopback stand, so later DB
+gain thresholds are `UNVERIFIED`, never `FAIL`.
+
+`taskset` is absent and `/proc` does not exist, so A.8 multicore (P10-00
+step 5) was not run. P10-06, P10-07 and P10-09 stay `BLOCKED` with no code
+change. P10-08 start condition from `row_transfer`: median
+`locked_ffi_call_2_threads` 199 / median `locked_ffi_call` 76 = 2.62,
+which is greater than 2.
+
+Probes compiled with `SPINEL=/tmp/spinel-519280d/bin/spinel`,
+`SPINEL_HDR_DIR=/tmp/spinel-519280d/lib/spinel/lib`,
+`KILN_DB_LIBPQ_PREFIX=/opt/homebrew/opt/libpq`,
+`KILN_DB_LIBMARIADB_PREFIX=/opt/homebrew/opt/mariadb-connector-c`, and
+`--cc=ci/spinel-cc.sh` (Apple clang rejects the extension build without
+that wrapper). `cc -O2 -D_GNU_SOURCE bench/idle_conns.c`. Each process
+below exited 0. The only stderr during the link was
+`ld: warning: ignoring duplicate libraries: '-lpthread'`.
+
+| series | median | min | max |
+| --- | --- | --- | --- |
+| c_scan, ns | 120 | 120 | 121 |
+| ruby_build_headers, ns | 450 | 450 | 453 |
+| request_context_new, ns | 258 | 258 | 258 |
+| request_context_plus_app, ns | 1059 | 1048 | 1066 |
+| send_fixed_build_head, ns | 825 | 822 | 825 |
+| keep_open_check, ns | 212 | 211 | 212 |
+| queue_push_empty_pop, ns | 27 | 27 | 29 |
+| gzip_once_ms 1 MB | 3.17 | 3.17 | 3.19 |
+| gzip_stream_max_call_ms 1 MB | 0.23 | 0.22 | 0.24 |
+| middleware_gzip_alone call_ms 1 MB | 3.22 | 3.18 | 3.22 |
+| alloc_thread_max_gap_ms 1 MB | 3.85 | 3.47 | 4.32 |
+| gzip_once_ms 10 MB | 32.7 | 32.02 | 32.76 |
+| gzip_stream_max_call_ms 10 MB | 0.36 | 0.32 | 0.46 |
+| middleware_gzip_alone call_ms 10 MB | 32.23 | 32.13 | 33.21 |
+| alloc_thread_max_gap_ms 10 MB | 32.87 | 32.83 | 32.88 |
+| pg import_us_per_row | 5.47 | 5.22 | 5.58 |
+| pg pluck_ns_per_row | 333 | 329 | 335 |
+| pg floor_ns_per_row | 159 | 158 | 163 |
+| mysql import_us_per_row | 7.75 | 7.74 | 7.77 |
+| mysql pluck_ns_per_row | 442 | 439 | 443 |
+| mysql floor_ns_per_row | 287 | 285 | 297 |
+| mariadb import_us_per_row | 5.60 | 5.57 | 5.69 |
+| mariadb pluck_ns_per_row | 429 | 418 | 431 |
+| mariadb floor_ns_per_row | 281 | 280 | 282 |
+| locked_ffi_call, ns | 76 | 76 | 79 |
+| locked_ffi_call_2_threads, ns | 199 | 170 | 202 |
+| exec_per_row, ns | 739 | 720 | 764 |
+| exec_per_row_2_threads, ns | 1146 | 916 | 1165 |
+| idle_rss 2000 per_conn_kb | 21.94 | 21.94 | 21.98 |
+| idle_rss 8000 per_conn_kb | 21.23 | 21.20 | 21.23 |
+
+HTTP baseline:
+`SAMPLE=0 MODES="inline lanes" FEATURES="text gzip" CLIENTS=wrk ROUNDS=3 DURATION=8`
+`bench/regression.sh`, exit 0. Artifacts
+`/tmp/kiln-regression/20261024-021106-9663/`.
+
+`median.tsv`:
+
+```
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+inline	gzip	wrk	80233.8	0.2773	99	0.421	12.3889
+inline	text	wrk	98881.18	0.2153	99	0.344	9.9886
+lanes	gzip	wrk	49053.69	0.4506	99	0.675	15.9573
+lanes	text	wrk	57955.87	0.363	99	0.573	12.4835
+```
+
+`summary.tsv`:
+
+```
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+inline	gzip	wrk	1	80456.83	0.27397000000000005	99	0.419	651671	false	8.05	12.3529
+inline	gzip	wrk	2	80019.99	0.28925	99	0.44	648160	false	8.03	12.3889
+inline	gzip	wrk	3	80233.8	0.2773	99	0.421	649881	false	8.07	12.4177
+inline	text	wrk	1	98862.87	0.21457	99	0.34600000000000003	800750	false	8.0	9.9906
+inline	text	wrk	2	99078.58	0.21883000000000002	99	0.34400000000000003	802567	false	7.99	9.9556
+inline	text	wrk	3	98881.18	0.21530000000000002	99	0.343	800915	false	8.0	9.9886
+lanes	gzip	wrk	1	48627.76	0.47225	99	0.732	393882	false	6.32	16.0454
+lanes	gzip	wrk	2	49053.69	0.44848000000000005	99	0.675	397310	false	6.34	15.9573
+lanes	gzip	wrk	3	49239.26	0.45060000000000006	99	0.671	398853	false	6.36	15.9457
+lanes	text	wrk	1	57963.05	0.37353	99	0.591	469518	false	5.85	12.4596
+lanes	text	wrk	2	57866.42	0.36022000000000004	99	0.5660000000000001	468702	false	5.87	12.5239
+lanes	text	wrk	3	57955.87	0.36298	99	0.5730000000000001	469419	false	5.86	12.4835
+```
+
+Raw probe stdout:
+
+```
+=== http_pump_parts run 1 ===
+c_scan 121 ns
+ruby_build_headers 450 ns
+request_context_new 258 ns
+request_context_plus_app 1059 ns
+send_fixed_build_head 825 ns
+keep_open_check 211 ns
+queue_push_empty_pop 27 ns
+ok http_pump_parts
+=== http_pump_parts run 2 ===
+c_scan 120 ns
+ruby_build_headers 453 ns
+request_context_new 258 ns
+request_context_plus_app 1048 ns
+send_fixed_build_head 825 ns
+keep_open_check 212 ns
+queue_push_empty_pop 29 ns
+ok http_pump_parts
+=== http_pump_parts run 3 ===
+c_scan 120 ns
+ruby_build_headers 450 ns
+request_context_new 258 ns
+request_context_plus_app 1066 ns
+send_fixed_build_head 822 ns
+keep_open_check 212 ns
+queue_push_empty_pop 27 ns
+ok http_pump_parts
+=== gzip_call run 1 ===
+gzip_once_ms size=1048576 3.17
+gzip_stream_max_call_ms size=1048576 chunk=65536 0.22
+middleware_gzip_alone size=1048576 gz=271568 call_ms=3.18 roundtrip=yes
+middleware_gzip size=1048576 gz=271568 call_ms=3.72 alloc_thread_max_gap_ms=4.32 roundtrip=yes
+gzip_once_ms size=10485760 32.7
+gzip_stream_max_call_ms size=10485760 chunk=65536 0.32
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=33.21 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=32.53 alloc_thread_max_gap_ms=32.83 roundtrip=yes
+ok gzip_call
+=== gzip_call run 2 ===
+gzip_once_ms size=1048576 3.17
+gzip_stream_max_call_ms size=1048576 chunk=65536 0.23
+middleware_gzip_alone size=1048576 gz=271568 call_ms=3.22 roundtrip=yes
+middleware_gzip size=1048576 gz=271568 call_ms=3.4 alloc_thread_max_gap_ms=3.47 roundtrip=yes
+gzip_once_ms size=10485760 32.02
+gzip_stream_max_call_ms size=10485760 chunk=65536 0.46
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=32.13 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=32.65 alloc_thread_max_gap_ms=32.87 roundtrip=yes
+ok gzip_call
+=== gzip_call run 3 ===
+gzip_once_ms size=1048576 3.19
+gzip_stream_max_call_ms size=1048576 chunk=65536 0.24
+middleware_gzip_alone size=1048576 gz=271568 call_ms=3.22 roundtrip=yes
+middleware_gzip size=1048576 gz=271568 call_ms=3.66 alloc_thread_max_gap_ms=3.85 roundtrip=yes
+gzip_once_ms size=10485760 32.76
+gzip_stream_max_call_ms size=10485760 chunk=65536 0.36
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=32.23 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=32.77 alloc_thread_max_gap_ms=32.88 roundtrip=yes
+ok gzip_call
+=== import_pluck run 1 ===
+pg import_us_per_row 5.58 pluck_ns_per_row 329 floor_ns_per_row 163
+mysql import_us_per_row 7.77 pluck_ns_per_row 442 floor_ns_per_row 297
+mariadb import_us_per_row 5.69 pluck_ns_per_row 418 floor_ns_per_row 281
+ok import_pluck
+=== import_pluck run 2 ===
+pg import_us_per_row 5.22 pluck_ns_per_row 333 floor_ns_per_row 158
+mysql import_us_per_row 7.74 pluck_ns_per_row 443 floor_ns_per_row 287
+mariadb import_us_per_row 5.57 pluck_ns_per_row 431 floor_ns_per_row 282
+ok import_pluck
+=== import_pluck run 3 ===
+pg import_us_per_row 5.47 pluck_ns_per_row 335 floor_ns_per_row 159
+mysql import_us_per_row 7.75 pluck_ns_per_row 439 floor_ns_per_row 285
+mariadb import_us_per_row 5.6 pluck_ns_per_row 429 floor_ns_per_row 280
+ok import_pluck
+=== row_transfer run 1 ===
+exec_per_row 739 ns
+exec_per_row_2_threads 1146 ns
+row_call 150 ns
+rows_call 52 ns
+locked_ffi_call 76 ns
+plain_ffi_call 2 ns
+codec_row 197 ns
+locked_ffi_call_2_threads 202 ns
+row_call_2_threads 368 ns
+rows_call_2_threads 56 ns
+ok row_transfer
+=== row_transfer run 2 ===
+exec_per_row 720 ns
+exec_per_row_2_threads 1165 ns
+row_call 150 ns
+rows_call 50 ns
+locked_ffi_call 79 ns
+plain_ffi_call 2 ns
+codec_row 206 ns
+locked_ffi_call_2_threads 199 ns
+row_call_2_threads 347 ns
+rows_call_2_threads 53 ns
+ok row_transfer
+=== row_transfer run 3 ===
+exec_per_row 764 ns
+exec_per_row_2_threads 916 ns
+row_call 129 ns
+rows_call 52 ns
+locked_ffi_call 76 ns
+plain_ffi_call 2 ns
+codec_row 196 ns
+locked_ffi_call_2_threads 170 ns
+row_call_2_threads 348 ns
+rows_call_2_threads 55 ns
+ok row_transfer
+=== idle_rss 2000 run 1 ===
+idle_rss count=2000 before_kb=7760 after_kb=51632 per_conn_kb=21.94 (ready 2000)
+=== idle_rss 2000 run 2 ===
+idle_rss count=2000 before_kb=7760 after_kb=51648 per_conn_kb=21.94 (ready 2000)
+=== idle_rss 2000 run 3 ===
+idle_rss count=2000 before_kb=7632 after_kb=51584 per_conn_kb=21.98 (ready 2000)
+=== idle_rss 8000 run 1 ===
+idle_rss count=8000 before_kb=7760 after_kb=177584 per_conn_kb=21.23 (ready 8000)
+=== idle_rss 8000 run 2 ===
+idle_rss count=8000 before_kb=7632 after_kb=177440 per_conn_kb=21.23 (ready 8000)
+=== idle_rss 8000 run 3 ===
+idle_rss count=8000 before_kb=7792 after_kb=177424 per_conn_kb=21.20 (ready 8000)
+```
+
+P10-01 gzip large bodies in pieces. Status: PASS.
+Thresholds against the P10-00 10 MB medians: `alloc_thread_max_gap_ms`
+≤ 11.5045 (35% of 32.87), `middleware_gzip_alone call_ms` ≤ 35.453
+(110% of 32.23), `gz` within ±1% of 2715192, every `roundtrip=yes`.
+Five alternating pairs, `SPINEL_WORKERS=2`, each process exit 0. A is
+`/tmp/kiln-p10/gzip_call_a` (the P10-00 binary). B is
+`/tmp/kiln-p10/gzip_call_b`. Median is the middle of the five sorted B
+samples.
+
+| series | median | min | max | limit | |
+| --- | --- | --- | --- | --- | --- |
+| alloc_thread_max_gap_ms | 2.82 | 1.90 | 3.49 | 11.5045 | PASS |
+| middleware_gzip_alone call_ms | 34.70 | 34.23 | 35.02 | 35.453 | PASS |
+| gz | 2715192 | 2715192 | 2715192 | ±1% | PASS |
+
+`compress`, `features`, `static` and `stream` matched their snapshots,
+each exit 0. Inline gzip wrk `cpu_us_per_request` median 12.6336 against
+12.3889, which is 1.98% higher and inside ±3%. Rounds were 13.086,
+12.5417 and 12.6336. Artifacts
+`/tmp/kiln-regression/20261024-021649-12111/`.
+
+```
+=== B run 1 ===
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=34.23 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=37.82 alloc_thread_max_gap_ms=3.28 roundtrip=yes
+=== B run 2 ===
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=35.02 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=43.06 alloc_thread_max_gap_ms=1.9 roundtrip=yes
+=== B run 3 ===
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=35.0 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=39.2 alloc_thread_max_gap_ms=2.34 roundtrip=yes
+=== B run 4 ===
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=34.7 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=40.73 alloc_thread_max_gap_ms=2.82 roundtrip=yes
+=== B run 5 ===
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=34.58 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=37.64 alloc_thread_max_gap_ms=3.49 roundtrip=yes
+```
+
+P10-02 release idle connection buffers. Status: PASS.
+
+`grep -n 'Uv\.' kiln/server/event.rb` (44 sites):
+
+```
+162 kiln_uv_running
+166 kiln_uv_fd
+183 kiln_uv_sigpipe_enter
+189 kiln_uv_sigpipe_leave
+194 kiln_uv_configure
+195 kiln_uv_error_text
+198 kiln_uv_port
+206 kiln_uv_start
+207 kiln_uv_error_text
+216 kiln_uv_abandon
+225 kiln_uv_adopt
+229 kiln_uv_error_text
+330 kiln_uv_flush
+331 kiln_uv_poll
+338 kiln_uv_poll
+341 kiln_uv_flush
+342 kiln_uv_busy
+350 kiln_uv_settle
+356 kiln_uv_drain
+371 kiln_uv_next
+383 kiln_uv_abort
+413 kiln_uv_stop
+414 kiln_uv_aborted
+434 kiln_uv_timeout
+442 kiln_uv_wake
+450 kiln_uv_wake
+684 kiln_uv_send
+688 kiln_uv_send
+698 kiln_uv_tls_alpn
+799 kiln_uv_body_finish
+816 kiln_uv_send
+829 kiln_uv_closes_after
+839 kiln_uv_send
+851 kiln_uv_abort
+851 kiln_uv_tunnel
+896 kiln_uv_part
+902 kiln_uv_send
+969 kiln_uv_body_take
+1003 kiln_uv_part
+1025 kiln_uv_backlog
+1044 kiln_uv_end
+1050 kiln_uv_abort
+1053 kiln_uv_send
+1095 kiln_uv_open
+1100 kiln_uv_handshakes
+```
+
+While the pump thread is alive, other threads reach only `wake_pump`
+(`kiln_uv_wake`, line 442), `nudge_pump` (`kiln_uv_wake`, line 450),
+`connections` (`kiln_uv_open`, line 1095) and `handshakes`
+(`kiln_uv_handshakes`, line 1100). `Lifecycle#start` calls
+`kiln_uv_running`, `kiln_uv_fd`, `kiln_uv_configure`, `kiln_uv_error_text`,
+`kiln_uv_port`, `kiln_uv_adopt`, `kiln_uv_start` and `kiln_uv_abandon` on
+the caller and returns before `@pump = Thread.new` (line 168). A second
+`start` raises when `kiln_uv_running == 1`. `stop_uv` (lines 413–414) runs
+on the pump thread from `pump`'s ensure. Handler, upload, stream and tunnel
+threads call `nudge_pump` only. The spare pool is entered from `kuv_alloc`,
+`kuv_reserve`, `kuv_flush_plain` and `kuv_after_write`, which run inside
+`uv_run` on the pump. `KUV_MAX_SLOTS` is 65536.
+
+Thresholds against the P10-00 medians: 8000 `per_conn_kb` ≤ 3.0 and ≤ 35%
+of 21.23 (≤ 7.4305); 2000 `per_conn_kb` ≤ 3.0; inline text CPU within ±3%
+of 9.9886 (9.689–10.288); lanes text CPU within ±3% of 12.4835
+(12.109–12.858). Median is the middle of three sorted runs. Each process
+exited 0.
+
+| series | median | min | max | limit | |
+| --- | --- | --- | --- | --- | --- |
+| idle_rss 2000 per_conn_kb | 1.86 | 1.82 | 1.88 | 3.0 | PASS |
+| idle_rss 8000 per_conn_kb | 1.08 | 1.08 | 1.11 | 3.0 and 7.4305 | PASS |
+| inline text cpu_us_per_request | 10.2518 | 10.2346 | 10.2919 | 9.689–10.288 | PASS |
+| lanes text cpu_us_per_request | 12.6485 | 12.6003 | 12.6851 | 12.109–12.858 | PASS |
+
+8000 median 1.08 is 5.09% of the 21.23 baseline. Inline text is 2.64% above
+9.9886. Lanes text is 1.32% above 12.4835.
+
+Tests `event_server`, `server`, `payload`, `timeouts`, `tls`, `stream`,
+`websocket`, `lifecycle` and `event_lanes` matched their snapshots, each
+exit 0. `clang-format --dry-run --Werror` on `ext/kiln_uv.c` passed.
+`clang-tidy` exited 0; the warnings are the existing
+`misc-use-internal-linkage` notes on `kiln_uv_*` exports (those stay
+non-static), `misc-include-cleaner`, `_GNU_SOURCE`, and vendored libuv
+headers. `cppcheck` and `cppcheck --check-level=exhaustive` report
+`unusedFunction` / `staticFunction` on the `kiln_uv_*` exports and a
+`memleak` on `w` at the `uv_write` success return in `kuv_queue_write`
+(the callback frees `w`); both are existing false positives, and
+`kuv_queue_write` was not changed. `lizard -C 15 -L 80 -a 8`: new
+`kuv_spare_put` CCN 6 and `kuv_release_idle` CCN 9. `kuv_after_write` CCN
+17 was already over 15; the added call is not a branch. Other warnings
+(`kuv_parse` 22, `kuv_tls_in` 16, `kuv_expire` 17, `kuv_send_finish` 21)
+are existing.
+
+Regression artifacts `/tmp/kiln-regression/20261024-023112-16948/`.
+
+`median.tsv`:
+
+```
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+inline	text	wrk	95989.89	0.2352	99	0.384	10.2518
+lanes	text	wrk	57291.29	0.3813	99	0.602	12.6485
+```
+
+`summary.tsv`:
+
+```
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+inline	text	wrk	1	95848.49	0.23072	99	0.36	776342	false	7.99	10.2919
+inline	text	wrk	2	95989.89	0.24441	99	0.501	767984	false	7.86	10.2346
+inline	text	wrk	3	96007.03	0.23517	99	0.384	768648	false	7.88	10.2518
+lanes	text	wrk	1	56929.88	0.39239	99	0.781	461171	false	5.85	12.6851
+lanes	text	wrk	2	57418.54	0.38130000000000003	99	0.602	465067	false	5.86	12.6003
+lanes	text	wrk	3	57291.29	0.37892000000000003	99	0.6	464087	false	5.87	12.6485
+```
+
+```
+=== idle_rss 2000 run 1 ===
+idle_rss count=2000 before_kb=7728 after_kb=11488 per_conn_kb=1.88 (ready 2000)
+=== idle_rss 8000 run 1 ===
+idle_rss count=8000 before_kb=7792 after_kb=16448 per_conn_kb=1.08 (ready 8000)
+=== idle_rss 2000 run 2 ===
+idle_rss count=2000 before_kb=7696 after_kb=11344 per_conn_kb=1.82 (ready 2000)
+=== idle_rss 8000 run 2 ===
+idle_rss count=8000 before_kb=7824 after_kb=16448 per_conn_kb=1.08 (ready 8000)
+=== idle_rss 2000 run 3 ===
+idle_rss count=2000 before_kb=7824 after_kb=11536 per_conn_kb=1.86 (ready 2000)
+=== idle_rss 8000 run 3 ===
+idle_rss count=8000 before_kb=7696 after_kb=16592 per_conn_kb=1.11 (ready 8000)
+```
+
+P10-03 one shared handler queue with per-connection order. Status: PASS.
+`KUV_MAX_SLOTS` is 65536, so the busy-map key is `gen * 65536 + slot`.
+Lanes text CPU limit is 103% of the P10-00 median 12.4835, which is 12.858.
+Measured median 12.5506 (rounds 12.5506, 12.5581, 12.5381), 0.54% above
+12.4835. Artifacts `/tmp/kiln-regression/20261024-024155-21672/`.
+
+`median.tsv`:
+
+```
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+lanes	text	wrk	55184.97	0.3931	99	0.653	12.5506
+```
+
+`summary.tsv`:
+
+```
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+lanes	text	wrk	1	55184.97	0.39311	99	0.653	446990	false	5.61	12.5506
+lanes	text	wrk	2	55135.17	0.41887	99	0.76	446723	false	5.61	12.5581
+lanes	text	wrk	3	55239.65	0.39013	99	0.643	447435	false	5.61	12.5381
+```
+
+Tests `event_lanes`, `event_server`, `lifecycle`, `timeouts`, `stream`,
+`websocket` and `payload` matched their snapshots, each exit 0.
+`event_server` with `SPINEL_WORKERS=2 SPINEL_GC_STRESS=1` matched its
+snapshot, exit 0. `event_lanes` with the same environment exits 1 on the
+existing check `lanes: a waiting handler does not block another connection`:
+the fast body is correct and `fast_took` was 0.375s, above the 0.2s limit.
+The P10-02 server (`f1c5ae8`), compiled with the same test, fails that check
+at 0.319s. Without `SPINEL_GC_STRESS`, `SPINEL_WORKERS=2` gives
+`fast_took` 0.002s and the snapshot matches. The stress miss is present
+before this change.
+
+P10-04 oracle, recorded on `89b850091b12ed5b68b70aaa79ab9b55a7c53207` before
+any P10-04 product change. Spinel `519280dc9edd136186c0b0767fb73766b6e45aba`.
+The database servers were already up (PostgreSQL 17.11, MySQL 8.4.11,
+MariaDB 11.4.13). Command, from the repo root, under `sh`:
+
+```
+export SPINEL=/tmp/spinel-519280d/bin/spinel
+export SPINEL_HDR_DIR=/tmp/spinel-519280d/lib/spinel/lib
+export KILN_SPINEL_REAL_CC=cc
+export KILN_DB_LIBPQ_PREFIX=/opt/homebrew/opt/libpq
+export KILN_DB_LIBMARIADB_PREFIX=/opt/homebrew/opt/mariadb-connector-c
+links=$(KILN_DB=1 ./ext/build.sh)
+"$SPINEL" "--cc=$(pwd)/ci/spinel-cc.sh" $links -I . test/db/typed_decode_test.rb -o build/test/db_typed_decode_test
+build/test/db_typed_decode_test
+```
+
+Exit 0. `test/db/typed_decode_test.rb.expected` sha256
+`8fafbd19ec4e46de16c21558a79af5505307258a7d8e27cd89b5069c23d38cd0`.
+`ExactDecimal`, `UInt64Value` and `Int64Value` are printed with `to_s`
+because `Object#inspect` includes an address. Integer, Float, true, false,
+nil and String use `inspect`, and String lines also include `encoding`.
+int8 and signed BIGINT minimum print as `Integer nil`: class Integer, inspect
+`nil`. MariaDB's text form of `-0e0` is `Float 0.0`. MySQL and PostgreSQL
+print `Float -0.0`.
+
+P10-04 typed decode and single-column pluck. Status: UNVERIFIED.
+The client is macOS and the servers run under Docker Desktop, so the pluck
+and `row_transfer` gain thresholds are not judged here. The code stays.
+Tests `typed_decode`, `row_batch`, `number`, `int64_sentinel`, `q_gates`,
+`gate_orm`, `gate_c`, `docs_examples`, `fix_regression`, `pg_stmt_cache`,
+`stmt_cache` and `stream_import` matched their snapshots, each exit 0.
+`typed_decode` matches the oracle sha256 above on PostgreSQL 17, MySQL 8.4
+and MariaDB 11.4.
+
+`import_pluck` and `row_transfer`, three A/B pairs, `SPINEL_WORKERS=2`.
+A is the P10-00 binary. B is this tree. Every process exited 0.
+Log `/tmp/kiln-p10/p10-04-measure.log`.
+
+B `pluck_ns_per_row` medians, with the three runs in parentheses:
+pg 219 (222, 205, 219); mysql 288 (288, 297, 285); mariadb 298 (282, 298, 301).
+B `floor_ns_per_row` medians: pg 157 (168, 144, 157); mysql 282 (286, 281, 282);
+mariadb 275 (283, 275, 271).
+Limits `F + 0.5 × (P − F)`, with baseline P and this B floor F:
+pg 245, mysql 362, mariadb 352. The B medians are inside those limits.
+Baseline P was pg 333, mysql 442, mariadb 429.
+
+B `row_transfer`: `exec_per_row` median 632 (619, 674, 632), baseline 739.
+`exec_per_row_2_threads` median 803 (766, 803, 807), baseline 1146.
+Both are at or under 100% of baseline.
+
+P10-05 copy import. Status: UNVERIFIED.
+The client is macOS and the servers run under Docker Desktop, so the
+`import_us_per_row` gain threshold is not judged here. The code stays.
+A plain PostgreSQL import uses `COPY`. `returning`, conflict options, and
+rows that contain a binary String stay on `INSERT`.
+Tests `copy_import`, `stream_import`, `import_exact_status`, `gate_orm`,
+`q_gates`, `fix_regression`, `docs_examples` and `pg_stmt_cache` matched
+their snapshots, each exit 0. `copy_import` covers N-10 through N-14 on
+PostgreSQL 17.
+
+`import_pluck`, three A/B pairs, `SPINEL_WORKERS=2`. A is the P10-04 binary.
+B is this tree. Every process exited 0. Log `/tmp/kiln-p10/p10-05-measure.log`.
+
+B `import_us_per_row` medians, with the three runs in parentheses:
+pg 3.91 (3.97, 3.91, 3.88); mysql 8.11 (8.11, 8.12, 7.92);
+mariadb 5.74 (5.82, 5.74, 5.70).
+Limits from the P10-00 baseline: pg ≤ 4.376 (80% of 5.47); mysql within ±5%
+of 7.75 (7.3625–8.1375); mariadb within ±5% of 5.60 (5.32–5.88).
+The B medians are inside those limits.
+
+P10-06 pump placement. Status: BLOCKED.
+P10-00 step 5(a) was not run. This host is Darwin arm64, `taskset` is absent,
+and `/proc` does not exist, so the start condition cannot be measured after
+P10-03. No code change.
+
+P10-07 pump offload. Status: BLOCKED.
+The start condition is P10-00 step 5(b), measured again after P10-03 and
+P10-06. Step 5 was not run on this host: Darwin arm64, no `taskset`, and no
+`/proc`. No code change.
+
+P10-08 atomic slot pin. Status: BLOCKED.
+The P10-00 start condition holds: median `locked_ffi_call_2_threads` 199 ns /
+median `locked_ffi_call` 76 ns = 2.62, above 2. No code change or P10-08
+tests were run. Requirement 3 demands that every field read after the proposed
+CAS, including `state`, be written only under `mu` and only while `pins == 0`.
+Requirement 4 requires a closer to set `state` to closing and bump the
+generation before loading `pins`. A concurrent acquire can change `pins` from
+0 to 1 after the closer's existing zero check and before that state write.
+Consequently the required closing write can occur while `pins == 1`. The
+existing close paths check `pins` before changing `state` at
+`ext/db/kiln_db_arena.c:285-305`, `:324-346`, and `:400-442`; that check
+cannot exclude a future lock-free CAS. Requirement 3 explicitly makes this
+item `BLOCKED` when its write invariant cannot be proved. The required
+closing protocol and the required write invariant cannot both hold.
+
+P10-09 process scaling study. Status: BLOCKED.
+The required Linux host with at least six cores and `taskset` is unavailable:
+this host is Darwin arm64 and has neither `taskset` nor `/proc`. The specified
+affinity-controlled `wrk` rounds and their RPS, latency, and RSS table cannot
+be produced here. The contract requires no code change for P10-09 on this
+machine; no P10-09 measurement or test was run.
+
+P10-10 final-code measurement repeat. The Ruby lint changes touched the P10-04
+decoder and P10-05 import path, so both probes were recompiled from the final
+tree and rerun in three alternating A/B rounds at `SPINEL_WORKERS=2`.
+Raw stdout and exit codes: `/tmp/kiln-p10/p10-10-remeasure.log`; every process
+exited 0. This is still a macOS Docker Desktop stand, so DB gain thresholds
+remain `UNVERIFIED`.
+
+| series | P10-00 baseline | final median (min–max) | limit on this stand |
+| --- | ---: | ---: | ---: |
+| pg pluck_ns_per_row | 333 | 242 (239–245) | 247 from floor 161 |
+| mysql pluck_ns_per_row | 442 | 305 (301–309) | 360 from floor 278 |
+| mariadb pluck_ns_per_row | 429 | 303 (297–310) | 350.5 from floor 272 |
+| row_transfer exec_per_row, ns | 739 | 726 (669–744) | 739 |
+| row_transfer exec_per_row_2_threads, ns | 1146 | 857 (780–959) | 1146 |
+| pg import_us_per_row | 5.47 | 3.93 (3.91–3.94) | 4.376 |
+| mysql import_us_per_row | 7.75 | 7.28 (7.23–7.43) | 7.3625–8.1375 |
+| mariadb import_us_per_row | 5.60 | 5.57 (5.52–5.68) | 5.32–5.88 |
+
+The final MySQL import median is below the stated ±5% band; the contract does
+not judge a DB gain threshold on this stand. The final
+`locked_ffi_call_2_threads` median was 154 ns (149–159), with no P10-08
+implementation to attribute this value to.
+
+P10-10 release. Status: BLOCKED. The required all-`PASS` release notes cannot
+be written truthfully: P10-04 and P10-05 are `UNVERIFIED` on Docker Desktop;
+P10-06, P10-07 and P10-09 need a Linux host with at least six cores and
+`taskset`; P10-08 is blocked by the conflicting slot write invariant above.
+`kiln/version.rb` therefore remains `0.0.9` and no `## 0.0.10` release section
+was added to `CHANGELOG.md`. The `docs/GET_STARTED.md` worker-placement
+paragraph and final lint repairs are present in this P10-10 attempt.
+
+| item and commit | baseline → result, median (spread) | status |
+| --- | --- | --- |
+| P10-00 `5eaa9a6` | 0.0.9 baseline recorded above | PASS |
+| P10-01 `6a34994` | 10 MB allocation gap 32.87 → 2.82 ms (1.90–3.49) | PASS |
+| P10-02 `f1c5ae8` | 8000 idle connections 21.23 → 1.08 KB each (1.08–1.11) | PASS |
+| P10-03 `89b8500` | lanes text CPU 12.4835 → 12.5506 µs (12.5381–12.5581) | PASS at item acceptance |
+| P10-04 `0bcb203` | pg pluck 333 → 242 ns (239–245); mysql 442 → 305 (301–309); mariadb 429 → 303 (297–310) | UNVERIFIED |
+| P10-05 `34a365e` | pg import 5.47 → 3.93 µs (3.91–3.94); mysql 7.75 → 7.28 (7.23–7.43); mariadb 5.60 → 5.57 (5.52–5.68) | UNVERIFIED |
+| P10-06 `4142305` | required pinned-worker baseline and result unavailable | BLOCKED |
+| P10-07 `b9931bd` | required pump CPU/RPS baseline and result unavailable | BLOCKED |
+| P10-08 `d99f5e6` | start ratio 199/76 = 2.62; no safe result | BLOCKED |
+| P10-09 `7dfd08f` | four-way process table unavailable | BLOCKED |
+| P10-10, this commit | HTTP 22/22 at workers 1, 2, 4; DB 24/24 at workers 1, 2, 4 on the final code | BLOCKED release |
+
+Final Spinel SHA: `519280dc9edd136186c0b0767fb73766b6e45aba`.
+The machine, compiler, DB clients, DB versions and Docker Desktop topology are
+listed in the P10-00 baseline above. The final tree passed:
+`SPINEL_WORKERS=1 ./test-spinel.sh` (exit 0),
+`SPINEL_WORKERS=2 ./test-spinel.sh` (exit 0), and
+`SPINEL_WORKERS=4 ./test-spinel.sh` (exit 0), each 22/22. With
+`build/db-runtime/session.env` exported in `sh`, `SPINEL_WORKERS=1 sh
+ci/db-test.sh` (exit 0), `SPINEL_WORKERS=2 sh ci/db-test.sh` (final exit 0),
+and `SPINEL_WORKERS=4 sh ci/db-test.sh` (exit 0), each 24/24. The first
+workers-2 DB run exited 1 at 23/24 when MariaDB TLS connect timed out in
+`stmt_cache`; the same binary passed a targeted retry and the following full
+workers-2 and workers-4 runs passed. The DB stand was shut down with
+`sh ci/db-services.sh down` after the DB evidence was saved; it exited 0 with
+`verify-clean PASS` and `project_owned_resources_after_cleanup=0`.
+
+RuboCop with `/tmp/kiln-lint/.rubocop.yml` over `kiln kiln.rb test bench`
+exited 1 because the full tree includes documentation-comment and test/bench
+style offenses; there are zero offenses in `kiln/` after excluding
+`Style/Documentation` and `Style/FrozenStringLiteralComment`, as required by
+rule 12. `rubyfast kiln` and `rubyfast bench` exited 0; `rubyfast test`
+reported three symbol-to-proc style offenses. `reek --no-progress` exited 2
+with smells; `flog -a -m` and `flay` exited 0. `clang-format --dry-run
+--Werror` exited 0 on `ext/kiln_http.c` and `ext/kiln_uv.c`.
+`clang-tidy` with the prescribed checks exited 0. Both standard and
+exhaustive `cppcheck` commands exited 0; their `memleak` report at
+`ext/kiln_uv.c:1369` is the async `uv_write` ownership transfer, whose
+completion callback frees `w` at `ext/kiln_uv.c:1304-1310`.
+`lizard -C 15 -L 80 -a 8` reported nine existing complexity warnings in
+unchanged C functions. Checker logs are under `/tmp/kiln-lint/` and
+`/tmp/kiln-p10/`.
+
+The final lanes-text recheck with Docker services still running was 13.0571
+µs/request (13.0458–13.1266), above the original 12.858 limit. After DB
+shutdown it was 12.907 (three rounds in
+`/tmp/kiln-regression/20261024-054138-93575/`). An unchanged P10-09 checkout
+under the same current conditions measured 13.0622 and the P10-00 checkout
+measured 13.0344. Thus the final lint changes did not show a CPU regression
+against either current control, while the original P10-00 numeric limit was
+not reproduced on today's machine. Raw control outputs are in
+`/tmp/kiln-p10/p10-10-lanes-before-lint.log` and
+`/tmp/kiln-p10/p10-10-lanes-baseline-now.log`.
+
+### P10-10 raw HTTP workers 1
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/compress_test.rb -> build/test/compress_test
+ok   compress_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/controller_test.rb -> build/test/controller_test
+ok   controller_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/cpu_pool_test.rb -> build/test/cpu_pool_test
+ok   cpu_pool_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/event_lanes_test.rb -> build/test/event_lanes_test
+ok   event_lanes_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/event_server_test.rb -> build/test/event_server_test
+ok   event_server_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/features_test.rb -> build/test/features_test
+ok   features_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/json_test.rb -> build/test/json_test
+ok   json_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/lifecycle_test.rb -> build/test/lifecycle_test
+ok   lifecycle_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/listen_test.rb -> build/test/listen_test
+ok   listen_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/payload_test.rb -> build/test/payload_test
+ok   payload_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/pool_close_test.rb -> build/test/pool_close_test
+ok   pool_close_test.rb
+test/pool_shutdown_test.rb -> build/test/pool_shutdown_test
+ok   pool_shutdown_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_interface_test.rb -> build/test/server_interface_test
+ok   server_interface_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_lifecycle_test.rb -> build/test/server_lifecycle_test
+ok   server_lifecycle_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_test.rb -> build/test/server_test
+ok   server_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/sigpipe_test.rb -> build/test/sigpipe_test
+ok   sigpipe_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/static_test.rb -> build/test/static_test
+ok   static_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/stream_test.rb -> build/test/stream_test
+ok   stream_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/timeouts_test.rb -> build/test/timeouts_test
+ok   timeouts_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/tls_test.rb -> build/test/tls_test
+ok   tls_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/units_test.rb -> build/test/units_test
+ok   units_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/websocket_test.rb -> build/test/websocket_test
+ok   websocket_test.rb
+22/22 passed under Spinel
+```
+
+### P10-10 raw HTTP workers 2
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/compress_test.rb -> build/test/compress_test
+ok   compress_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/controller_test.rb -> build/test/controller_test
+ok   controller_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/cpu_pool_test.rb -> build/test/cpu_pool_test
+ok   cpu_pool_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/event_lanes_test.rb -> build/test/event_lanes_test
+ok   event_lanes_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/event_server_test.rb -> build/test/event_server_test
+ok   event_server_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/features_test.rb -> build/test/features_test
+ok   features_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/json_test.rb -> build/test/json_test
+ok   json_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/lifecycle_test.rb -> build/test/lifecycle_test
+ok   lifecycle_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/listen_test.rb -> build/test/listen_test
+ok   listen_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/payload_test.rb -> build/test/payload_test
+ok   payload_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/pool_close_test.rb -> build/test/pool_close_test
+ok   pool_close_test.rb
+test/pool_shutdown_test.rb -> build/test/pool_shutdown_test
+ok   pool_shutdown_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_interface_test.rb -> build/test/server_interface_test
+ok   server_interface_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_lifecycle_test.rb -> build/test/server_lifecycle_test
+ok   server_lifecycle_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_test.rb -> build/test/server_test
+ok   server_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/sigpipe_test.rb -> build/test/sigpipe_test
+ok   sigpipe_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/static_test.rb -> build/test/static_test
+ok   static_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/stream_test.rb -> build/test/stream_test
+ok   stream_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/timeouts_test.rb -> build/test/timeouts_test
+ok   timeouts_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/tls_test.rb -> build/test/tls_test
+ok   tls_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/units_test.rb -> build/test/units_test
+ok   units_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/websocket_test.rb -> build/test/websocket_test
+ok   websocket_test.rb
+22/22 passed under Spinel
+```
+
+### P10-10 raw HTTP workers 4
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/compress_test.rb -> build/test/compress_test
+ok   compress_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/controller_test.rb -> build/test/controller_test
+ok   controller_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/cpu_pool_test.rb -> build/test/cpu_pool_test
+ok   cpu_pool_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/event_lanes_test.rb -> build/test/event_lanes_test
+ok   event_lanes_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/event_server_test.rb -> build/test/event_server_test
+ok   event_server_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/features_test.rb -> build/test/features_test
+ok   features_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/json_test.rb -> build/test/json_test
+ok   json_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/lifecycle_test.rb -> build/test/lifecycle_test
+ok   lifecycle_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/listen_test.rb -> build/test/listen_test
+ok   listen_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/payload_test.rb -> build/test/payload_test
+ok   payload_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/pool_close_test.rb -> build/test/pool_close_test
+ok   pool_close_test.rb
+test/pool_shutdown_test.rb -> build/test/pool_shutdown_test
+ok   pool_shutdown_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_interface_test.rb -> build/test/server_interface_test
+ok   server_interface_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_lifecycle_test.rb -> build/test/server_lifecycle_test
+ok   server_lifecycle_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/server_test.rb -> build/test/server_test
+ok   server_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/sigpipe_test.rb -> build/test/sigpipe_test
+ok   sigpipe_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/static_test.rb -> build/test/static_test
+ok   static_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/stream_test.rb -> build/test/stream_test
+ok   stream_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/timeouts_test.rb -> build/test/timeouts_test
+ok   timeouts_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/tls_test.rb -> build/test/tls_test
+ok   tls_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/units_test.rb -> build/test/units_test
+ok   units_test.rb
+ld: warning: ignoring duplicate libraries: '-lpthread'
+test/websocket_test.rb -> build/test/websocket_test
+ok   websocket_test.rb
+22/22 passed under Spinel
+```
+
+### P10-10 raw DB workers 1
+
+```text
+test/db/api_surface_test.rb -> build/test/db_api_surface_test
+ok   api_surface_test.rb
+test/db/copy_import_test.rb -> build/test/db_copy_import_test
+ok   copy_import_test.rb
+test/db/docs_examples_test.rb -> build/test/db_docs_examples_test
+ok   docs_examples_test.rb
+test/db/fix_regression_test.rb -> build/test/db_fix_regression_test
+ok   fix_regression_test.rb
+test/db/gate_a_test.rb -> build/test/db_gate_a_test
+ok   gate_a_test.rb
+test/db/gate_c_test.rb -> build/test/db_gate_c_test
+ok   gate_c_test.rb
+test/db/gate_orm_test.rb -> build/test/db_gate_orm_test
+ok   gate_orm_test.rb
+test/db/gen_emit_test.rb -> build/test/db_gen_emit_test
+ok   gen_emit_test.rb
+test/db/import_exact_status_test.rb -> build/test/db_import_exact_status_test
+ok   import_exact_status_test.rb
+test/db/int64_sentinel_test.rb -> build/test/db_int64_sentinel_test
+ok   int64_sentinel_test.rb
+test/db/load_test.rb -> build/test/db_load_test
+ok   load_test.rb
+test/db/number_test.rb -> build/test/db_number_test
+ok   number_test.rb
+test/db/pg_stmt_cache_test.rb -> build/test/db_pg_stmt_cache_test
+ok   pg_stmt_cache_test.rb
+test/db/pipeline_group_fault_test.rb -> build/test/db_pipeline_group_fault_test
+ok   pipeline_group_fault_test.rb
+test/db/pipeline_test.rb -> build/test/db_pipeline_test
+ok   pipeline_test.rb
+test/db/pipeline_tx_fault_test.rb -> build/test/db_pipeline_tx_fault_test
+ok   pipeline_tx_fault_test.rb
+test/db/q_gates_test.rb -> build/test/db_q_gates_test
+ok   q_gates_test.rb
+test/db/query_sql_test.rb -> build/test/db_query_sql_test
+ok   query_sql_test.rb
+test/db/row_batch_test.rb -> build/test/db_row_batch_test
+ok   row_batch_test.rb
+test/db/spinel_pinning_test.rb -> build/test/db_spinel_pinning_test
+ok   spinel_pinning_test.rb
+test/db/stmt_cache_test.rb -> build/test/db_stmt_cache_test
+ok   stmt_cache_test.rb
+test/db/stream_import_test.rb -> build/test/db_stream_import_test
+ok   stream_import_test.rb
+test/db/tls_policy_test.rb -> build/test/db_tls_policy_test
+ok   tls_policy_test.rb
+test/db/typed_decode_test.rb -> build/test/db_typed_decode_test
+ok   typed_decode_test.rb
+24/24 passed under Spinel
+```
+
+### P10-10 raw DB workers 2 first run
+
+```text
+test/db/api_surface_test.rb -> build/test/db_api_surface_test
+ok   api_surface_test.rb
+test/db/copy_import_test.rb -> build/test/db_copy_import_test
+ok   copy_import_test.rb
+test/db/docs_examples_test.rb -> build/test/db_docs_examples_test
+ok   docs_examples_test.rb
+test/db/fix_regression_test.rb -> build/test/db_fix_regression_test
+ok   fix_regression_test.rb
+test/db/gate_a_test.rb -> build/test/db_gate_a_test
+ok   gate_a_test.rb
+test/db/gate_c_test.rb -> build/test/db_gate_c_test
+ok   gate_c_test.rb
+test/db/gate_orm_test.rb -> build/test/db_gate_orm_test
+ok   gate_orm_test.rb
+test/db/gen_emit_test.rb -> build/test/db_gen_emit_test
+ok   gen_emit_test.rb
+test/db/import_exact_status_test.rb -> build/test/db_import_exact_status_test
+ok   import_exact_status_test.rb
+test/db/int64_sentinel_test.rb -> build/test/db_int64_sentinel_test
+ok   int64_sentinel_test.rb
+test/db/load_test.rb -> build/test/db_load_test
+ok   load_test.rb
+test/db/number_test.rb -> build/test/db_number_test
+ok   number_test.rb
+test/db/pg_stmt_cache_test.rb -> build/test/db_pg_stmt_cache_test
+ok   pg_stmt_cache_test.rb
+test/db/pipeline_group_fault_test.rb -> build/test/db_pipeline_group_fault_test
+ok   pipeline_group_fault_test.rb
+test/db/pipeline_test.rb -> build/test/db_pipeline_test
+ok   pipeline_test.rb
+test/db/pipeline_tx_fault_test.rb -> build/test/db_pipeline_tx_fault_test
+ok   pipeline_tx_fault_test.rb
+test/db/q_gates_test.rb -> build/test/db_q_gates_test
+ok   q_gates_test.rb
+test/db/query_sql_test.rb -> build/test/db_query_sql_test
+ok   query_sql_test.rb
+test/db/row_batch_test.rb -> build/test/db_row_batch_test
+ok   row_batch_test.rb
+test/db/spinel_pinning_test.rb -> build/test/db_spinel_pinning_test
+ok   spinel_pinning_test.rb
+test/db/stmt_cache_test.rb -> build/test/db_stmt_cache_test
+connect TLS/SSL error: Operation timed out (60) (Kiln::DB::ConnectionError)
+cache bad_cache ConfigError
+mysql prepare_delta<=2 yes
+mysql open_result yes
+mysql alter yes
+mysql disabled yes
+mysql bound yes
+mysql large_break yes
+mysql binds_eviction yes
+mysql failed_prepare yes
+mariadb prepare_delta<=2 yes
+mariadb open_result yes
+FAIL stmt_cache_test.rb: exit 1
+test/db/stream_import_test.rb -> build/test/db_stream_import_test
+ok   stream_import_test.rb
+test/db/tls_policy_test.rb -> build/test/db_tls_policy_test
+ok   tls_policy_test.rb
+test/db/typed_decode_test.rb -> build/test/db_typed_decode_test
+ok   typed_decode_test.rb
+23/24 passed under Spinel
+```
+
+### P10-10 raw DB workers 2 final run
+
+```text
+test/db/api_surface_test.rb -> build/test/db_api_surface_test
+ok   api_surface_test.rb
+test/db/copy_import_test.rb -> build/test/db_copy_import_test
+ok   copy_import_test.rb
+test/db/docs_examples_test.rb -> build/test/db_docs_examples_test
+ok   docs_examples_test.rb
+test/db/fix_regression_test.rb -> build/test/db_fix_regression_test
+ok   fix_regression_test.rb
+test/db/gate_a_test.rb -> build/test/db_gate_a_test
+ok   gate_a_test.rb
+test/db/gate_c_test.rb -> build/test/db_gate_c_test
+ok   gate_c_test.rb
+test/db/gate_orm_test.rb -> build/test/db_gate_orm_test
+ok   gate_orm_test.rb
+test/db/gen_emit_test.rb -> build/test/db_gen_emit_test
+ok   gen_emit_test.rb
+test/db/import_exact_status_test.rb -> build/test/db_import_exact_status_test
+ok   import_exact_status_test.rb
+test/db/int64_sentinel_test.rb -> build/test/db_int64_sentinel_test
+ok   int64_sentinel_test.rb
+test/db/load_test.rb -> build/test/db_load_test
+ok   load_test.rb
+test/db/number_test.rb -> build/test/db_number_test
+ok   number_test.rb
+test/db/pg_stmt_cache_test.rb -> build/test/db_pg_stmt_cache_test
+ok   pg_stmt_cache_test.rb
+test/db/pipeline_group_fault_test.rb -> build/test/db_pipeline_group_fault_test
+ok   pipeline_group_fault_test.rb
+test/db/pipeline_test.rb -> build/test/db_pipeline_test
+ok   pipeline_test.rb
+test/db/pipeline_tx_fault_test.rb -> build/test/db_pipeline_tx_fault_test
+ok   pipeline_tx_fault_test.rb
+test/db/q_gates_test.rb -> build/test/db_q_gates_test
+ok   q_gates_test.rb
+test/db/query_sql_test.rb -> build/test/db_query_sql_test
+ok   query_sql_test.rb
+test/db/row_batch_test.rb -> build/test/db_row_batch_test
+ok   row_batch_test.rb
+test/db/spinel_pinning_test.rb -> build/test/db_spinel_pinning_test
+ok   spinel_pinning_test.rb
+test/db/stmt_cache_test.rb -> build/test/db_stmt_cache_test
+ok   stmt_cache_test.rb
+test/db/stream_import_test.rb -> build/test/db_stream_import_test
+ok   stream_import_test.rb
+test/db/tls_policy_test.rb -> build/test/db_tls_policy_test
+ok   tls_policy_test.rb
+test/db/typed_decode_test.rb -> build/test/db_typed_decode_test
+ok   typed_decode_test.rb
+24/24 passed under Spinel
+```
+
+### P10-10 raw DB workers 4
+
+```text
+test/db/api_surface_test.rb -> build/test/db_api_surface_test
+ok   api_surface_test.rb
+test/db/copy_import_test.rb -> build/test/db_copy_import_test
+ok   copy_import_test.rb
+test/db/docs_examples_test.rb -> build/test/db_docs_examples_test
+ok   docs_examples_test.rb
+test/db/fix_regression_test.rb -> build/test/db_fix_regression_test
+ok   fix_regression_test.rb
+test/db/gate_a_test.rb -> build/test/db_gate_a_test
+ok   gate_a_test.rb
+test/db/gate_c_test.rb -> build/test/db_gate_c_test
+ok   gate_c_test.rb
+test/db/gate_orm_test.rb -> build/test/db_gate_orm_test
+ok   gate_orm_test.rb
+test/db/gen_emit_test.rb -> build/test/db_gen_emit_test
+ok   gen_emit_test.rb
+test/db/import_exact_status_test.rb -> build/test/db_import_exact_status_test
+ok   import_exact_status_test.rb
+test/db/int64_sentinel_test.rb -> build/test/db_int64_sentinel_test
+ok   int64_sentinel_test.rb
+test/db/load_test.rb -> build/test/db_load_test
+ok   load_test.rb
+test/db/number_test.rb -> build/test/db_number_test
+ok   number_test.rb
+test/db/pg_stmt_cache_test.rb -> build/test/db_pg_stmt_cache_test
+ok   pg_stmt_cache_test.rb
+test/db/pipeline_group_fault_test.rb -> build/test/db_pipeline_group_fault_test
+ok   pipeline_group_fault_test.rb
+test/db/pipeline_test.rb -> build/test/db_pipeline_test
+ok   pipeline_test.rb
+test/db/pipeline_tx_fault_test.rb -> build/test/db_pipeline_tx_fault_test
+ok   pipeline_tx_fault_test.rb
+test/db/q_gates_test.rb -> build/test/db_q_gates_test
+ok   q_gates_test.rb
+test/db/query_sql_test.rb -> build/test/db_query_sql_test
+ok   query_sql_test.rb
+test/db/row_batch_test.rb -> build/test/db_row_batch_test
+ok   row_batch_test.rb
+test/db/spinel_pinning_test.rb -> build/test/db_spinel_pinning_test
+ok   spinel_pinning_test.rb
+test/db/stmt_cache_test.rb -> build/test/db_stmt_cache_test
+ok   stmt_cache_test.rb
+test/db/stream_import_test.rb -> build/test/db_stream_import_test
+ok   stream_import_test.rb
+test/db/tls_policy_test.rb -> build/test/db_tls_policy_test
+ok   tls_policy_test.rb
+test/db/typed_decode_test.rb -> build/test/db_typed_decode_test
+ok   typed_decode_test.rb
+24/24 passed under Spinel
+```
+
+### P10-10 raw Final DB A/B
+
+```text
+bench/db/import_pluck.rb -> /tmp/kiln-p10/import_pluck_final
+bench/db/row_transfer.rb -> /tmp/kiln-p10/row_transfer_final
+=== import_pluck P10-00 A 1 ===
+pg import_us_per_row 5.42 pluck_ns_per_row 368 floor_ns_per_row 146
+mysql import_us_per_row 7.24 pluck_ns_per_row 449 floor_ns_per_row 295
+mariadb import_us_per_row 5.9 pluck_ns_per_row 426 floor_ns_per_row 283
+ok import_pluck
+RC 0
+=== import_pluck final B 1 ===
+pg import_us_per_row 3.91 pluck_ns_per_row 245 floor_ns_per_row 143
+mysql import_us_per_row 7.69 pluck_ns_per_row 301 floor_ns_per_row 278
+mariadb import_us_per_row 5.27 pluck_ns_per_row 303 floor_ns_per_row 271
+ok import_pluck
+RC 0
+=== import_pluck P10-04 A 1 ===
+pg import_us_per_row 5.35 pluck_ns_per_row 222 floor_ns_per_row 172
+mysql import_us_per_row 7.47 pluck_ns_per_row 287 floor_ns_per_row 309
+mariadb import_us_per_row 5.13 pluck_ns_per_row 294 floor_ns_per_row 270
+ok import_pluck
+RC 0
+=== import_pluck final B2 1 ===
+pg import_us_per_row 3.91 pluck_ns_per_row 230 floor_ns_per_row 172
+mysql import_us_per_row 7.43 pluck_ns_per_row 306 floor_ns_per_row 285
+mariadb import_us_per_row 5.57 pluck_ns_per_row 303 floor_ns_per_row 269
+ok import_pluck
+RC 0
+=== row_transfer P10-00 A 1 ===
+exec_per_row 720 ns
+exec_per_row_2_threads 1219 ns
+row_call 143 ns
+rows_call 59 ns
+locked_ffi_call 83 ns
+plain_ffi_call 2 ns
+codec_row 217 ns
+locked_ffi_call_2_threads 210 ns
+row_call_2_threads 344 ns
+rows_call_2_threads 59 ns
+ok row_transfer
+RC 0
+=== row_transfer final B 1 ===
+exec_per_row 726 ns
+exec_per_row_2_threads 780 ns
+row_call 310 ns
+rows_call 227 ns
+locked_ffi_call 78 ns
+plain_ffi_call 2 ns
+codec_row 267 ns
+locked_ffi_call_2_threads 159 ns
+row_call_2_threads 405 ns
+rows_call_2_threads 404 ns
+ok row_transfer
+RC 0
+=== import_pluck P10-00 A 2 ===
+pg import_us_per_row 5.37 pluck_ns_per_row 338 floor_ns_per_row 138
+mysql import_us_per_row 7.17 pluck_ns_per_row 441 floor_ns_per_row 292
+mariadb import_us_per_row 5.94 pluck_ns_per_row 423 floor_ns_per_row 293
+ok import_pluck
+RC 0
+=== import_pluck final B 2 ===
+pg import_us_per_row 3.93 pluck_ns_per_row 242 floor_ns_per_row 174
+mysql import_us_per_row 7.47 pluck_ns_per_row 309 floor_ns_per_row 293
+mariadb import_us_per_row 5.3 pluck_ns_per_row 297 floor_ns_per_row 272
+ok import_pluck
+RC 0
+=== import_pluck P10-04 A 2 ===
+pg import_us_per_row 5.43 pluck_ns_per_row 204 floor_ns_per_row 160
+mysql import_us_per_row 7.65 pluck_ns_per_row 287 floor_ns_per_row 289
+mariadb import_us_per_row 5.15 pluck_ns_per_row 291 floor_ns_per_row 311
+ok import_pluck
+RC 0
+=== import_pluck final B2 2 ===
+pg import_us_per_row 3.93 pluck_ns_per_row 228 floor_ns_per_row 127
+mysql import_us_per_row 7.28 pluck_ns_per_row 313 floor_ns_per_row 279
+mariadb import_us_per_row 5.68 pluck_ns_per_row 305 floor_ns_per_row 294
+ok import_pluck
+RC 0
+=== row_transfer P10-00 A 2 ===
+exec_per_row 741 ns
+exec_per_row_2_threads 1131 ns
+row_call 156 ns
+rows_call 52 ns
+locked_ffi_call 80 ns
+plain_ffi_call 2 ns
+codec_row 198 ns
+locked_ffi_call_2_threads 200 ns
+row_call_2_threads 340 ns
+rows_call_2_threads 54 ns
+ok row_transfer
+RC 0
+=== row_transfer final B 2 ===
+exec_per_row 669 ns
+exec_per_row_2_threads 857 ns
+row_call 315 ns
+rows_call 229 ns
+locked_ffi_call 75 ns
+plain_ffi_call 2 ns
+codec_row 271 ns
+locked_ffi_call_2_threads 154 ns
+row_call_2_threads 398 ns
+rows_call_2_threads 376 ns
+ok row_transfer
+RC 0
+=== import_pluck P10-00 A 3 ===
+pg import_us_per_row 5.43 pluck_ns_per_row 338 floor_ns_per_row 146
+mysql import_us_per_row 7.18 pluck_ns_per_row 450 floor_ns_per_row 303
+mariadb import_us_per_row 5.76 pluck_ns_per_row 427 floor_ns_per_row 282
+ok import_pluck
+RC 0
+=== import_pluck final B 3 ===
+pg import_us_per_row 3.99 pluck_ns_per_row 239 floor_ns_per_row 161
+mysql import_us_per_row 7.29 pluck_ns_per_row 305 floor_ns_per_row 277
+mariadb import_us_per_row 5.18 pluck_ns_per_row 310 floor_ns_per_row 275
+ok import_pluck
+RC 0
+=== import_pluck P10-04 A 3 ===
+pg import_us_per_row 5.47 pluck_ns_per_row 222 floor_ns_per_row 157
+mysql import_us_per_row 7.46 pluck_ns_per_row 291 floor_ns_per_row 278
+mariadb import_us_per_row 5.13 pluck_ns_per_row 309 floor_ns_per_row 269
+ok import_pluck
+RC 0
+=== import_pluck final B2 3 ===
+pg import_us_per_row 3.94 pluck_ns_per_row 262 floor_ns_per_row 178
+mysql import_us_per_row 7.23 pluck_ns_per_row 305 floor_ns_per_row 280
+mariadb import_us_per_row 5.52 pluck_ns_per_row 318 floor_ns_per_row 274
+ok import_pluck
+RC 0
+=== row_transfer P10-00 A 3 ===
+exec_per_row 740 ns
+exec_per_row_2_threads 1103 ns
+row_call 143 ns
+rows_call 53 ns
+locked_ffi_call 77 ns
+plain_ffi_call 2 ns
+codec_row 197 ns
+locked_ffi_call_2_threads 198 ns
+row_call_2_threads 356 ns
+rows_call_2_threads 55 ns
+ok row_transfer
+RC 0
+=== row_transfer final B 3 ===
+exec_per_row 744 ns
+exec_per_row_2_threads 959 ns
+row_call 310 ns
+rows_call 227 ns
+locked_ffi_call 78 ns
+plain_ffi_call 2 ns
+codec_row 274 ns
+locked_ffi_call_2_threads 149 ns
+row_call_2_threads 398 ns
+rows_call_2_threads 370 ns
+ok row_transfer
+RC 0
+```
+
+### P10-10 raw Lanes with DB services
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+bench/regression_server.rb -> build/bench/regression_server
+mode=lanes
+  text   lanes  wrk    saved
+results=/tmp/kiln-regression/20261024-054001-92890
+summary=/tmp/kiln-regression/20261024-054001-92890/summary.tsv
+medians=/tmp/kiln-regression/20261024-054001-92890/median.tsv
+```
+
+### P10-10 raw Lanes after DB shutdown
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+bench/regression_server.rb -> build/bench/regression_server
+mode=lanes
+  text   lanes  wrk    saved
+results=/tmp/kiln-regression/20261024-054138-93575
+summary=/tmp/kiln-regression/20261024-054138-93575/summary.tsv
+medians=/tmp/kiln-regression/20261024-054138-93575/median.tsv
+```
+
+### P10-10 raw Lanes unchanged checkout
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+bench/regression_server.rb -> build/bench/regression_server
+mode=lanes
+  text   lanes  wrk    saved
+results=/tmp/kiln-regression/20261024-054312-94167
+summary=/tmp/kiln-regression/20261024-054312-94167/summary.tsv
+medians=/tmp/kiln-regression/20261024-054312-94167/median.tsv
+```
+
+### P10-10 raw Lanes P10-00 checkout
+
+```text
+ld: warning: ignoring duplicate libraries: '-lpthread'
+bench/regression_server.rb -> build/bench/regression_server
+mode=lanes
+  text   lanes  wrk    saved
+results=/tmp/kiln-regression/20261024-054428-94899
+summary=/tmp/kiln-regression/20261024-054428-94899/summary.tsv
+medians=/tmp/kiln-regression/20261024-054428-94899/median.tsv
+```
+
+### P10-10 raw lanes with DB median.tsv
+
+```text
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+lanes	text	wrk	52662.89	0.4722	99	3.25	13.0571
+```
+
+### P10-10 raw lanes with DB summary.tsv
+
+```text
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+lanes	text	wrk	1	52454.45	0.47217000000000003	99	3.25	419759	false	5.51	13.1266
+lanes	text	wrk	2	52662.89	0.49249000000000004	99	3.32	421591	false	5.5	13.0458
+lanes	text	wrk	3	52935.83	0.44806	99	1.42	428887	false	5.6	13.0571
+```
+
+### P10-10 raw lanes after DB shutdown median.tsv
+
+```text
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+lanes	text	wrk	52994.24	0.4935	99	4.88	12.907
+```
+
+### P10-10 raw lanes after DB shutdown summary.tsv
+
+```text
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+lanes	text	wrk	1	53080.5	0.49119	99	3.61	424685	false	5.48	12.9037
+lanes	text	wrk	2	52994.24	0.49346	99	4.88	429224	false	5.54	12.907
+lanes	text	wrk	3	52916.71	0.50025	99	4.99	428657	false	5.54	12.9241
+```
+
+### P10-10 raw lanes unchanged checkout median.tsv
+
+```text
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+lanes	text	wrk	52352.61	0.566	99	7.5	13.0622
+```
+
+### P10-10 raw lanes unchanged checkout summary.tsv
+
+```text
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+lanes	text	wrk	1	52352.61	0.53965	99	6.15	424124	false	5.54	13.0622
+lanes	text	wrk	2	52127.18	0.56602	99	7.59	417324	false	5.46	13.0834
+lanes	text	wrk	3	52409.93	0.5678	99	7.5	419429	false	5.44	12.97
+```
+
+### P10-10 raw lanes P10-00 checkout median.tsv
+
+```text
+mode	feature	client	requests_per_second_median	average_latency_ms_median	tail_percentile	tail_latency_ms_median	cpu_us_per_request_median
+lanes	text	wrk	54309.83	0.5222	99	6.3	13.0344
+```
+
+### P10-10 raw lanes P10-00 checkout summary.tsv
+
+```text
+mode	feature	client	round	requests_per_second	average_latency_ms	tail_percentile	tail_latency_ms	requests	request_count_estimated	cpu_seconds	cpu_us_per_request
+lanes	text	wrk	1	54226.94	0.5150399999999999	99	5.57	434235	false	5.66	13.0344
+lanes	text	wrk	2	54309.83	0.5598200000000001	99	8.05	435000	false	5.67	13.0345
+lanes	text	wrk	3	54383.66	0.52224	99	6.3	440524	false	5.73	13.0072
+```
+
+## 0.0.10 review on Linux loopback
+
+This section reviews the P10 work above, records the fixes made in review, and
+replaces the statuses in the P10-10 table above. All numbers here come from
+one Linux host, so every DB gain threshold is judged here instead of
+`UNVERIFIED`.
+
+Host: Linux 6.18 x86-64, 2 vCPU, 7 GiB. Spinel
+`519280dc9edd136186c0b0767fb73766b6e45aba`. libpq 17.6 (`PQlibVersion`
+170006) at build and run time, MariaDB Connector/C 3.4.7 (30407). Servers run
+natively on 127.0.0.1: PostgreSQL 16.15, MySQL 8.0.46, MariaDB 10.11.14. These
+versions differ from `ci/db-versions.lock`, so every comparison is an A/B on
+the same host: A is the released 0.0.9 tree (`65237b1`), B the agent tree
+(`c725ff5`), C the reviewed tree. Medians are the middle of sorted runs; runs
+alternate. Each process exited 0.
+
+### Defects found in review and fixed
+
+1. `COPY` with `timestamps: true` wrote the client's `Time.now.utc` without
+   fractions, while `INSERT` writes the server's `CURRENT_TIMESTAMP`. With a
+   session `TimeZone` other than UTC both `timestamptz` and `timestamp` columns
+   got a different value; `copy_timestamps` in `test/db/copy_import_test.rb`
+   prints `0` on B. C reads `CAST(CURRENT_TIMESTAMP AS text)` once per group in
+   the import transaction and writes that text. A psql check on every column
+   type `CURRENT_TIMESTAMP` can be assigned to (`timestamptz`, `timestamp`,
+   `date`, `time`, `timetz`, `text`, `varchar`), with `TimeZone` Asia/Tokyo and
+   with `DateStyle` `SQL, DMY`, gave equal values for the `INSERT` and the text
+   form.
+2. A `COPY` interrupted by a timeout before the server answered left
+   `copy_stage` set: the connection stayed usable for queries, was not marked
+   broken, and every later import on it failed with `ConnectionError: copy`.
+   A timeout during the data transfer left a backend in `COPY` until the
+   socket closed. C sends a cancel request and marks the connection broken in
+   both cases (`pg_copy_cancel`), so the pool discards it.
+   `copy_timeout Timeout broken=true` in `copy_import_test.rb` covers the first
+   case; the probe output is below.
+3. The text export of a binary `float8` printed `nan`, `inf`, `-inf`, and
+   `%.17g` (`0.10000000000000001`). `Codec.decode` reads `nan` as `0.0`. C
+   prints `NaN`, `Infinity`, `-Infinity`, and the shortest of `%.15g`–`%.17g`
+   that reads back to the same double; integers use a direct conversion.
+   `result_bytes` of an automatically binary `bytea` returns the `\x` hex text
+   0.0.9 returned. The conversions apply only to results Kiln asked to be
+   binary (`result_format` 0); a caller that asks for binary still gets raw
+   bytes, as `gate_a` checks. `check_text_export` in
+   `test/db/typed_decode_test.rb` compares the text export with the typed rows.
+4. `ci/db-native.sh safety` did not link: the lifetime harness had no stubs for
+   `kiln_db_pg_result_rows_typed`, `kiln_db_my_result_rows_typed`, and
+   `kiln_db_pg_set_copy`.
+5. `hol_slow_handler` measured latency against 0.1 s. Under
+   `SPINEL_WORKERS=2 SPINEL_GC_STRESS=1` it failed on every run here
+   (worst `/fast` 0.21–0.31 s), and gave the same 0.21–0.26 s with no slow
+   request at all, so it measured GC stress, not head-of-line blocking. C parks
+   the slow handler on a queue that the test opens only after all 80 `/fast`
+   responses arrived, and checks that the slow handler had started and had not
+   finished by then. It passes at workers 1 and 2 and under GC stress, and fails
+   on the 0.0.9 lane dispatch. `pipelined_order_mixed` uses a separate `/nap`
+   route.
+6. The typed PostgreSQL export formatted every binary integer with `snprintf`
+   only to validate its length, and Ruby read cells through a
+   `[raw, lens, nums, floats]` Array, which Spinel holds as a polymorphic array.
+   C checks lengths directly and passes a `RowBatch` object. With B, pg `pluck`
+   missed its threshold on this host.
+7. The `COPY` payload was built by encoding every value twice and scanning
+   every String byte by byte in Ruby. C checks binary Strings without
+   allocating, appends integers directly, and searches for the four special
+   bytes with `include?`. Spinel copies a String that a callee mutates, so rows
+   are built locally and appended once. With B, pg import missed its threshold
+   on this host.
+8. `pg_note_oids` marked an entry as non-binary for good when its first named
+   run failed. C records column types only from a settled result.
+
+### P10-08
+
+The agent's `BLOCKED` was correct for the contract as written: requirement 4
+writes `state` while another thread may already hold `pins == 1`, which
+requirement 3 forbids. The contract was at fault. C keeps the registry mutex
+for allocation and multi-slot work (`put`, `take`, `take_conn_idle`,
+`arena_close`) and gives every slot its own spin lock for `acquire`,
+`release`, `pin`, `unpin`, and `use`. A field is written only with both locks
+held and read with either; `pins` is read and written only under the slot
+lock. `arena_close` holds the locks of the arena slot and all its block slots
+while it checks and retires them. Slots are aligned to 64 bytes: without that,
+two connections in adjacent slots shared a cache line and
+`locked_ffi_call_2_threads` stayed at 290–379 ns. This is a lock per slot, not
+the lock-free protocol of the contract.
+
+`bench/db_pin_stress.c` runs 4 threads acquiring and releasing over 64 handles
+while one thread takes and reopens slots; every object carries a canary.
+`ci/db-native.sh safety` runs it for 2 s under TSan and under ASan+UBSan.
+10 s runs:
+
+```
+-fsanitize=thread:            pin_stress acquires=10128841 stale=95312 busy=143311 closes=864483 canary_failures=0
+-fsanitize=address,undefined: pin_stress acquires=88954328 stale=818387 busy=794516 closes=5049847 canary_failures=0
+```
+
+With the slot lock removed from `kiln_db_slot_acquire`, the TSan build reports
+a data race within 3 s.
+
+### Measurements
+
+| item | series | A 0.0.9 | B agent | C review | threshold | C |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| P10-01 | 10 MB `alloc_thread_max_gap_ms` | 41.39 | 4.65 | = B | ≤ 35% of A | PASS (11%) |
+| P10-01 | 10 MB `middleware_gzip_alone call_ms` | 40.02 | 42.00 | = B | ≤ 110% of A | PASS (105%) |
+| P10-02 | `idle_rss` 8000, KB per connection | 8.91 | 0.87 | = B | ≤ 3.0 and ≤ 35% of A | PASS (10%) |
+| P10-02 | `idle_rss` 2000, KB per connection | 9.38 | 1.39 | = B | ≤ 3.0 | PASS |
+| P10-04 | pg `pluck_ns_per_row` (floor) | 250 | 196 (131) | 141 (112) | ≤ F + 0.5 (A − F) | PASS (limit 181; B limit 190.5, B fails) |
+| P10-04 | mysql `pluck_ns_per_row` (floor) | 387 | 216 (170) | 188 (167) | same | PASS (limit 277) |
+| P10-04 | mariadb `pluck_ns_per_row` (floor) | 416 | 299 (201) | 185 (166) | same | PASS (limit 291) |
+| P10-04 | `exec_per_row`, ns | 679 | 612 | 485 | ≤ 100% of A | PASS |
+| P10-04 | `exec_per_row_2_threads`, ns | 1170 | 1014 | 824 | ≤ 100% of A | PASS |
+| P10-05 | pg `import_us_per_row` | 4.72 | 3.87 | 3.33 | ≤ 80% of A | PASS (71%; B 82% fails) |
+| P10-05 | mysql `import_us_per_row` | 7.72 | 8.04 | 7.73 | ±5% of A | PASS |
+| P10-05 | mariadb `import_us_per_row` | 5.46 | 5.28 | 4.89 | ±5% of A | faster by 10%; the MySQL import path is unchanged and the A runs spread 5.12–5.47 |
+| P10-08 | `locked_ffi_call_2_threads`, ns | 580 | 529 | 146 | ≤ 50% of A | PASS (25%) |
+| P10-08 | `locked_ffi_call`, ns | 91 | 89 | 73 | ≤ 105% of A | PASS |
+| P10-08 | `exec_per_row_2_threads`, ns | 1170 | 1014 | 824 | ≤ 95% of A | PASS |
+
+The P10-01 and P10-02 C rows equal B: the review changed no HTTP or gzip code.
+`row_call` and `rows_call`, the text export of a cached statement, now pay for
+number formatting (A 97 / 42 ns, C 309 / 248 ns); no Ruby path in Kiln uses
+the text export, only `test/db/row_batch_test.rb`, `gate_a`, and the bench.
+`codec_row` is unchanged (A 240, C 231).
+
+HTTP `cpu_us_per_request` from `bench/regression.sh`
+(`SAMPLE=0 MODES="inline lanes" FEATURES="text gzip" CLIENTS=wrk ROUNDS=3 DURATION=8`),
+two interleaved runs per tree. Server and `wrk` share the 2 vCPU, so runs of
+one tree differ by up to 10%:
+
+| mode, feature | A run 1 / 2 | C run 1 / 2 |
+| --- | --- | --- |
+| inline text | 10.40 / 9.41 | 9.20 / 10.41 |
+| inline gzip | 14.24 / 14.52 | 13.43 / 14.55 |
+| lanes text | 14.27 / 14.38 | 13.51 / 13.93 |
+| lanes gzip | 18.58 / 18.49 | 17.05 / 18.19 |
+
+`test/db/typed_decode_test.rb.expected` gained the `text_export` line; its
+sha256 is now `8966137643c5091b819c85728ecd4ea3f3d3e91e41d26ee783a8e85b7952cf87`.
+On this host every line except two matches the snapshot: MariaDB 10.11 keeps
+`-0e0` as `-0.0` where MariaDB 11.4 stores `0.0`. The output on this host is
+identical to the 0.0.9 tree's output on the same servers, with the reviewed
+test.
+
+### Status after review
+
+| item | status | basis |
+| --- | --- | --- |
+| P10-00 | PASS | baseline above and A runs here |
+| P10-01 | PASS | Linux table |
+| P10-02 | PASS | Linux table |
+| P10-03 | PASS | deterministic `hol_slow_handler`, `pipelined_order_mixed`, `busy_cleanup`; `event_lanes` and `event_server` pass with `SPINEL_WORKERS=2 SPINEL_GC_STRESS=1`; lanes CPU within noise |
+| P10-04 | PASS | Linux table after fixes 3, 6, 8; `typed_decode` equal to 0.0.9 on these servers |
+| P10-05 | DEVIATION | pg and mysql pass; mariadb 10% faster, outside the literal ±5% band |
+| P10-06 | BLOCKED | needs Linux with ≥ 6 cores; this host has 2 |
+| P10-07 | BLOCKED | same |
+| P10-08 | BLOCKED | requirement 3 fails; per-slot locks shipped outside the contract, see above |
+| P10-09 | BLOCKED | same as P10-06 |
+| P10-10 | PASS | version `0.0.10` in `kiln/version.rb` and `spin.toml`, `CHANGELOG.md`, suites and checks below |
+
+### Raw output
+
+`gzip_call`, `size=10485760`, `SPINEL_WORKERS=2`, A/B alternating:
+
+```
+== A 1
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=39.86 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=40.27 alloc_thread_max_gap_ms=40.23 roundtrip=yes
+== B 1
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=42.24 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=49.79 alloc_thread_max_gap_ms=4.65 roundtrip=yes
+== A 2
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=40.02 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=48.11 alloc_thread_max_gap_ms=53.76 roundtrip=yes
+== B 2
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=41.2 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=48.56 alloc_thread_max_gap_ms=4.26 roundtrip=yes
+== A 3
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=40.02 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=38.21 alloc_thread_max_gap_ms=38.69 roundtrip=yes
+== B 3
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=41.65 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=48.37 alloc_thread_max_gap_ms=4.32 roundtrip=yes
+== A 4
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=39.94 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=40.68 alloc_thread_max_gap_ms=41.39 roundtrip=yes
+== B 4
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=42.0 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=48.47 alloc_thread_max_gap_ms=5.95 roundtrip=yes
+== A 5
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=40.04 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=40.83 alloc_thread_max_gap_ms=42.3 roundtrip=yes
+== B 5
+middleware_gzip_alone size=10485760 gz=2715192 call_ms=42.14 roundtrip=yes
+middleware_gzip size=10485760 gz=2715192 call_ms=48.59 alloc_thread_max_gap_ms=6.6 roundtrip=yes
+```
+
+`idle_rss`:
+
+```
+A 2000: idle_rss count=2000 before_kb=10156 after_kb=28976 per_conn_kb=9.41 (ready 2000)
+B 2000: idle_rss count=2000 before_kb=10088 after_kb=12908 per_conn_kb=1.41 (ready 2000)
+A 8000: idle_rss count=8000 before_kb=10152 after_kb=81440 per_conn_kb=8.91 (ready 8000)
+B 8000: idle_rss count=8000 before_kb=10212 after_kb=17116 per_conn_kb=0.86 (ready 8000)
+A 2000: idle_rss count=2000 before_kb=10020 after_kb=28776 per_conn_kb=9.38 (ready 2000)
+B 2000: idle_rss count=2000 before_kb=10120 after_kb=12908 per_conn_kb=1.39 (ready 2000)
+A 8000: idle_rss count=8000 before_kb=10156 after_kb=81408 per_conn_kb=8.91 (ready 8000)
+B 8000: idle_rss count=8000 before_kb=9992 after_kb=16992 per_conn_kb=0.88 (ready 8000)
+A 2000: idle_rss count=2000 before_kb=10144 after_kb=28896 per_conn_kb=9.38 (ready 2000)
+B 2000: idle_rss count=2000 before_kb=10148 after_kb=12808 per_conn_kb=1.33 (ready 2000)
+A 8000: idle_rss count=8000 before_kb=10120 after_kb=81344 per_conn_kb=8.90 (ready 8000)
+B 8000: idle_rss count=8000 before_kb=10132 after_kb=17068 per_conn_kb=0.87 (ready 8000)
+```
+
+`import_pluck` and `row_transfer`, `SPINEL_WORKERS=2`, A (`base`), B (`k`),
+C (`fin`) alternating:
+
+```
+== ip base 1
+pg import_us_per_row 4.68 pluck_ns_per_row 243 floor_ns_per_row 110
+mysql import_us_per_row 7.34 pluck_ns_per_row 379 floor_ns_per_row 184
+mariadb import_us_per_row 5.12 pluck_ns_per_row 408 floor_ns_per_row 181
+== rt base 1 exec_per_row 679 ns exec_per_row_2_threads 1102 ns row_call 97 ns rows_call 42 ns locked_ffi_call 91 ns codec_row 239 ns locked_ffi_call_2_threads 681 ns
+== ip k 1
+pg import_us_per_row 3.87 pluck_ns_per_row 191 floor_ns_per_row 131
+mysql import_us_per_row 8.04 pluck_ns_per_row 212 floor_ns_per_row 170
+mariadb import_us_per_row 5.09 pluck_ns_per_row 286 floor_ns_per_row 168
+== rt k 1 exec_per_row 596 ns exec_per_row_2_threads 855 ns row_call 312 ns rows_call 228 ns locked_ffi_call 85 ns codec_row 338 ns locked_ffi_call_2_threads 555 ns
+== ip fin 1
+pg import_us_per_row 3.25 pluck_ns_per_row 139 floor_ns_per_row 115
+mysql import_us_per_row 8.29 pluck_ns_per_row 188 floor_ns_per_row 167
+mariadb import_us_per_row 4.89 pluck_ns_per_row 180 floor_ns_per_row 164
+== rt fin 1 exec_per_row 483 ns exec_per_row_2_threads 731 ns row_call 309 ns rows_call 250 ns locked_ffi_call 73 ns codec_row 231 ns locked_ffi_call_2_threads 146 ns
+== ip base 2
+pg import_us_per_row 4.72 pluck_ns_per_row 250 floor_ns_per_row 118
+mysql import_us_per_row 8.03 pluck_ns_per_row 524 floor_ns_per_row 255
+mariadb import_us_per_row 5.47 pluck_ns_per_row 416 floor_ns_per_row 182
+== rt base 2 exec_per_row 673 ns exec_per_row_2_threads 1424 ns row_call 97 ns rows_call 40 ns locked_ffi_call 101 ns codec_row 241 ns locked_ffi_call_2_threads 580 ns
+== ip k 2
+pg import_us_per_row 3.86 pluck_ns_per_row 196 floor_ns_per_row 116
+mysql import_us_per_row 7.79 pluck_ns_per_row 216 floor_ns_per_row 170
+mariadb import_us_per_row 5.28 pluck_ns_per_row 299 floor_ns_per_row 205
+== rt k 2 exec_per_row 612 ns exec_per_row_2_threads 1014 ns row_call 294 ns rows_call 229 ns locked_ffi_call 89 ns codec_row 405 ns locked_ffi_call_2_threads 529 ns
+== ip fin 2
+pg import_us_per_row 3.33 pluck_ns_per_row 141 floor_ns_per_row 111
+mysql import_us_per_row 7.52 pluck_ns_per_row 187 floor_ns_per_row 165
+mariadb import_us_per_row 4.71 pluck_ns_per_row 185 floor_ns_per_row 166
+== rt fin 2 exec_per_row 485 ns exec_per_row_2_threads 1027 ns row_call 311 ns rows_call 244 ns locked_ffi_call 71 ns codec_row 231 ns locked_ffi_call_2_threads 136 ns
+== ip base 3
+pg import_us_per_row 4.91 pluck_ns_per_row 263 floor_ns_per_row 114
+mysql import_us_per_row 7.72 pluck_ns_per_row 387 floor_ns_per_row 187
+mariadb import_us_per_row 5.46 pluck_ns_per_row 429 floor_ns_per_row 181
+== rt base 3 exec_per_row 778 ns exec_per_row_2_threads 1170 ns row_call 105 ns rows_call 44 ns locked_ffi_call 80 ns codec_row 240 ns locked_ffi_call_2_threads 498 ns
+== ip k 3
+pg import_us_per_row 4.2 pluck_ns_per_row 244 floor_ns_per_row 160
+mysql import_us_per_row 8.15 pluck_ns_per_row 258 floor_ns_per_row 208
+mariadb import_us_per_row 5.3 pluck_ns_per_row 338 floor_ns_per_row 201
+== rt k 3 exec_per_row 690 ns exec_per_row_2_threads 1123 ns row_call 304 ns rows_call 222 ns locked_ffi_call 102 ns codec_row 340 ns locked_ffi_call_2_threads 201 ns
+== ip fin 3
+pg import_us_per_row 3.43 pluck_ns_per_row 144 floor_ns_per_row 112
+mysql import_us_per_row 7.73 pluck_ns_per_row 188 floor_ns_per_row 187
+mariadb import_us_per_row 5.17 pluck_ns_per_row 185 floor_ns_per_row 166
+== rt fin 3 exec_per_row 507 ns exec_per_row_2_threads 824 ns row_call 307 ns rows_call 248 ns locked_ffi_call 73 ns codec_row 229 ns locked_ffi_call_2_threads 156 ns
+```
+
+`COPY` timeout probes on C (`kiln_copy_to` is locked by another session; in
+the second probe a row trigger sleeps 1 ms and the payload is 12 MB):
+
+```
+copy while locked Kiln::DB::Timeout: copy
+broken_after_timeout true
+select after Kiln::DB::ConnectionError: connection broken; discard it
+copy after Kiln::DB::ConnectionError: connection broken; discard it
+count ok 0
+done
+copy slow Kiln::DB::Timeout: copy  1.02s
+broken_after_timeout true
+select after Kiln::DB::ConnectionError: connection broken; discard it 0.0s
+copy after Kiln::DB::ConnectionError: connection broken; discard it 0.0s
+activity ok [["idle", "COPY kiln_copy_slow (id, pad) "]] 0.0s
+done
+```
+
+The same lock-wait probe on B:
+
+```
+copy while locked Kiln::DB::Timeout: copy
+broken_after_timeout false
+select after ok 1
+copy after Kiln::DB::ConnectionError: copy
+count ok 0
+done
+```
+
+Text export of a cached `float8`/`bool`/`int2` row on B and on C (A prints the
+same as C):
+
+```
+B raw "naninf-inf0.100000000000000011.0000000000000001e+300t-5"
+C raw "NaNInfinity-Infinity0.11e+300t-5"
+```
+
+### Suites and checks on C
+
+- `SPINEL_WORKERS=1 ./test-spinel.sh` and `SPINEL_WORKERS=2 ./test-spinel.sh`:
+  22/22 each, exit 0.
+- `SPINEL_WORKERS=1 sh ci/db-test.sh` and `SPINEL_WORKERS=2 sh ci/db-test.sh`:
+  23/24 each. The one difference is `typed_decode`, and only in the two MariaDB
+  `-0.0` lines described above; every other test, including `gate_a`,
+  `copy_import`, `row_batch`, `stmt_cache`, `pg_stmt_cache`, `pipeline*`,
+  `load`, and `spinel_pinning`, matches its snapshot.
+- `event_lanes` and `event_server` with `SPINEL_WORKERS=2 SPINEL_GC_STRESS=1`:
+  match their snapshots.
+- `ci/db-native.sh unit`, `asan`, `affinity`, `safety`, `dns`: exit 0.
+- `sh ci/spin-build-smoke.sh`: `kiln spin build ok` with version `0.0.10`.
+- RuboCop 1.88.2 with the project settings over `kiln kiln.rb`, without
+  `Style/Documentation` and `Style/FrozenStringLiteralComment`: no offenses.
+- clang-format 21.1.8: `ext/kiln_http.c`, `ext/kiln_uv.c`,
+  `bench/db_pin_stress.c`, and the lifetime harness are clean; in the DB driver
+  files only the lines changed since 0.0.9 were formatted.
+- Not run here: `rubyfast`, `reek`, `flog`, `flay`, `cppcheck`, `lizard`, and
+  the suites at `SPINEL_WORKERS=4` (2 vCPU).
+
+### Follow-up after the macOS audit
+
+- P10-08 is BLOCKED by the contract text: requirement 3 makes the item
+  BLOCKED when a field read after the pin is written while `pins` may be
+  non-zero, and requirement 4 does exactly that. The shipped per-slot spin lock
+  is a different algorithm and is not the contract's compare-and-swap protocol.
+  Its measurements meet the P10-08 thresholds and `pin_stress` is clean under
+  TSan and ASan+UBSan on Linux and on macOS, but accepting it needs a contract
+  amendment.
+- P10-05 is a DEVIATION: MariaDB import is 4.89 µs against 5.46 µs on A,
+  10% faster and therefore outside the literal ±5% band. PostgreSQL and MySQL
+  meet their criteria.
+- P10-06, P10-07, and P10-09 stay BLOCKED (they need a Linux host with at least
+  6 cores). Linux performance thresholds are not confirmed on macOS.
+- `event_lanes` under `SPINEL_GC_STRESS=1` was reproduced here at
+  `SPINEL_WORKERS=4` (it passed at 2). Causes, all in the test:
+  `read_responses` stopped at a spurious `:wait_readable` and returned a partial
+  reply; `hol_slow_handler` ran on the default request timeout, so under GC
+  stress the slow request was answered 504 at its deadline before the gate
+  opened (the server was right); reads, gates, and start waits had 2–5 s limits.
+  Now `read_responses` retries on `:wait_readable`, the order server uses
+  `request_timeout: 60`, gates wait up to 30 s, and reads up to 10 s; a passing
+  run is not slower, because every wait ends on its event. The old
+  wall-clock check `fast_took < 0.2` waits on a gate, and in `event_server`
+  the blocked handler waits on a gate with a 0.3 s request timeout instead of
+  a 0.05 s timeout and `fast_elapsed < 0.3`.
+- Results on Linux, 2 vCPU: `event_lanes` matches its snapshot at 1, 2, and
+  4 workers, at 2 workers with GC stress, and in 6 of 6 runs at 4 workers with
+  GC stress (6 of 6 failed before, all on `hol_slow_handler`). `event_server`
+  matches in 6 of 6 runs at 4 workers with GC stress. The earlier macOS hang
+  of `event_server` was not reproduced here.
+
+## 0.0.10 review fixes
+
+An external review of 0.0.10 reported eight defects. Each was reproduced on the
+tree before these fixes (B) and checked on the fixed tree (C), Linux x86-64,
+2 vCPU, PostgreSQL 16.15, MySQL 8.0.46, MariaDB 10.11.14, Connector/C 3.4.7.
+The new tests are `test/db/review_fixes_test.rb` (PostgreSQL and MariaDB),
+`test/event_order_test.rb`, and the `plaintext-loopback` lines of
+`test/db/tls_policy_test.rb`.
+
+| # | defect | B | C |
+| --- | --- | --- | --- |
+| 1 | automatic `COPY` ignores the table | `FORCE ROW LEVEL SECURITY` table: `0A000 COPY FROM not supported with row-level security`; `ON INSERT DO ALSO` rule: 2 rows, 0 log rows | RLS table: 2 rows through `INSERT`; rule table: 2 rows, 2 log rows; a plain table with an `AFTER` row trigger still sees `COPY` |
+| 2 | NUL in PostgreSQL parameters | `SELECT $1::bytea` with `"a\0b".b` returns `"a"`, `"\0".b` returns `""`; `"before\0after"` is cut silently | all three binary values round-trip; a text value with NUL raises `ArgumentError`; `import` of `"x\0y".b` stores 3 bytes |
+| 3 | unbounded response queue | 64 pipelined `GET`s with 1 MiB replies, client not reading: 64 handlers run (`handlers: 2` and inline) | 4 handlers run, then the connection waits; after the client reads, all 64 replies arrive (67 115 731 bytes) |
+| 4 | `COPY` deadlock with a chatty server | 20 000 rows, `BEFORE` trigger sending a 4000-byte `NOTICE` per row: stops at the 20 s deadline, connection broken | completes; the whole test file runs in 0.7 s |
+| 5 | 400/501 overtakes an earlier response | `/slow` then a request without `Host` (or `CONNECT`, or target `x`) with `handlers: 2`: only the 400/501 arrives, the 200 is lost | 200 `slow`, then 400/501, then close; the request after the bad one does not run |
+| 6 | `DISCARD PLANS` leaks statements | 40 × (2 runs + `DISCARD PLANS`): 40 rows in `pg_prepared_statements` | 1 row; `DEALLOCATE ALL` gives 0, `DEALLOCATE kiln_sN` re-prepares 1 |
+| 7 | `returning` matches by a changed key | `BEFORE` trigger `id := 3 - id`: import succeeds and attributes rows to the wrong inputs | `UnsupportedReturn` before writing, 0 rows (PostgreSQL and MariaDB); the same import without `returning` writes both rows |
+| 8 | `tls: :disable` on Connector/C 3.4 | server started with `--skip-ssl`: `SSL is required, but the server does not support it`; TLS server: connected with TLS on | `--skip-ssl` server: connected, `Ssl_cipher` empty; TLS server: plaintext (the stand user has `REQUIRE SSL`, so the server refuses) |
+
+Changes. 1: `Schema.copy_table?` asks `pg_class` once per `import`; `COPY` runs
+only for `relkind` `r` or `p` without rules, without row-level security, and
+without statement-level `INSERT` triggers; otherwise `INSERT`. 2:
+`Codec.binary_text?` also treats an `ASCII-8BIT` String with a NUL as binary;
+a PostgreSQL text value with NUL raises `ArgumentError` in Ruby, and
+`kiln_db_pg_bind_str` refuses it with `KILN_DB_UNSUPPORTED`; `COPY` rows follow
+the same rule. 3: `kiln_uv.c` stops parsing and reading a connection while
+`out_len + sending + tls_pending` is at least 256 KiB and resumes below 64 KiB
+(after a write completes or a flush); `kiln_uv_next` skips the queued requests
+of such a connection; with `handlers: N` the next job of a connection is not
+started while its backlog is at least 256 KiB and is promoted from the pump
+when it drops below 64 KiB. 4: every PostgreSQL wait after `PQflush` returns 1,
+`PQputCopyData` returns 0, or `PQputCopyEnd` returns 0 calls `PQconsumeInput`
+and waits for read or write (`KILN_DB_READY_BOTH`), in `pg_pump`, the pipeline
+flush and take, and the `COPY` stages. 5: `kiln_uv_refuse` stops parsing and
+drops queued requests of the connection; when a request of that connection is
+still running, streaming, or uploading, the 400/501 becomes a prepared
+`Context` (`prepared = true`, no handler call) that is delivered through the
+same per-connection order. 6: `pg_drop_kind` recognises `DISCARD ALL`,
+`DEALLOCATE [PREPARE] ALL`, and `DEALLOCATE [PREPARE] <name>`; other `DISCARD`
+forms keep the cache; `26000` forgets only the failed name. 7: before writing,
+`returning: true` counts `BEFORE` row triggers on `INSERT` (and `UPDATE` with
+`on_duplicate_key_update:`) on the table and its partitions, plus PostgreSQL
+rules, and raises `UnsupportedReturn` when there is any; several unmatched rows
+are no longer paired with inputs by position (one unmatched input and one
+unmatched row still pair). 8: `my_plain` sets `MYSQL_OPT_SSL_ENFORCE` and
+`MYSQL_OPT_SSL_VERIFY_SERVER_CERT` to 0 for `tls: :disable`.
+
+### Measurements after the fixes
+
+`bench/db/import_pluck.rb`, 3 alternating runs (B, C), medians:
+
+| series | B | C |
+| --- | ---: | ---: |
+| pg `import_us_per_row` | 3.48 | 3.48 |
+| pg `pluck_ns_per_row` | 142 | 145 |
+| mysql `import_us_per_row` | 8.52 | 8.55 |
+| mariadb `import_us_per_row` | 5.20 | 5.26 |
+
+MySQL `pluck_ns_per_row` was noisy on C (255, 229, 182, then 182, 203, 182;
+B 182–187); the pluck path is unchanged by these fixes. The MySQL import is
+slower on this host today than in the 0.0.10 review table above for both trees.
+
+### Suites and checks on C
+
+- `SPINEL_WORKERS=1` and `2 ./test-spinel.sh`: 23/23 each.
+- `SPINEL_WORKERS=1` and `2 sh ci/db-test.sh`: 24/25 each; the only difference
+  is the two MariaDB 10.11 `-0.0` lines of `typed_decode` described above.
+- `event_lanes`, `event_server`, `event_order` at `SPINEL_WORKERS=4
+  SPINEL_GC_STRESS=1`: 3 of 3 runs each match; `event_order` also matches at
+  2 and 4 workers with and without GC stress.
+- `ci/db-native.sh unit`, `asan`, `affinity`, `safety`, `dns`: exit 0.
+- `sh ci/spin-build-smoke.sh`: `kiln spin build ok`.
+- RuboCop 1.88.2 with `TargetRubyVersion: 3.4` over `kiln kiln.rb`, without
+  `Style/Documentation` and `Style/FrozenStringLiteralComment`: no offenses.
+- clang-format 21.1.8: `ext/kiln_uv.c` clean; changed lines of the DB drivers
+  clean.
+- Not run here: the MySQL 8 trigger case (the stand's MySQL needs
+  `log_bin_trust_function_creators` for a non-SUPER user), macOS, TLS
+  listeners under backpressure.
+
+## Follow-up audit of the corrected 0.0.10 archive
+
+The supplied archive containing the earlier review fixes was used as the base.
+Additional corrections cover binary ASCII/backslash parameters, COPY identity
+semantics, skipped-row detection and rollback, stable schema inspection during
+DDL and snapshot transactions, hidden trigger metadata, commented and quoted
+DEALLOCATE statements, database-equivalent key matching, and unique-index
+validation after changing the current MySQL/MariaDB database. HTTP now treats
+connection resets as errors, discards queued jobs for closed connections, and
+keys deferred upload refusals by connection generation. The plaintext TLS test
+requires a successful connection and checks its actual TLS state.
+
+The follow-up used Linux x86-64, Spinel 2026.09.12+7939 (519280dc9), PostgreSQL
+17.11 with libpq 18.6, and MariaDB 10.11.14 with Connector/C 3.4.8. These are not
+the complete pinned ARM/Docker matrix in `ci/db-versions.lock`.
+
+- Final `./test-spinel.sh`: 23/24 snapshots matched. `listen_test` cannot bind
+  its Unix-domain socket in this execution environment (`Operation not
+  permitted`). TCP, HTTP, streaming, shutdown, TLS, and WebSocket suites passed.
+- `audit_regression_test`, `schema_guard_test`, `review_fixes_test`,
+  `copy_import_test`, `pg_stmt_cache_test`, and `tls_disable_test` passed against
+  live local database servers.
+- `number_test`, `int64_sentinel_test`, `query_sql_test`, and
+  `api_surface_test` passed.
+- The PostgreSQL/MariaDB portions of `stream_import_test`, `row_batch_test`,
+  and `tls_policy_test` passed. The MySQL portions were not run against MariaDB
+  as a substitute for MySQL.
+- `typed_decode_test` completed its PostgreSQL/MariaDB assertions. Its snapshot
+  differs in two MariaDB 10.11 lines: the server returns `-0.0` where the pinned
+  snapshot expects `0.0`. The snapshot was not changed to hide that difference.
+- All DB C sources passed `-std=c11 -Wall -Wextra -Werror` compilation checks.
+  `ci/db-native.sh safety` passed its ASan/UBSan and TSan lifetime and concurrent
+  pin tests, with zero canary failures. LeakSanitizer was disabled because it
+  cannot inspect process threads in this environment.
+- clang-format, clang-tidy, cppcheck (normal and exhaustive), and lizard ran.
+  Inspected diagnostics included FFI exports reported as unused, ownership
+  transferred to the libuv write callback, and generic C buffer/style warnings.
+- Rubyfast, RuboCop, Reek, Flog, and Flay were unavailable; their invocations
+  failed with `command not found`. Their cleanliness is not established.
+- PostgreSQL 18, MySQL 8.4, MariaDB 11.4, macOS, and ARM were not exercised in
+  this follow-up. The earlier benchmark numbers belong to the earlier review;
+  the additional schema checks and canonical-key lookups have not been benchmarked.
+
+The added regressions are `test/backpressure_order_test.rb`,
+`test/db/audit_regression_test.rb`, `test/db/schema_guard_test.rb`, and
+`test/db/tls_disable_test.rb`. Updated import restrictions and fallback behavior
+are documented in `DB.md`.
+
+## Review of the follow-up audit
+
+The follow-up above was checked on Linux x86-64, 2 vCPU, PostgreSQL 16.15,
+MySQL 8.0.46, MariaDB 10.11.14, Connector/C 3.4.7. The local stand was aligned
+with `ci/db-services.sh`: the PostgreSQL user is a superuser (as
+`POSTGRES_USER` in the image), the MySQL and MariaDB users have no
+`REQUIRE SSL`, and `KILN_DB_MY_ROOT_PASSWORD` is set. Under a superuser the
+`FORCE ROW LEVEL SECURITY` case of `review_fixes` passes on any tree;
+`audit_regression` covers row-level security through a non-superuser role.
+
+Kept as written: the `GENERATED ALWAYS` identity fallback, the affected-row
+check on `INSERT` pages, `ROW EXCLUSIVE` before the catalog checks, the
+`REPEATABLE READ`/`SERIALIZABLE` fallback, the MySQL `TRIGGER` visibility and
+base-table checks, `DATABASE()` in the MySQL checks, comment- and
+quote-aware `DEALLOCATE`, the canonical key match, the read-error close, the
+generation-keyed held refusals, and dropping queued jobs of a closed
+connection.
+
+Changed:
+
+1. `Codec.binary_text?`. Sending every `ASCII-8BIT` String as binary broke
+   values that are text in a binary String. On the follow-up tree:
+
+   ```
+   SELECT $1::int + 1   with '41'.b         08P01 insufficient data left in message
+   SELECT $1::numeric   with '1.5'.b        08P01 insufficient data left in message
+   SELECT $1::date      with '2026-10-24'.b 22P03 incorrect binary data format
+   SELECT $1::jsonb     with '{"a":1}'.b    XX000 unsupported jsonb version number 123
+   ```
+
+   The `bytea` defect only needs a backslash: the `bytea` text input reads
+   nothing else specially. A binary String is now sent as binary when it has
+   non-ASCII bytes, a NUL, or a backslash; `'\\x41'.b` and `'a\\\\b'.b`
+   round-trip through `bytea`, and `'41'.b`/`'{"a":1}'.b` bind to `int` and
+   `jsonb` again (`review_fixes` checks both).
+2. `COPY` for tables with `BEFORE` row triggers. The follow-up sent them to
+   `INSERT` to catch skipped rows, but `copy_payload` already compares the
+   `COPY` row count with the rows sent and raises `InvariantViolation`; a
+   skipping trigger on a partition is caught the same way (`schema_guard`).
+   20 000 rows into a table with a one-line `BEFORE` trigger: 4.93–4.99 µs per
+   row through `INSERT`, 3.78–3.90 through `COPY`.
+3. `SHARE UPDATE EXCLUSIVE` on partitioned tables. The lock conflicts with
+   itself, so a second import into the same partitioned table waited for the
+   first transaction (`55P03` under `lock_timeout = 100ms` on the follow-up
+   tree), two transactions importing into two partitioned tables in opposite
+   order could deadlock, and a role with only `INSERT` lost `COPY` and
+   `returning` on partitioned tables. The import takes `ROW EXCLUSIVE` only;
+   a partition attached by another session during an import is not covered by
+   the `returning` trigger check (`DB.md`).
+4. Canonical key lookup. One `SELECT` per unmatched input became one
+   `UNION ALL` query per page. `import(returning: true,
+   on_duplicate_key_ignore: true)` of 1000 rows with 500 present: 37.5–40.2 ms
+   before, 31.7–32.0 ms after on loopback; the old cost grows with 500 round
+   trips per page.
+5. A dropped queued job of a closed connection also drops its body inlet.
+6. `test/db/tls_disable_test.rb` was removed: `tls_policy` checks the same
+   MariaDB plaintext connection and its `Ssl_cipher`.
+7. RuboCop over `kiln` reported 18 offenses on the follow-up tree;
+   `SchemaGuard` and `Batch::Canonical` were split out and `kiln` is clean.
+
+### Results
+
+- `SPINEL_WORKERS=1` and `2 ./test-spinel.sh`: 24/24 each.
+- `SPINEL_WORKERS=1` and `2 sh ci/db-test.sh`: 26/27 each; the only difference
+  is the two MariaDB 10.11 `-0.0` lines of `typed_decode`. `audit_regression`,
+  `schema_guard`, `review_fixes`, `tls_policy`, `copy_import`,
+  `pg_stmt_cache`, and `stream_import` match.
+- `backpressure_order`, `event_order`, `event_lanes`, `event_server`: match at
+  1 and 2 workers and at `SPINEL_WORKERS=4 SPINEL_GC_STRESS=1`.
+- `ci/db-native.sh unit`, `asan`, `affinity`, `safety`, `dns`: exit 0.
+  `sh ci/spin-build-smoke.sh`: `kiln spin build ok`.
+- `bench/db/import_pluck.rb`, 3 alternating runs, v0.0.10 commit and this
+  tree: pg `import_us_per_row` 3.38 and 3.42, mysql 8.61 and 8.26, mariadb
+  5.12 and 5.16 (medians); `pluck` within noise.
+- RuboCop 1.88.2 with `TargetRubyVersion: 3.4` over `kiln kiln.rb`: no
+  offenses. clang-format 21.1.8: changed C lines clean.
+- Not run: the MySQL 8 `TRIGGER`-visibility path (the hidden-trigger test
+  uses MariaDB), PostgreSQL 17/18, MySQL 8.4, MariaDB 11.4, macOS.
+
+## Spinel 2e5295be4
+
+Compiler pin: `2e5295be4f1010dda79e88e6d4417081ab29f2cc` (Dockerfile, both
+workflows, `ci/spin-build-smoke.sh` checks the revision).
+
+Failures on the 0.0.10 tree: `kiln/static.rb` was refused at
+`ctx.req.params[@param]`; `Server.new(router, ...)` answered every request with
+`NoMethodError: undefined method 'call' for Kiln::Routing::Router` (the
+generated `@handler.call` had no `Router` branch: the handler went through a
+`Data` options object built with `super(**DEFAULTS, **options)`); `Log#error`
+failed the same way; `Base#begin_handling` returned `nil` or an Integer and
+raised `TypeError` during shutdown; `backpressure_order` blocked the only worker
+on `sock.read`.
+
+Changes: `Server::Settings` replaces `EventOptions`, `BaseOptions` and `Rules`:
+a defaults table per backend, one rules table with the old messages, and one
+typed reader per setting. The handler and the application are engine
+arguments. `log:` is narrowed to `Kiln::Observability::Log` or nil.
+`begin_handling` returns `0` when registration is refused. `Static#respond`
+reads the parameter key into a local.
+
+`SPINEL_WORKERS=1` and `2 ./test-spinel.sh` on Spinel 2e5295be4: 26/26.
+RuboCop 1.88.2 over `kiln kiln.rb`: no offenses. The DB suite does not touch
+these files and was not rerun.

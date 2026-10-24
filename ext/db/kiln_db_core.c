@@ -1,6 +1,7 @@
 #include "kiln_db.h"
 
 #include <stdio.h>
+#include <float.h>
 #include <limits.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
@@ -709,6 +710,60 @@ char *kiln_db_thread_room(size_t need) {
     return data->bytes;
 }
 
+int kiln_db_format_i64(int64_t value, char *out, size_t cap) {
+    char rev[24];
+    uint64_t mag = value < 0 ? (uint64_t)0 - (uint64_t)value : (uint64_t)value;
+    int n = 0;
+    int at = 0;
+    do {
+        rev[n++] = (char)('0' + (int)(mag % 10u));
+        mag /= 10u;
+    } while (mag != 0);
+    if (!out || (size_t)n + 2u > cap) {
+        return -1;
+    }
+    if (value < 0) {
+        out[at++] = '-';
+    }
+    while (n > 0) {
+        out[at++] = rev[--n];
+    }
+    out[at] = 0;
+    return at;
+}
+
+static int kiln_db_put_word(const char *word, char *out, size_t cap) {
+    size_t n = strlen(word);
+    if (!out || n + 1u > cap) {
+        return -1;
+    }
+    memcpy(out, word, n + 1u);
+    return (int)n;
+}
+
+int kiln_db_format_f64(double value, char *out, size_t cap) {
+    int digits;
+    if (value != value) {
+        return kiln_db_put_word("NaN", out, cap);
+    }
+    if (value > DBL_MAX) {
+        return kiln_db_put_word("Infinity", out, cap);
+    }
+    if (value < -DBL_MAX) {
+        return kiln_db_put_word("-Infinity", out, cap);
+    }
+    for (digits = 15; digits <= 17; digits++) {
+        int n = out ? snprintf(out, cap, "%.*g", digits, value) : -1;
+        if (n <= 0 || (size_t)n >= cap) {
+            return -1;
+        }
+        if (digits == 17 || strtod(out, NULL) == value) {
+            return n;
+        }
+    }
+    return -1;
+}
+
 static const char *kiln_db_thread_bytes(void) {
     kiln_db_thread_data *data = kiln_db_thread_get();
     return data ? data->bytes : NULL;
@@ -797,6 +852,41 @@ const char *kiln_db_result_rows(uint64_t handle, uint64_t scope, uint64_t thread
     return out;
 }
 
+const char *kiln_db_result_rows_typed(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    int64_t first_row, int64_t max_rows, int64_t max_bytes, int64_t *lens, int lens_cap,
+    int64_t *nums, double *floats, int64_t *meta, int meta_n) {
+    static const char empty[] = "";
+    const char *out = empty;
+    kiln_db_conn *conn;
+    sp_ffi_bin_len = 0;
+    if (!meta || meta_n < 3) {
+        return empty;
+    }
+    meta[0] = -2;
+    meta[1] = 0;
+    meta[2] = 0;
+    if (!lens || !nums || !floats || lens_cap <= 0 || first_row < 0 ||
+        first_row > (int64_t)UINT32_MAX || max_rows <= 0 || max_bytes <= 0) {
+        return empty;
+    }
+    if (kiln_db_pin_conn(handle, scope, thread_id) != KILN_DB_OK) {
+        return empty;
+    }
+    conn = kiln_db_held_conn;
+    if (max_rows > (int64_t)UINT32_MAX) {
+        max_rows = (int64_t)UINT32_MAX;
+    }
+    if (conn->kind == KILN_DB_KIND_PG) {
+        out = kiln_db_pg_result_rows_typed(conn, (uint32_t)first_row, (uint32_t)max_rows,
+            (size_t)max_bytes, lens, lens_cap, nums, floats, meta);
+    } else if (conn->kind == KILN_DB_KIND_MY) {
+        out = kiln_db_my_result_rows_typed(conn, (uint32_t)first_row, (uint32_t)max_rows,
+            (size_t)max_bytes, lens, lens_cap, nums, floats, meta);
+    }
+    kiln_db_unpin_conn(handle, scope, thread_id);
+    return out;
+}
+
 int kiln_db_conn_set(uint64_t handle, uint64_t scope, uint64_t thread_id, const char *host,
     size_t host_len, int port, const char *user, size_t user_len, const char *pass, size_t pass_len,
     const char *database, size_t database_len, int ssl_mode, const char *ca, size_t ca_len,
@@ -821,6 +911,45 @@ int kiln_db_set_sql(
         return pin;
     }
     value = kiln_db_set_sql_impl(handle, scope, thread_id, sql, sql_len);
+    kiln_db_unpin_conn(handle, scope, thread_id);
+    return value;
+}
+
+static int kiln_db_set_copy_impl(
+    uint64_t handle, uint64_t scope, uint64_t thread_id, const char *data, long len) {
+    const kiln_db_limits *limits = kiln_db_limits_get();
+    kiln_db_conn *conn;
+    int err = KILN_DB_OK;
+    conn = kiln_db_conn_get(handle, scope, thread_id, &err);
+    if (!conn) {
+        return err;
+    }
+    if (conn->active_op) {
+        return KILN_DB_BUSY;
+    }
+    if (conn->kind != KILN_DB_KIND_PG) {
+        return KILN_DB_UNSUPPORTED;
+    }
+    if (!limits) {
+        return KILN_DB_CONFIG;
+    }
+    if (len < 0 || (len > 0 && !data)) {
+        return KILN_DB_ERR;
+    }
+    if ((uint64_t)len > limits->max_payload_bytes) {
+        return KILN_DB_CAPACITY;
+    }
+    return kiln_db_pg_set_copy(conn, data, len);
+}
+
+int kiln_db_set_copy(
+    uint64_t handle, uint64_t scope, uint64_t thread_id, const char *data, long len) {
+    int pin = kiln_db_pin_conn(handle, scope, thread_id);
+    int value;
+    if (pin != KILN_DB_OK) {
+        return pin;
+    }
+    value = kiln_db_set_copy_impl(handle, scope, thread_id, data, len);
     kiln_db_unpin_conn(handle, scope, thread_id);
     return value;
 }

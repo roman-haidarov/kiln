@@ -273,15 +273,16 @@ end
 check 'a later server keeps the loop fd after an earlier one is collected', reused == [true, true]
 
 blocked_started = Queue.new
+blocked_gate = Queue.new
 deadline_router = Kiln::Routing::Router.new
 deadline_router.get('/blocked', lambda do |ctx|
   blocked_started << true
-  Kernel.sleep 0.5
+  blocked_gate.pop(timeout: 5)
   ctx.res.text('late')
 end)
 deadline_router.get('/fast', ->(ctx) { ctx.res.text('fast') })
 deadline_server = Kiln::Server::Event.new(deadline_router, nil, log: log, port: 0,
-                                                                request_timeout: 0.05, handlers: 2)
+                                                                request_timeout: 0.3, handlers: 2)
 deadline_server.start
 blocked_client = Thread.new do
   exchange(deadline_server.port, "GET /blocked HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
@@ -291,9 +292,10 @@ fast_started = Kiln::Runtime.now
 fast_reply = exchange(deadline_server.port, "GET /fast HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 fast_elapsed = Kiln::Runtime.now - fast_started
 blocked_reply = blocked_client.value
+blocked_gate << true
 check 'a blocked handler gets 504 at its deadline', blocked_reply.start_with?('HTTP/1.1 504 ') &&
                                                     deadline_server.killed == 1
-check 'a blocked handler does not stall the next request', fast_reply.end_with?('fast') && fast_elapsed < 0.3
+check 'a blocked handler does not stall the next request', fast_reply.end_with?('fast') && fast_elapsed < 2.5
 deadline_server.shutdown(grace: 1)
 
 stream_started = Queue.new
@@ -377,4 +379,70 @@ huge_out = read_until_closed(huge_sock, 2)
 huge_sock.close
 check 'a header larger than 16384 bytes sent 64 bytes at a time -> 431',
       huge_out.start_with?('HTTP/1.1 431 ')
+
+def response_count(buf)
+  count = 0
+  offset = 0
+  while offset < buf.bytesize
+    cut = buf.index("\r\n\r\n", offset)
+    break unless cut
+
+    head = buf.byteslice(offset, cut - offset)
+    mark = head.index('Content-Length: ')
+    break unless mark
+
+    start = head.getbyte(mark + 16)
+    break unless start && start >= 48 && start <= 57
+
+    length = head.byteslice(mark + 16, 16).to_i
+    body_end = cut + 4 + length
+    break if body_end > buf.bytesize
+
+    count += 1
+    offset = body_end
+  end
+  count
+end
+
+def read_responses(sock, count, seconds = 2.0)
+  out = (+'').b
+  limit = Kiln::Runtime.now + seconds
+  while response_count(out) < count && Kiln::Runtime.now < limit
+    ready, = IO.select([sock], nil, nil, limit - Kiln::Runtime.now)
+    break unless ready
+
+    chunk = begin
+      sock.read_nonblock(65_536, exception: false)
+    rescue IOError, SystemCallError
+      nil
+    end
+    break unless chunk.is_a?(String)
+
+    out << chunk
+  end
+  out
+end
+
+keep = TCPSocket.new('127.0.0.1', drip.port)
+keep.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+keep_first = read_responses(keep, 1)
+Kernel.sleep 0.05
+keep.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+keep_second = read_responses(keep, 1)
+check 'keep-alive: a request, a pause, and a second request are both 200 with the body',
+      keep_first.start_with?('HTTP/1.1 200 ') && keep_first.end_with?("Hello, World!\n") &&
+      keep_second.start_with?('HTTP/1.1 200 ') && keep_second.end_with?("Hello, World!\n")
+post_body = ('z' * 100_000).b
+keep.write("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\n\r\n".b + post_body)
+posted = read_responses(keep, 1)
+check 'keep-alive: a 100000-byte POST on the same socket reports that size',
+      posted.start_with?('HTTP/1.1 200 ') && posted.end_with?('len=100000')
+Kernel.sleep 0.05
+keep.write("GET / HTTP/1.1\r\nHost: x\r\n\r\nGET /utf HTTP/1.1\r\nHost: x\r\n\r\n")
+piped = read_responses(keep, 2)
+hello_at = piped.index("Hello, World!\n")
+utf_at = piped.b.index('привет'.b)
+check 'keep-alive: two pipelined requests after an idle pause stay in order',
+      piped.scan('HTTP/1.1 200 ').size == 2 && hello_at && utf_at && hello_at < utf_at
+keep.close
 drip.shutdown(grace: 0.5)

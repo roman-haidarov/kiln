@@ -83,7 +83,7 @@ module Kiln
         def begin_handling(slot, deadline)
           shard = slot.shard
           @shard_locks[shard].synchronize do
-            start_handling(slot, deadline) if handling_open?(slot, shard)
+            handling_open?(slot, shard) ? start_handling(slot, deadline) : 0
           end
         end
 
@@ -180,7 +180,7 @@ module Kiln
         rescue Runtime::ClientGone
           false
         rescue *Kiln::Runtime::FAILURES => e
-          @log.error("upgrade #{e.class}: #{e.message}")
+          @log&.error("upgrade #{e.class}: #{e.message}")
           false
         end
 
@@ -224,7 +224,7 @@ module Kiln
         rescue Runtime::ClientGone
           false
         rescue *Kiln::Runtime::FAILURES => e
-          @log.error("stream #{e.class}: #{e.message}")
+          @log&.error("stream #{e.class}: #{e.message}")
           false
         end
 

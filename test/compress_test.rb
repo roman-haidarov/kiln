@@ -303,5 +303,28 @@ log = Kiln::Observability::Log.new(StringIO.new)
   check "#{name}: the whole SSE stream inflates", Zlib.gunzip(dechunk(wire)).end_with?("data: second\n\n")
   server.shutdown(grace: 1.0)
 end
+def next_seed(seed) = ((seed * 1_103_515_245) + 12_345) % 2_147_483_648
+
+def pseudo_body(size)
+  out = (+'').b
+  seed = 12_345
+  while out.bytesize < size
+    seed = next_seed(seed)
+    out << "{\"id\":#{seed},\"name\":\"user-#{seed % 99_991}\",\"score\":#{seed % 1000},\"tag\":\"t#{seed % 37}\"}\n"
+  end
+  out.byteslice(0, size)
+end
+
+def round_gzip(text, level: 2)
+  app = Kiln::Middleware::Compress.new(->(ctx) { ctx.res.text(text) }, level: level)
+  packed = gz(app, '/')
+  packed.headers['Content-Encoding'] == 'gzip' && Zlib.gunzip(packed.body) == text
+end
+
+large = pseudo_body(300_000)
+check 'a 300000-byte body round-trips', round_gzip(large)
+check '262144 bytes round-trip', round_gzip(pseudo_body(262_144))
+check '262145 bytes round-trip', round_gzip(pseudo_body(262_145))
+check 'level 9 round-trips a 300000-byte body', round_gzip(large, level: 9)
 log.close
 puts 'done'

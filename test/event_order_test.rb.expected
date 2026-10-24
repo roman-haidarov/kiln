@@ -1,0 +1,7 @@
+ok   handlers 2: an unread pipeline of 1 MiB replies runs a bounded number of handlers
+ok   handlers 2: every pipelined reply arrives once the client reads
+ok   handlers 0: an unread pipeline of 1 MiB replies runs a bounded number of handlers
+ok   handlers 0: every pipelined reply arrives once the client reads
+ok   a request without Host is answered after the earlier response
+ok   CONNECT is answered after the earlier response
+ok   a bad target is answered after the earlier response

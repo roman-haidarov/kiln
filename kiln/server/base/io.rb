@@ -30,7 +30,7 @@ module Kiln
       end
 
       def log_accept_error(error, delay)
-        @log.error("accept error: #{error.class}: #{error.message}; retrying in #{delay}s")
+        @log&.error("accept error: #{error.class}: #{error.message}; retrying in #{delay}s")
       rescue *Kiln::Runtime::FAILURES
         nil
       end

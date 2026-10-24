@@ -5,6 +5,13 @@ spinel=${SPINEL:-spinel}
 spinel_path=$(command -v "$spinel")
 spinel_dir=$(CDPATH= cd -- "$(dirname -- "$spinel_path")" && pwd -P)
 spin=${SPIN:-$spinel_dir/spin}
+if [ -n "${SPINEL_REF:-}" ]; then
+  actual=$("$spinel" --version | sed -n 's/^[^(]*(\([^)]*\)).*/\1/p')
+  case "$SPINEL_REF" in
+    "$actual"*) ;;
+    *) printf 'Spinel revision mismatch: expected %s, got %s\n' "$SPINEL_REF" "$actual" >&2; exit 1 ;;
+  esac
+fi
 if ! command -v "$spin" >/dev/null 2>&1; then
   printf 'spin executable not found: %s\n' "$spin" >&2
   exit 1

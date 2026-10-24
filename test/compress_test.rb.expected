@@ -61,4 +61,8 @@ ok   event/2: the whole SSE stream inflates
 ok   base: gzip over the wire
 ok   base: the first gzipped event arrives before the stream ends
 ok   base: the whole SSE stream inflates
+ok   a 300000-byte body round-trips
+ok   262144 bytes round-trip
+ok   262145 bytes round-trip
+ok   level 9 round-trips a 300000-byte body
 done

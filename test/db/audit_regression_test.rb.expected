@@ -1,0 +1,12 @@
+ok import RLS
+ok returning foreign keys
+ok import rules
+ok bind integrity
+ok statement retirement
+ok returning identity
+ok skipped insert rollback
+ok identity COPY fallback
+ok commented DEALLOCATE
+ok quoted DEALLOCATE
+ok canonical conflict mapping
+ok duplex COPY

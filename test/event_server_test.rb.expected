@@ -40,3 +40,6 @@ ok   a stream below max_streams completes
 ok   a request sent one byte at a time matches the whole request
 ok   a write split before each of the last four header bytes matches
 ok   a header larger than 16384 bytes sent 64 bytes at a time -> 431
+ok   keep-alive: a request, a pause, and a second request are both 200 with the body
+ok   keep-alive: a 100000-byte POST on the same socket reports that size
+ok   keep-alive: two pipelined requests after an idle pause stay in order

@@ -1,17 +1,19 @@
 #include "kiln_db.h"
 
 #include <pthread.h>
+#include <sched.h>
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
-    int state;
+    _Alignas(64) int state;
     int kind;
     uint32_t generation;
     uint64_t scope;
     uint64_t thread_id;
     void *ptr;
     uint32_t pins;
+    int lock;
 } db_slot;
 
 typedef struct {
@@ -25,6 +27,31 @@ static kiln_db_limits lim;
 static int ready;
 static db_slot *slots;
 static int64_t metric_values[KILN_DB_METRIC_N];
+
+static void slot_lock(db_slot *slot) {
+    int spins = 0;
+    while (__atomic_exchange_n(&slot->lock, 1, __ATOMIC_ACQUIRE)) {
+        if (++spins >= 64) {
+            spins = 0;
+            sched_yield();
+        }
+    }
+}
+
+static void slot_unlock(db_slot *slot) {
+    __atomic_store_n(&slot->lock, 0, __ATOMIC_RELEASE);
+}
+
+static int slot_check(
+    const db_slot *slot, uint32_t gen, int kind, uint64_t scope, uint64_t thread_id) {
+    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
+        return KILN_DB_STALE;
+    }
+    if (slot->scope != scope || slot->thread_id != thread_id) {
+        return KILN_DB_OWNERSHIP;
+    }
+    return KILN_DB_OK;
+}
 
 static int limits_same(const kiln_db_limits *a, const kiln_db_limits *b) {
     return a->max_live_slots == b->max_live_slots && a->block_rows == b->block_rows &&
@@ -62,7 +89,10 @@ int kiln_db_configure(const kiln_db_limits *next) {
         return same ? KILN_DB_OK : KILN_DB_CONFIG;
     }
     lim = *next;
-    slots = calloc((size_t)lim.max_live_slots + 1u, sizeof *slots);
+    slots = aligned_alloc(64, ((size_t)lim.max_live_slots + 1u) * sizeof *slots);
+    if (slots) {
+        memset(slots, 0, ((size_t)lim.max_live_slots + 1u) * sizeof *slots);
+    }
     if (!slots) {
         pthread_mutex_unlock(&mu);
         return KILN_DB_CAPACITY;
@@ -129,6 +159,7 @@ uint64_t kiln_db_slot_put(int kind, void *ptr, uint64_t scope, uint64_t thread_i
         if (slots[i].state != KILN_DB_SLOT_FREE) {
             continue;
         }
+        slot_lock(&slots[i]);
         if (slots[i].generation == 0) {
             slots[i].generation = 1;
         }
@@ -139,6 +170,7 @@ uint64_t kiln_db_slot_put(int kind, void *ptr, uint64_t scope, uint64_t thread_i
         slots[i].scope = scope;
         slots[i].thread_id = thread_id;
         handle = ((uint64_t)slots[i].generation << 32) | (uint64_t)i;
+        slot_unlock(&slots[i]);
         pthread_mutex_unlock(&mu);
         *err = KILN_DB_OK;
         return handle;
@@ -152,7 +184,8 @@ void *kiln_db_slot_use(uint64_t handle, int kind, uint64_t scope, uint64_t threa
     uint32_t id = (uint32_t)handle;
     uint32_t gen = (uint32_t)(handle >> 32);
     db_slot *slot;
-    void *ptr;
+    void *ptr = NULL;
+    int rc;
     if (!err) {
         return NULL;
     }
@@ -161,22 +194,17 @@ void *kiln_db_slot_use(uint64_t handle, int kind, uint64_t scope, uint64_t threa
         kiln_db_metric_add(KILN_DB_METRIC_STALE, 1);
         return NULL;
     }
-    pthread_mutex_lock(&mu);
     slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
-        pthread_mutex_unlock(&mu);
-        *err = KILN_DB_STALE;
+    slot_lock(slot);
+    rc = slot_check(slot, gen, kind, scope, thread_id);
+    if (rc == KILN_DB_OK) {
+        ptr = slot->ptr;
+    }
+    slot_unlock(slot);
+    if (rc == KILN_DB_STALE) {
         kiln_db_metric_add(KILN_DB_METRIC_STALE, 1);
-        return NULL;
     }
-    if (slot->scope != scope || slot->thread_id != thread_id) {
-        pthread_mutex_unlock(&mu);
-        *err = KILN_DB_OWNERSHIP;
-        return NULL;
-    }
-    ptr = slot->ptr;
-    pthread_mutex_unlock(&mu);
-    *err = KILN_DB_OK;
+    *err = rc;
     return ptr;
 }
 
@@ -184,22 +212,19 @@ int kiln_db_slot_pin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_
     uint32_t id = (uint32_t)handle;
     uint32_t gen = (uint32_t)(handle >> 32);
     db_slot *slot;
-    int rc = KILN_DB_OK;
+    int rc;
     if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
         return KILN_DB_STALE;
     }
-    pthread_mutex_lock(&mu);
     slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
-        rc = KILN_DB_STALE;
-    } else if (slot->scope != scope || slot->thread_id != thread_id) {
-        rc = KILN_DB_OWNERSHIP;
-    } else if (slot->pins) {
+    slot_lock(slot);
+    rc = slot_check(slot, gen, kind, scope, thread_id);
+    if (rc == KILN_DB_OK && slot->pins) {
         rc = KILN_DB_BUSY;
-    } else {
+    } else if (rc == KILN_DB_OK) {
         slot->pins = 1;
     }
-    pthread_mutex_unlock(&mu);
+    slot_unlock(slot);
     return rc;
 }
 
@@ -208,24 +233,21 @@ void *kiln_db_slot_acquire(uint64_t handle, int kind, uint64_t scope, uint64_t t
     uint32_t gen = (uint32_t)(handle >> 32);
     db_slot *slot;
     void *ptr = NULL;
-    int rc = KILN_DB_OK;
+    int rc;
     if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
         *err = KILN_DB_STALE;
         return NULL;
     }
-    pthread_mutex_lock(&mu);
     slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
-        rc = KILN_DB_STALE;
-    } else if (slot->scope != scope || slot->thread_id != thread_id) {
-        rc = KILN_DB_OWNERSHIP;
-    } else if (slot->pins) {
+    slot_lock(slot);
+    rc = slot_check(slot, gen, kind, scope, thread_id);
+    if (rc == KILN_DB_OK && slot->pins) {
         rc = KILN_DB_BUSY;
-    } else {
+    } else if (rc == KILN_DB_OK) {
         slot->pins = 1;
         ptr = slot->ptr;
     }
-    pthread_mutex_unlock(&mu);
+    slot_unlock(slot);
     *err = rc;
     return ptr;
 }
@@ -237,103 +259,36 @@ void kiln_db_slot_release(uint64_t handle, int kind) {
     if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
         return;
     }
-    pthread_mutex_lock(&mu);
     slot = &slots[id];
+    slot_lock(slot);
     if (slot->state == KILN_DB_SLOT_LIVE && slot->generation == gen && slot->kind == kind &&
         slot->pins == 1) {
         slot->pins = 0;
     }
-    pthread_mutex_unlock(&mu);
+    slot_unlock(slot);
 }
 
 int kiln_db_slot_unpin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id) {
     uint32_t id = (uint32_t)handle;
     uint32_t gen = (uint32_t)(handle >> 32);
     db_slot *slot;
-    int rc = KILN_DB_OK;
+    int rc;
     if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
         return KILN_DB_STALE;
     }
-    pthread_mutex_lock(&mu);
     slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
-        rc = KILN_DB_STALE;
-    } else if (slot->scope != scope || slot->thread_id != thread_id || slot->pins != 1) {
+    slot_lock(slot);
+    rc = slot_check(slot, gen, kind, scope, thread_id);
+    if (rc == KILN_DB_OK && slot->pins != 1) {
         rc = KILN_DB_OWNERSHIP;
-    } else {
+    } else if (rc == KILN_DB_OK) {
         slot->pins = 0;
     }
-    pthread_mutex_unlock(&mu);
+    slot_unlock(slot);
     return rc;
 }
 
-int kiln_db_slot_take_conn_idle(uint64_t handle, uint64_t scope, uint64_t thread_id, void **out) {
-    uint32_t id = (uint32_t)handle;
-    uint32_t gen = (uint32_t)(handle >> 32);
-    db_slot *slot;
-    kiln_db_conn *conn;
-    int rc = KILN_DB_OK;
-    if (!out) {
-        return KILN_DB_ERR;
-    }
-    *out = NULL;
-    if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
-        return KILN_DB_STALE;
-    }
-    pthread_mutex_lock(&mu);
-    slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen ||
-        slot->kind != KILN_DB_SLOT_CONN) {
-        rc = KILN_DB_STALE;
-    } else if (slot->scope != scope || slot->thread_id != thread_id) {
-        rc = KILN_DB_OWNERSHIP;
-    } else if (slot->pins) {
-        rc = KILN_DB_BUSY;
-    } else {
-        conn = slot->ptr;
-        if (!conn || (conn->active_op && !pthread_equal(conn->owner, pthread_self()))) {
-            rc = KILN_DB_BUSY;
-        } else {
-            *out = slot->ptr;
-            slot->ptr = NULL;
-            if (slot->generation == UINT32_MAX) {
-                slot->state = KILN_DB_SLOT_RETIRED;
-            } else {
-                slot->generation++;
-                slot->state = KILN_DB_SLOT_FREE;
-            }
-        }
-    }
-    pthread_mutex_unlock(&mu);
-    return rc;
-}
-
-int kiln_db_slot_take(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, void **out) {
-    uint32_t id = (uint32_t)handle;
-    uint32_t gen = (uint32_t)(handle >> 32);
-    db_slot *slot;
-    if (!out) {
-        return KILN_DB_ERR;
-    }
-    *out = NULL;
-    if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
-        return KILN_DB_STALE;
-    }
-    pthread_mutex_lock(&mu);
-    slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen || slot->kind != kind) {
-        pthread_mutex_unlock(&mu);
-        return KILN_DB_STALE;
-    }
-    if (slot->scope != scope || slot->thread_id != thread_id) {
-        pthread_mutex_unlock(&mu);
-        return KILN_DB_OWNERSHIP;
-    }
-    if (slot->pins) {
-        pthread_mutex_unlock(&mu);
-        return KILN_DB_BUSY;
-    }
-    *out = slot->ptr;
+static void slot_retire(db_slot *slot) {
     slot->ptr = NULL;
     slot->pins = 0;
     if (slot->generation == UINT32_MAX) {
@@ -342,8 +297,65 @@ int kiln_db_slot_take(uint64_t handle, int kind, uint64_t scope, uint64_t thread
         slot->generation++;
         slot->state = KILN_DB_SLOT_FREE;
     }
+}
+
+static int conn_idle(const db_slot *slot) {
+    const kiln_db_conn *conn = slot->ptr;
+    return conn && (!conn->active_op || pthread_equal(conn->owner, pthread_self()));
+}
+
+int kiln_db_slot_take_conn_idle(uint64_t handle, uint64_t scope, uint64_t thread_id, void **out) {
+    uint32_t id = (uint32_t)handle;
+    uint32_t gen = (uint32_t)(handle >> 32);
+    db_slot *slot;
+    int rc;
+    if (!out) {
+        return KILN_DB_ERR;
+    }
+    *out = NULL;
+    if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
+        return KILN_DB_STALE;
+    }
+    slot = &slots[id];
+    pthread_mutex_lock(&mu);
+    slot_lock(slot);
+    rc = slot_check(slot, gen, KILN_DB_SLOT_CONN, scope, thread_id);
+    if (rc == KILN_DB_OK && (slot->pins || !conn_idle(slot))) {
+        rc = KILN_DB_BUSY;
+    } else if (rc == KILN_DB_OK) {
+        *out = slot->ptr;
+        slot_retire(slot);
+    }
+    slot_unlock(slot);
     pthread_mutex_unlock(&mu);
-    return KILN_DB_OK;
+    return rc;
+}
+
+int kiln_db_slot_take(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, void **out) {
+    uint32_t id = (uint32_t)handle;
+    uint32_t gen = (uint32_t)(handle >> 32);
+    db_slot *slot;
+    int rc;
+    if (!out) {
+        return KILN_DB_ERR;
+    }
+    *out = NULL;
+    if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
+        return KILN_DB_STALE;
+    }
+    slot = &slots[id];
+    pthread_mutex_lock(&mu);
+    slot_lock(slot);
+    rc = slot_check(slot, gen, kind, scope, thread_id);
+    if (rc == KILN_DB_OK && slot->pins) {
+        rc = KILN_DB_BUSY;
+    } else if (rc == KILN_DB_OK) {
+        *out = slot->ptr;
+        slot_retire(slot);
+    }
+    slot_unlock(slot);
+    pthread_mutex_unlock(&mu);
+    return rc;
 }
 
 uint64_t kiln_db_arena_open(uint64_t scope, uint64_t thread_id, int *err) {
@@ -369,83 +381,87 @@ uint64_t kiln_db_arena_open(uint64_t scope, uint64_t thread_id, int *err) {
     return handle;
 }
 
-static void slot_retire(db_slot *slot) {
-    slot->ptr = NULL;
-    slot->pins = 0;
-    if (slot->generation == UINT32_MAX) {
-        slot->state = KILN_DB_SLOT_RETIRED;
-    } else {
-        slot->generation++;
-        slot->state = KILN_DB_SLOT_FREE;
+static int arena_block(const db_slot *slot, uint32_t arena_id, uint64_t scope, uint64_t thread_id) {
+    const kiln_db_block *block = slot->ptr;
+    return slot->state == KILN_DB_SLOT_LIVE && slot->kind == KILN_DB_SLOT_BLOCK && block &&
+           block->arena_id == arena_id && block->scope == scope && block->thread_id == thread_id;
+}
+
+static uint32_t arena_lock_blocks(
+    uint32_t id, uint64_t scope, uint64_t thread_id, uint32_t *ids, int *busy) {
+    uint32_t i;
+    uint32_t n = 0;
+    *busy = 0;
+    for (i = 1; i <= lim.max_live_slots; i++) {
+        if (i == id || !arena_block(&slots[i], id, scope, thread_id)) {
+            continue;
+        }
+        slot_lock(&slots[i]);
+        ids[n++] = i;
+        if (slots[i].pins) {
+            *busy = 1;
+        }
+    }
+    return n;
+}
+
+static void arena_unlock_blocks(const uint32_t *ids, uint32_t n) {
+    uint32_t i;
+    for (i = 0; i < n; i++) {
+        slot_unlock(&slots[ids[i]]);
     }
 }
 
 int kiln_db_arena_close(uint64_t handle, uint64_t scope, uint64_t thread_id) {
     void **blocks;
+    uint32_t *ids;
     db_slot *slot;
     uint32_t i;
-    uint32_t n = 0;
+    uint32_t n;
     uint32_t id = (uint32_t)handle;
     uint32_t gen = (uint32_t)(handle >> 32);
-    void *arena;
+    void *arena = NULL;
+    int rc;
+    int busy;
     if (!ready || id == 0 || gen == 0 || id > lim.max_live_slots) {
         return KILN_DB_STALE;
     }
     blocks = calloc(lim.max_live_slots, sizeof *blocks);
-    if (!blocks) {
+    ids = calloc(lim.max_live_slots, sizeof *ids);
+    if (!blocks || !ids) {
+        free(blocks);
+        free(ids);
         return KILN_DB_CAPACITY;
     }
-    pthread_mutex_lock(&mu);
     slot = &slots[id];
-    if (slot->state != KILN_DB_SLOT_LIVE || slot->generation != gen ||
-        slot->kind != KILN_DB_SLOT_ARENA) {
-        pthread_mutex_unlock(&mu);
-        free(blocks);
-        return KILN_DB_STALE;
+    pthread_mutex_lock(&mu);
+    slot_lock(slot);
+    rc = slot_check(slot, gen, KILN_DB_SLOT_ARENA, scope, thread_id);
+    if (rc == KILN_DB_OK && slot->pins) {
+        rc = KILN_DB_BUSY;
     }
-    if (slot->scope != scope || slot->thread_id != thread_id) {
-        pthread_mutex_unlock(&mu);
-        free(blocks);
-        return KILN_DB_OWNERSHIP;
+    n = rc == KILN_DB_OK ? arena_lock_blocks(id, scope, thread_id, ids, &busy) : 0;
+    if (rc == KILN_DB_OK && busy) {
+        rc = KILN_DB_BUSY;
     }
-    if (slot->pins) {
-        pthread_mutex_unlock(&mu);
-        free(blocks);
-        return KILN_DB_BUSY;
-    }
-    for (i = 1; i <= lim.max_live_slots; i++) {
-        kiln_db_block *b;
-        if (slots[i].state != KILN_DB_SLOT_LIVE || slots[i].kind != KILN_DB_SLOT_BLOCK) {
-            continue;
-        }
-        b = slots[i].ptr;
-        if (b && b->arena_id == id && b->scope == scope && b->thread_id == thread_id &&
-            slots[i].pins) {
-            pthread_mutex_unlock(&mu);
-            free(blocks);
-            return KILN_DB_BUSY;
+    if (rc == KILN_DB_OK) {
+        arena = slot->ptr;
+        slot_retire(slot);
+        for (i = 0; i < n; i++) {
+            blocks[i] = slots[ids[i]].ptr;
+            slot_retire(&slots[ids[i]]);
         }
     }
-    arena = slot->ptr;
-    slot_retire(slot);
-    for (i = 1; i <= lim.max_live_slots; i++) {
-        kiln_db_block *block;
-        if (slots[i].state != KILN_DB_SLOT_LIVE || slots[i].kind != KILN_DB_SLOT_BLOCK) {
-            continue;
-        }
-        block = slots[i].ptr;
-        if (!block || block->arena_id != id || block->scope != scope ||
-            block->thread_id != thread_id) {
-            continue;
-        }
-        blocks[n++] = block;
-        slot_retire(&slots[i]);
-    }
+    arena_unlock_blocks(ids, n);
+    slot_unlock(slot);
     pthread_mutex_unlock(&mu);
-    for (i = 0; i < n; i++) {
-        kiln_db_block_free(blocks[i]);
+    if (rc == KILN_DB_OK) {
+        for (i = 0; i < n; i++) {
+            kiln_db_block_free(blocks[i]);
+        }
+        free(arena);
     }
     free(blocks);
-    free(arena);
-    return KILN_DB_OK;
+    free(ids);
+    return rc;
 }
