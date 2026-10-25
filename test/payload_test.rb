@@ -138,6 +138,8 @@ router.seal!
                          "Connection: close\r\n\r\n" \
                          "zz\r\nab\r\n0\r\n\r\n")
   check "#{label}: a malformed chunk size -> 400", reply.start_with?('HTTP/1.1 400 ')
+  check "#{label}: a malformed chunked body is reported the same way on every backend",
+        reply.end_with?("malformed request body\n")
 
   reply = exchange(port, "POST /zero HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n" \
                          "3\r\nabc\r\n0\r\n\r\n")

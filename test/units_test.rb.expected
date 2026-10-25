@@ -29,9 +29,21 @@ ok   each returns detached header names that cannot rename stored headers
 ok   HTTP::Date.value is a copy; changing it never reaches the wire
 ok   Date header is recognized case-insensitively
 ok   coop_budget rejects negative values
+ok   both engines default to the loopback address
+ok   Log writes a line out before it is closed
 -- HTTP syntax
 ok   header parsing does not modify input string
 ok   repeated headers are combined
+ok   repeated Cookie uses a semicolon in both parsers
+ok   empty WebSocket payload has a two-byte frame header
+ok   WebSocket frame headers use the minimal length encoding at each boundary
+ok   upgrade bounds idle reads at 60 seconds unless idle_timeout says otherwise
+ok   idle_timeout rejects zero, negative, infinite, NaN and too large values
+ok   WebSocket origins default to the request host
+ok   WebSocket origins reject another host, port, scheme or an opaque origin
+ok   WebSocket origins accept an HTTPS page behind TLS termination but no HTTP page on an HTTPS request
+ok   WebSocket origins match a list exactly and accept *
+ok   origins rejects an empty list, a bare string and non-string entries
 ok   duplicate Host is rejected
 ok   body length limit works independently of server
 ok   absolute-form extracts path and authority

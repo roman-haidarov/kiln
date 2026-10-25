@@ -236,6 +236,19 @@ rescue ArgumentError
   :rejected
 end
 check 'coop_budget rejects negative values', r == :rejected
+check 'both engines default to the loopback address',
+      Kiln::Server::Settings.base({}).host == '127.0.0.1' && Kiln::Server::Settings.event({}).host == '127.0.0.1'
+log_path = "/tmp/kiln-log-flush-#{Process.pid}.log"
+log_file = File.open(log_path, 'w')
+file_log = Kiln::Observability::Log.new(log_file)
+file_log.info('flushed line')
+log_limit = Kiln::Runtime.now + 2
+Kernel.sleep 0.01 until File.read(log_path).include?('flushed line') || Kiln::Runtime.now > log_limit
+log_seen = File.read(log_path)
+file_log.close
+log_file.close
+File.delete(log_path)
+check 'Log writes a line out before it is closed', log_seen.include?('flushed line')
 
 puts '-- HTTP syntax'
 head = "GET /items/42 HTTP/1.1\r\nHost: example.org\r\nAccept: text/plain\r\nAccept: application/json".b
@@ -244,6 +257,66 @@ check 'header parsing does not modify input string', head.include?("Accept: text
 check 'repeated headers are combined',
       parsed[0] == '1.1' && parsed[1] == 'GET' && parsed[2] == '/items/42' &&
       parsed[3]['accept'] == 'text/plain, application/json'
+cookie_head = "GET / HTTP/1.1\r\nHost: x\r\nCookie: a=1\r\nCookie: b=2".b
+syntax_cookie = Kiln::HTTP::Syntax.parse_head(cookie_head)
+native_cookie = Kiln::HTTP::Native.parse_head(cookie_head, Kiln::HTTP::Native.scratch)
+check 'repeated Cookie uses a semicolon in both parsers',
+      syntax_cookie[3]['cookie'] == 'a=1; b=2' && native_cookie[3]['cookie'] == 'a=1; b=2'
+check 'empty WebSocket payload has a two-byte frame header',
+      Kiln::HTTP::WebSocket.header(1, 0) == "\x81\x00".b
+check 'WebSocket frame headers use the minimal length encoding at each boundary',
+      Kiln::HTTP::WebSocket.header(1, 125) == "\x81\x7D".b &&
+      Kiln::HTTP::WebSocket.header(1, 126) == "\x81\x7E\x00\x7E".b &&
+      Kiln::HTTP::WebSocket.header(1, 255) == "\x81\x7E\x00\xFF".b &&
+      Kiln::HTTP::WebSocket.header(1, 512) == "\x81\x7E\x02\x00".b &&
+      Kiln::HTTP::WebSocket.header(1, 65_535) == "\x81\x7E\xFF\xFF".b &&
+      Kiln::HTTP::WebSocket.header(2, 65_536) == "\x82\x7F\x00\x00\x00\x00\x00\x01\x00\x00".b
+idle_res = Kiln::HTTP::Response.new
+idle_res.upgrade('kiln-idle') { |_conn| nil }
+default_idle = idle_res.tunnel_idle
+idle_res.upgrade('kiln-idle', idle_timeout: nil) { |_conn| nil }
+unbounded_idle = idle_res.tunnel_idle
+idle_res.hijack(idle_timeout: 2) { |_conn| nil }
+check 'upgrade bounds idle reads at 60 seconds unless idle_timeout says otherwise',
+      default_idle == 60.0 && unbounded_idle.negative? && idle_res.tunnel_idle == 2.0
+bad_idle = [0, -1.5, Float::INFINITY, 0.0 / 0.0, 10**400]
+rejected_idle = bad_idle.count do |value|
+  Kiln::HTTP::Response.new.upgrade('kiln-idle', idle_timeout: value) { |_conn| nil }
+  false
+rescue ArgumentError
+  true
+end
+check 'idle_timeout rejects zero, negative, infinite, NaN and too large values', rejected_idle == bad_idle.size
+ws_origins = Kiln::HTTP::WsOrigins
+same_host = ws_origins.policy(nil)
+check 'WebSocket origins default to the request host',
+      ws_origins.allowed?(nil, 'x', same_host) && ws_origins.allowed?('https://x', 'x', same_host, 'https') &&
+      ws_origins.allowed?('https://x:443', 'x', same_host, 'https') &&
+      ws_origins.allowed?('http://x', 'x:80', same_host) &&
+      ws_origins.allowed?('http://x:8080', 'x:8080', same_host) &&
+      ws_origins.allowed?('HTTPS://X', 'X', same_host, 'https')
+check 'WebSocket origins reject another host, port, scheme or an opaque origin',
+      !ws_origins.allowed?('http://x:8080', 'x', same_host) && !ws_origins.allowed?('https://evil', 'x', same_host) &&
+      !ws_origins.allowed?('null', 'x', same_host) && !ws_origins.allowed?('ftp://x', 'x', same_host) &&
+      !ws_origins.allowed?('https://x', nil, same_host)
+check 'WebSocket origins accept an HTTPS page behind TLS termination but no HTTP page on an HTTPS request',
+      ws_origins.allowed?('https://x', 'x', same_host, 'http') &&
+      ws_origins.allowed?('https://x:8443', 'x:8443', same_host, 'http') &&
+      !ws_origins.allowed?('http://x', 'x', same_host, 'https') &&
+      !ws_origins.allowed?('http://x:443', 'x:443', same_host, 'https')
+listed_origins = ws_origins.policy(['https://A.example'])
+check 'WebSocket origins match a list exactly and accept *',
+      ws_origins.allowed?('https://a.example', 'x', listed_origins) &&
+      !ws_origins.allowed?('https://b.example', 'x', listed_origins) &&
+      ws_origins.allowed?('https://b.example', 'x', ws_origins.policy(['*']))
+bad_origins = [[], 'https://a.example', [1]]
+rejected_origins = bad_origins.count do |value|
+  ws_origins.policy(value)
+  false
+rescue ArgumentError
+  true
+end
+check 'origins rejects an empty list, a bare string and non-string entries', rejected_origins == bad_origins.size
 check 'duplicate Host is rejected', Kiln::HTTP::Syntax.parse_head("GET / HTTP/1.1\r\nHost: a\r\nHost: b".b) == :bad
 check 'body length limit works independently of server',
       Kiln::HTTP::Syntax.content_length({ 'content-length' => '12' }, 10) == :too_long

@@ -5,6 +5,47 @@ module Kiln
       ffi_func :kiln_ws_mask, %i[str long long], :binstr
     end
 
+    module WsOrigins
+      ANY = '*'.freeze
+      SAME_HOST = [ANY].drop(1).freeze
+      DEFAULT_PORTS = { 'http' => ':80', 'https' => ':443' }.freeze
+
+      class << self
+        def policy(origins)
+          return SAME_HOST if origins.nil?
+          raise ArgumentError, 'origins must be nil or a non-empty list of strings' unless list?(origins)
+
+          origins.map { |item| item.downcase.freeze }.freeze
+        end
+
+        def allowed?(origin, host, policy, scheme = 'http')
+          return true if origin.nil?
+          return same_host?(origin.downcase, host, scheme) if policy.empty?
+
+          policy.include?(ANY) || policy.include?(origin.downcase)
+        end
+
+        private
+
+        def list?(origins)
+          origins.is_a?(Array) && !origins.empty? && origins.all? { |item| item.is_a?(String) }
+        end
+
+        def same_host?(origin, host, request_scheme)
+          return false if host.nil? || host.empty?
+
+          scheme, authority = origin.split('://', 2)
+          port = DEFAULT_PORTS[scheme]
+          return false if port.nil? || authority.nil? || authority.empty? || authority.include?('/')
+          return false if request_scheme == 'https' && scheme != 'https'
+
+          bare(authority, port) == bare(host.downcase, port)
+        end
+
+        def bare(authority, port) = authority.end_with?(port) ? authority.delete_suffix(port) : authority
+      end
+    end
+
     class WebSocket
       MAX_MESSAGE = 1 << 20
       MAX_CONTROL = 125
@@ -33,15 +74,18 @@ module Kiln
       end
 
       module Handshake
-        def accept(ctx, protocols, max_message, ping_interval, body)
+        def accept(ctx, protocols, max_message, ping_interval, origins, body)
           req = ctx.req
           res = ctx.res
           problem = handshake_problem(req)
           return refuse(res, problem) if problem
+          return forbid(res) unless WsOrigins.allowed?(req.header('origin'), req.header('host'), origins, req.scheme)
 
           chosen = choose(req.header('sec-websocket-protocol'), protocols)
           accept_headers(res, req.header('sec-websocket-key'), chosen)
-          res.upgrade('websocket') { |conn| serve(WebSocket.new(conn, chosen, max_message, ping_interval), body) }
+          res.upgrade('websocket', idle_timeout: nil) do |conn|
+            serve(WebSocket.new(conn, chosen, max_message, ping_interval), body)
+          end
         end
 
         def handshake_problem(req)
@@ -60,6 +104,8 @@ module Kiln
           res.text("websocket handshake required\n", status: status)
         end
 
+        def forbid(res) = res.text("websocket origin not allowed\n", status: 403)
+
         def choose(offered, protocols)
           return '' if offered.nil? || protocols.empty?
 
@@ -70,8 +116,14 @@ module Kiln
         def header(opcode, size)
           out = (+'').b
           out << (0x80 | opcode)
-          return out << size if size < 126
-          return out << 126 << (size >> 8) << (size & 0xFF) if size < 65_536
+          if size < 126
+            out << size
+            return out
+          end
+          if size < 65_536
+            out << 126 << (size >> 8) << (size & 0xFF)
+            return out
+          end
 
           out << 127
           7.downto(0) { |shift| out << ((size >> (shift * 8)) & 0xFF) }
@@ -223,7 +275,12 @@ module Kiln
           return extended_size(deadline) if size == 127
           return [0, 0] unless fill(4, deadline)
 
-          [4, (byte(2) << 8) | byte(3)]
+          length = (byte(2) << 8) | byte(3)
+          if length < 126
+            reject(PROTOCOL_ERROR)
+            return [0, 0]
+          end
+          [4, length]
         end
 
         def extended_size(deadline)
@@ -235,6 +292,10 @@ module Kiln
           end
           size = 0
           8.times { |index| size = (size << 8) | byte(2 + index) }
+          if size < 65_536
+            reject(PROTOCOL_ERROR)
+            return [0, 0]
+          end
           [10, size]
         end
 

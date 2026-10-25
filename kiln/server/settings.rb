@@ -9,7 +9,8 @@ module Kiln
         read_timeout: 5.0, request_timeout: 2.0, write_timeout: 10.0, header_timeout: nil, keep_alive_timeout: nil
       }.freeze
       EVENT = SHARED.merge(host: '127.0.0.1', handlers: 0, max_streams: 1024, client_disconnect_timeout: 1.0).freeze
-      BASE = SHARED.merge(kill_grace: 1.0, coop_budget: 4, shards: 1, client_disconnect_timeout: 0.5).freeze
+      BASE = SHARED.merge(host: '127.0.0.1', kill_grace: 1.0, coop_budget: 4, shards: 1,
+                          client_disconnect_timeout: 0.5).freeze
       RULES = [
         [:max_conns, 'max_conns', :int_at_least_one], [:max_body, 'max_body', :int_at_least_zero],
         [:read_timeout, 'read_timeout', :seconds_above], [:request_timeout, 'request_timeout', :seconds_above],

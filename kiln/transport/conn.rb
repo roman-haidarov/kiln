@@ -149,21 +149,22 @@ module Kiln
 
     class Tunnel
       READ = 64 * 1024
+      UNBOUNDED = 3600.0
 
-      def initialize(inlet, outlet, write_timeout)
+      def initialize(inlet, outlet, write_timeout, idle = -1.0)
         @inlet = inlet
         @outlet = outlet
         @write_timeout = write_timeout
+        @idle = idle
         @closed = false
       end
 
       def read(max = READ, timeout: nil)
         raise Runtime::ClientGone, 'connection closed' if @closed
+        return wait_chunk(max, timeout) unless timeout.nil?
+        return wait_chunk(max, UNBOUNDED) if @idle.negative?
 
-        chunk = @inlet.await_chunk(max, timeout.nil? ? 3600.0 : timeout)
-        return nil if chunk&.empty? && @outlet.closed?
-
-        chunk
+        idle_read(max)
       end
 
       def write(bytes)
@@ -183,24 +184,49 @@ module Kiln
       end
 
       def closed? = @closed || @outlet.closed?
+
+      private
+
+      def wait_chunk(max, wait)
+        chunk = @inlet.await_chunk(max, wait)
+        return nil if chunk&.empty? && @outlet.closed?
+
+        chunk
+      end
+
+      def idle_read(max)
+        limit = Kiln::Runtime.now + @idle
+        loop do
+          left = limit - Kiln::Runtime.now
+          break if left <= 0
+
+          chunk = wait_chunk(max, left)
+          return chunk if chunk.nil? || !chunk.empty?
+        end
+        @closed = true
+        nil
+      end
     end
 
     class SocketConn
       READ = 64 * 1024
 
-      def initialize(sock, buffer, write, closed)
+      def initialize(sock, buffer, write, closed, idle = -1.0)
         @sock = sock
         @buffer = buffer
         @write = write
         @closed_probe = closed
+        @idle = idle
         @closed = false
       end
 
       def read(max = READ, timeout: nil)
         raise Runtime::ClientGone, 'connection closed' if @closed
         return @buffer.take([@buffer.size, max].min) unless @buffer.empty?
+        return receive(max, Kiln::Runtime.now + timeout) unless timeout.nil?
+        return receive(max, nil) if @idle.negative?
 
-        receive(max, timeout.nil? ? nil : Kiln::Runtime.now + timeout)
+        idle_receive(max)
       rescue IOError, SystemCallError
         nil
       end
@@ -225,6 +251,14 @@ module Kiln
       def closed? = @closed || @closed_probe.call == true
 
       private
+
+      def idle_receive(max)
+        chunk = receive(max, Kiln::Runtime.now + @idle)
+        return chunk unless chunk&.empty?
+
+        @closed = true
+        nil
+      end
 
       def receive(max, limit)
         fd = @sock.fileno

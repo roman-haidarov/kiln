@@ -170,7 +170,7 @@ module Kiln
           return false unless tunnel_head_sent?(sock, res, box)
 
           Thread.current[:kiln_deadline] = nil
-          res.tunnel_body.call(tunnel_conn(sock, box.buffer))
+          res.tunnel_body.call(tunnel_conn(sock, box.buffer, res.tunnel_idle))
           false
         rescue Runtime::ClientGone
           false
@@ -187,10 +187,10 @@ module Kiln
           head.empty? || write_all(sock, head, limit)
         end
 
-        def tunnel_conn(sock, buf)
+        def tunnel_conn(sock, buf, idle)
           timeout = @write_timeout
           writer = ->(bytes) { write_all(sock, bytes, Kiln::Runtime.now + timeout) }
-          Transport::SocketConn.new(sock, buf, writer, -> { @draining })
+          Transport::SocketConn.new(sock, buf, writer, -> { @draining }, idle)
         end
       end
 
