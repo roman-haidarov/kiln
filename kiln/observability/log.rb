@@ -24,6 +24,7 @@ module Kiln
 
     class Log
       CAP = 1024
+      FLUSH_DELAY = 0.05
 
       def initialize(io = $stdout)
         @queue = SizedQueue.new(CAP)
@@ -48,16 +49,36 @@ module Kiln
       private
 
       def drain(io)
+        dirty = false
         loop do
-          line = next_line
-          break if line.nil?
+          line = dirty ? quiet_line : next_line
+          if line.nil?
+            break if @queue.closed? && @queue.empty?
 
-          write_line(io, line)
+            flush(io)
+            dirty = false
+          else
+            write_line(io, line)
+            dirty = true
+          end
         end
+        flush(io)
+      end
+
+      def flush(io)
+        io.flush
+      rescue *Kiln::Runtime::FAILURES
+        nil
       end
 
       def next_line
         @queue.pop
+      rescue ClosedQueueError
+        nil
+      end
+
+      def quiet_line
+        @queue.pop(timeout: FLUSH_DELAY)
       rescue ClosedQueueError
         nil
       end

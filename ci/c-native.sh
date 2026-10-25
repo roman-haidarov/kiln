@@ -231,15 +231,18 @@ run_fuzz() {
   for name in http-kind-0 http-kind-1 http-kind-2 http-kind-3 http-kind-4 http-kind-5 http-kind-6 uv-parse uv-parse-diff uv-chunk; do
     objects="$objects -object=$run_dir/fuzz-$name"
   done
+  if [ -x "$run_dir/fuzz-http-sse-diff" ]; then
+    objects="$objects -object=$run_dir/fuzz-http-sse-diff"
+  fi
   coverage_raw="$artifacts/http-coverage-all.txt"
   "$cov" report "$run_dir/fuzz-http-kind-0" $objects \
     -instr-profile="$run_dir/fuzz.profdata" --show-functions \
-    "$root/ext/kiln_http.c" "$root/ext/kiln_uv_parse.c" > "$artifacts/http-coverage.txt"
+    "$root/ext/kiln_http.c" "$root/ext/kiln_uv_parse.c" \
+    "$root/ext/picohttpparser/picohttpparser.c" "$root/ext/kiln_pico_sse42.c" > "$coverage_raw"
   awk '
     /^File / || /^Name[[:space:]]/ || /^-+/ { print; next }
     $1 ~ /^(kiln_http_accepts_gzip|kiln_http_scan|kiln_http_scan_at|kiln_scan_request_head|kiln_chunk_size|kiln_token|kiln_ctl|kiln_digits|kiln_host|kiln_uv_parse_request|kiln_http\.c:(kiln_skip_ows|kiln_trim_ows|kiln_gzip_kind|kiln_accept_parameters|kiln_quality|kiln_scan_terminated|kiln_crlf_only|kiln_ascii|kiln_clean_value|kiln_common_index|kiln_tchar|kiln_hex|kiln_ows|kiln_alnum|kiln_subdelim)|kiln_uv_chunk_decode|kiln_uv_parse\.c:(kuv_digits|kuv_has_token|kuv_head_length|kuv_parse_headers|kuv_transfer_coding|kuv_note_field|kuv_check_coding|kuv_is_upgrade_name|kuv_forbidden_trailer|kuv_chunk_line|kuv_chunk_size_line|kuv_chunk_trailer_line))$/ { print }
-  ' "$artifacts/http-coverage.txt" > "$coverage_raw"
-  mv "$coverage_raw" "$artifacts/http-coverage.txt"
+  ' "$coverage_raw" > "$artifacts/http-coverage.txt"
   cat "$artifacts/http-coverage.txt"
 }
 
@@ -269,6 +272,13 @@ run_tsan() {
     return 1
   fi
   cat "$tls_log"
+  tls_lifecycle_log="$artifacts/tls-lifecycle-tsan.log"
+  if ! TSAN_OPTIONS=halt_on_error=1 "$tls_binary" \
+    "$root/test/fixtures/tls_cert.pem" "$root/test/fixtures/tls_key.pem" > "$tls_lifecycle_log" 2>&1; then
+    cat "$tls_lifecycle_log" >&2
+    return 1
+  fi
+  cat "$tls_lifecycle_log"
   tls_native="$run_dir/tls_lifecycle"
   "$cc_bin" -std=c11 -O2 -DSP_THREADS -I "$root/ext" -pthread \
     "$root/bench/tls_tsan.c" "$root/ext/kiln_tls.c" $link_flags $tls_dl_flags -o "$tls_native"

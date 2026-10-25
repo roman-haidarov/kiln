@@ -28,16 +28,18 @@ module Kiln
           @inlets[slot] = inlet
           @outlets[slot] = outlet
           @inflight += 1
-          body = ctx.res.tunnel_body
+          res = ctx.res
+          body = res.tunnel_body
+          idle = res.tunnel_idle
           id = ctx.id
-          outlet.thread = Thread.new { run_tunnel(outlet, inlet, body, id) }
+          outlet.thread = Thread.new { run_tunnel(outlet, inlet, body, idle, id) }
           0
         end
 
-        def run_tunnel(outlet, inlet, body, id)
+        def run_tunnel(outlet, inlet, body, idle, id)
           Thread.current[:request_id] = id
           failed = true
-          body.call(Transport::Tunnel.new(inlet, outlet, @write_timeout))
+          body.call(Transport::Tunnel.new(inlet, outlet, @write_timeout, idle))
           failed = false
         rescue Runtime::ClientGone
           nil

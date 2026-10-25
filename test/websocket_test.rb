@@ -53,6 +53,8 @@ class WsClient
     @io.write(ws_frame(opcode, data, **opts))
   end
 
+  def send_raw(data) = @io.write(data)
+
   def receive(seconds = 2.0)
     limit = Kiln::Runtime.now + seconds
     loop do
@@ -115,6 +117,7 @@ end
 log = Kiln::Observability::Log.new(StringIO.new)
 GOT = Queue.new
 CLOSE_CHECKS = Queue.new
+IDLE = Queue.new
 router = Kiln::Routing::Router.new
 router.get('/ws', lambda { |ctx|
   ctx.res.websocket(ctx, protocols: %w[chat echo], max_message: 4096) do |ws|
@@ -131,6 +134,13 @@ router.get('/ws', lambda { |ctx|
 router.get('/ping', lambda { |ctx|
   ctx.res.websocket(ctx, ping_interval: 0.2) do |ws|
     ws.each { |message| ws.send_text(message.data) }
+  end
+})
+router.get('/mirror', lambda { |ctx|
+  ctx.res.websocket(ctx) do |ws|
+    ws.each do |message|
+      message.text? ? ws.send_text(message.data) : ws.send_binary(message.data)
+    end
   end
 })
 router.get('/close-check', lambda { |ctx|
@@ -166,6 +176,23 @@ router.get('/hijack', lambda { |ctx|
     conn.write("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nhijacked")
   end
 })
+router.get('/ws-any', lambda { |ctx|
+  ctx.res.websocket(ctx, origins: ['*']) { |ws| ws.each { |message| ws.send_text(message.data) } }
+})
+router.get('/ws-list', lambda { |ctx|
+  ctx.res.websocket(ctx, origins: ['https://App.Example']) { |ws| ws.each { |message| ws.send_text(message.data) } }
+})
+router.get('/idle-raw', lambda { |ctx|
+  ctx.res.upgrade('kiln-idle', idle_timeout: 0.3) do |conn|
+    IDLE << (conn.read.nil? ? 'closed' : 'data')
+  end
+})
+router.get('/timed-raw', lambda { |ctx|
+  ctx.res.upgrade('kiln-idle', idle_timeout: nil) do |conn|
+    IDLE << (conn.read(timeout: 0.2) == '' ? 'empty' : 'other')
+    conn.write('still')
+  end
+})
 router.seal!
 long = 'w' * 70_000
 
@@ -189,6 +216,55 @@ long = 'w' * 70_000
   check "#{backend}: close validates code and UTF-8 and truncates on a character boundary",
         close_frame && close_frame[0] == 8 && close_reason&.valid_encoding? && close_reason == '🙂' * 30 &&
         close_reason.bytesize <= 123 && close_check == [true, true]
+  mirror = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror')
+  mirror.send(1, '')
+  check "#{backend}: an empty text message has a complete frame", mirror.receive == [1, ''.b]
+  mirror.send(2, '')
+  check "#{backend}: an empty binary message has a complete frame", mirror.receive == [2, ''.b]
+  mirror.send(9, '')
+  check "#{backend}: an empty ping receives a complete pong", mirror.receive == [10, ''.b]
+  [125, 126, 127, 128, 255, 256, 65_535, 65_536].each do |size|
+    data = ('w' * size).b
+    [1, 2].each do |opcode|
+      mirror.send(opcode, data)
+      check "#{backend}: frame opcode #{opcode} length #{size} round-trips", mirror.receive == [opcode, data]
+    end
+  end
+  mirror.send(8, "\x03\xE8".b)
+  mirror.close_code
+  mirror.close
+
+  short16 = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror')
+  short16.send_raw("\x81\xFE\x00\x01\x37\xFA\x21\x3D\x4F".b)
+  check "#{backend}: a nonminimal 16-bit frame length closes with 1002", short16.close_code == 1002
+  short16.close
+  short64 = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror')
+  short64.send_raw("\x81\xFF\x00\x00\x00\x00\x00\x00\x00\x01\x37\xFA\x21\x3D\x4F".b)
+  check "#{backend}: a nonminimal 64-bit frame length closes with 1002", short64.close_code == 1002
+  short64.close
+
+  foreign = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror', extra: "Origin: http://evil.example\r\n")
+  foreign.close
+  same = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror', extra: "Origin: http://x\r\n")
+  same.close
+  opaque = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror', extra: "Origin: null\r\n")
+  opaque.close
+  check "#{backend}: by default a handshake from another origin gets 403 and the same host gets 101",
+        foreign.head.start_with?('HTTP/1.1 403 ') && same.head.start_with?('HTTP/1.1 101 ') &&
+        opaque.head.start_with?('HTTP/1.1 403 ')
+  terminated = WsClient.new(TCPSocket.new('127.0.0.1', port), '/mirror', extra: "Origin: https://x\r\n")
+  terminated.close
+  check "#{backend}: an HTTPS page reaching a plain backend through TLS termination gets 101",
+        terminated.head.start_with?('HTTP/1.1 101 ')
+  anyone = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws-any', extra: "Origin: http://evil.example\r\n")
+  anyone.close
+  listed = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws-list', extra: "Origin: https://app.example\r\n")
+  listed.close
+  unlisted = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws-list', extra: "Origin: https://other.example\r\n")
+  unlisted.close
+  check "#{backend}: origins: accepts '*' and an exact list",
+        anyone.head.start_with?('HTTP/1.1 101 ') && listed.head.start_with?('HTTP/1.1 101 ') &&
+        unlisted.head.start_with?('HTTP/1.1 403 ')
   ws.send(1, 'hello')
   check "#{backend}: a text message is echoed", ws.receive == [1, 'echo:hello'.b]
   ws.send(2, "\x01\x02\x03".b)
@@ -277,6 +353,24 @@ long = 'w' * 70_000
   hijacked = exchange(port, "GET /hijack HTTP/1.1\r\nHost: x\r\n\r\n")
   check "#{backend}: hijack writes the raw response",
         hijacked == "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nhijacked"
+
+  idle = TCPSocket.new('127.0.0.1', port)
+  idle.write("GET /idle-raw HTTP/1.1\r\nHost: x\r\nUpgrade: kiln-idle\r\nConnection: Upgrade\r\n\r\n")
+  idle_head = collect_until(idle, 2) { |buf| buf.include?("\r\n\r\n") }
+  idle_from = Kiln::Runtime.now
+  idle_rest = read_until_closed(idle, 3)
+  idle_took = Kiln::Runtime.now - idle_from
+  idle.close
+  check "#{backend}: an idle upgraded connection is closed after idle_timeout",
+        idle_head.start_with?('HTTP/1.1 101 ') && IDLE.pop(timeout: 2) == 'closed' &&
+        idle_rest.empty? && idle_took < 2.5
+
+  timed = TCPSocket.new('127.0.0.1', port)
+  timed.write("GET /timed-raw HTTP/1.1\r\nHost: x\r\nUpgrade: kiln-idle\r\nConnection: Upgrade\r\n\r\n")
+  timed_reply = collect_until(timed, 2) { |buf| buf.end_with?('still') }
+  timed.close
+  check "#{backend}: an explicit read timeout returns an empty chunk and keeps the tunnel open",
+        timed_reply.start_with?('HTTP/1.1 101 ') && timed_reply.end_with?('still') && IDLE.pop(timeout: 2) == 'empty'
 
   open = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   open.send(1, 'still here')

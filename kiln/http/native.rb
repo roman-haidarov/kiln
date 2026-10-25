@@ -88,13 +88,13 @@ module Kiln
           end
           return false if Syntax::SINGLE.include?(key)
 
-          headers[key] = joined_value(previous, value, ascii)
+          headers[key] = joined_value(previous, value, ascii, key)
           true
         end
 
-        def joined_value(previous, value, ascii)
+        def joined_value(previous, value, ascii, key)
           joined = previous.b
-          joined << ', '.b
+          joined << (key == 'cookie' ? '; '.b : ', '.b)
           joined << value.b
           own!(joined, ascii)
           joined

@@ -266,7 +266,7 @@ module Kiln
         def check_chunk_status(status)
           raise HTTP::TrailersTooLarge, 'trailers too large' if status == CHUNK_TOO_BIG
           raise HTTP::PayloadTooLarge, 'payload too large' if status == CHUNK_HUGE
-          raise HTTP::BadRequest, 'malformed chunked body' if status.negative?
+          raise HTTP::BadRequest, 'malformed request body' if status.negative?
         end
       end
 

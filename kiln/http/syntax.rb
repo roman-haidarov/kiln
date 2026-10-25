@@ -59,7 +59,7 @@ module Kiln
         end
         return false if Syntax::SINGLE.include?(key)
 
-        headers[key] = encode_owned(join_header(headers[key], value))
+        headers[key] = encode_owned(join_header(headers[key], value, key))
         true
       end
 
@@ -68,9 +68,9 @@ module Kiln
         text.valid_encoding? ? text : text.force_encoding(Encoding::ASCII_8BIT)
       end
 
-      def join_header(left, right)
+      def join_header(left, right, key)
         out = left.b
-        out << ', '.b
+        out << (key == 'cookie' ? '; '.b : ', '.b)
         out << right.b
         out
       end

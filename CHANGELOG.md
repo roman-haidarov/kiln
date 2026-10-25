@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.0.12
+
+### Changed
+
+- Breaking: `ctx.res.websocket` checks the `Origin` header. By default (`origins: nil`) a browser handshake has to come from the request host and port, and on an HTTPS connection the origin has to be HTTPS too. An HTTPS origin is accepted on a plain-HTTP connection, so the default also works behind a proxy that terminates TLS. Any other origin, including `null`, gets 403. `origins: ["https://app.example.com"]` accepts the listed origins and `origins: ["*"]` keeps the previous behavior. A handshake without `Origin` is accepted as before. Behind a proxy that rewrites `Host`, forward the original host and port or list the origins.
+- `ctx.res.upgrade` and `ctx.res.hijack` take `idle_timeout:` (default 60 seconds), a finite positive number of seconds; an Integer too large to convert to a finite Float is rejected. A `read` without `timeout:` waits at most that long; then the connection wrapper is marked closed and `read` returns nil, and the transport is released when the handler returns. Before, it waited 3600 seconds on the event backend and without limit on the base backend, so idle clients could hold upgraded connections, and base threads, indefinitely. `idle_timeout: nil` keeps the unbounded wait. A `read` with `timeout:` behaves as before. WebSocket connections are unchanged.
+- `Kiln::Server::Base` defaults to `127.0.0.1` like `Kiln::Server::Event`. `Kiln::Server.new` still defaults both backends to `0.0.0.0`; this is now documented.
+- A malformed chunked body gets the same 400 body, `malformed request body`, on both backends.
+- GET_STARTED documents percent-decoding before route matching (and what a proxy ACL on the raw path misses), what `:name` and `*path` parameters can contain, that an absolute-form target replaces `Host`, and when `100 Continue` is sent and an unread body keeps the connection open.
+- `ci/c-native.sh` also runs the TLS context lifecycle under TSan with the test certificate, adds the SSE4.2 differential target and `ext/kiln_pico_sse42.c` to the coverage report when that target is built, and keeps the unfiltered report as `http-coverage-all.txt`.
+
+### Fixed
+
+- WebSocket frames whose length encoding contained a zero byte were sent with that byte missing: empty messages and pongs, messages of 126 to 255 bytes, and messages whose length is a multiple of 256 below 65 536. Clients then misread the stream. Autobahn Testsuite went from 11 failed cases to none.
+- A WebSocket frame with a non-minimal 16-bit or 64-bit length was accepted; it now closes with 1002, as RFC 6455 section 5.2 requires.
+- A repeated `Cookie` header was joined with `, `, so `Cookie: a=1` and `Cookie: b=2` reached the handler as `a` = `1, b=2` and no `b`. Both header parsers join it with `; `.
+- Log output written to a file or a pipe stayed in the IO buffer until about 4 KB more output arrived or the log was closed. The writer flushes after 50 ms without new lines and on close, and writes every line accepted before `close`; under a continuous stream of lines it does not flush, and access-logged throughput is unchanged.
+- On Spinel `519280dc9`, `return out << byte if condition` dropped a zero `byte`, which caused the WebSocket length bug above. The frame header is now built with separate statements. A module with `class << self` nested in `Kiln::HTTP::WebSocket` changed the compiled shutdown path, so the origin policy lives in `Kiln::HTTP::WsOrigins`.
+
 ## 0.0.11
 
 ### Changed

@@ -5,6 +5,7 @@ ok   a 1 MB response crosses TLS intact
 ok   a streamed 3 MB upload crosses TLS intact
 ok   pipelined requests are answered over TLS
 ok   a websocket works over TLS
+ok   over TLS an HTTPS page gets 101 and an HTTP page of the same host gets 403
 ok   plain HTTP on the TLS port gets no HTTP answer
 ok   ALPN selects http/1.1 from h2,http/1.1
 ok   ALPN without http/1.1 fails the handshake

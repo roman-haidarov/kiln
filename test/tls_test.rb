@@ -136,6 +136,13 @@ ws = tls_exchange(secure, "GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n
                           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n" \
                           "#{frame}\x88\x82\x01\x02\x03\x04#{closing}")
 check 'a websocket works over TLS', ws.is_a?(String) && ws.start_with?('HTTP/1.1 101 ') && ws.include?('echo:hi')
+handshake = "GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n"
+insecure_page = tls_exchange(secure, "#{handshake}Origin: http://x\r\n\r\n", 2.0)
+secure_page = tls_exchange(secure, "#{handshake}Origin: https://x\r\n\r\n\x88\x82\x01\x02\x03\x04#{closing}", 2.0)
+check 'over TLS an HTTPS page gets 101 and an HTTP page of the same host gets 403',
+      secure_page.is_a?(String) && secure_page.start_with?('HTTP/1.1 101 ') &&
+      insecure_page.is_a?(String) && insecure_page.start_with?('HTTP/1.1 403 ')
 
 cleartext = exchange(secure, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 check 'plain HTTP on the TLS port gets no HTTP answer', !cleartext.include?('HTTP/1.1')

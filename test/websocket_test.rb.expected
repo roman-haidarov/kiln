@@ -1,5 +1,29 @@
 ok   event: the handshake answers 101 with the RFC 6455 accept key
 ok   event: close validates code and UTF-8 and truncates on a character boundary
+ok   event: an empty text message has a complete frame
+ok   event: an empty binary message has a complete frame
+ok   event: an empty ping receives a complete pong
+ok   event: frame opcode 1 length 125 round-trips
+ok   event: frame opcode 2 length 125 round-trips
+ok   event: frame opcode 1 length 126 round-trips
+ok   event: frame opcode 2 length 126 round-trips
+ok   event: frame opcode 1 length 127 round-trips
+ok   event: frame opcode 2 length 127 round-trips
+ok   event: frame opcode 1 length 128 round-trips
+ok   event: frame opcode 2 length 128 round-trips
+ok   event: frame opcode 1 length 255 round-trips
+ok   event: frame opcode 2 length 255 round-trips
+ok   event: frame opcode 1 length 256 round-trips
+ok   event: frame opcode 2 length 256 round-trips
+ok   event: frame opcode 1 length 65535 round-trips
+ok   event: frame opcode 2 length 65535 round-trips
+ok   event: frame opcode 1 length 65536 round-trips
+ok   event: frame opcode 2 length 65536 round-trips
+ok   event: a nonminimal 16-bit frame length closes with 1002
+ok   event: a nonminimal 64-bit frame length closes with 1002
+ok   event: by default a handshake from another origin gets 403 and the same host gets 101
+ok   event: an HTTPS page reaching a plain backend through TLS termination gets 101
+ok   event: origins: accepts '*' and an exact list
 ok   event: a text message is echoed
 ok   event: a binary message is echoed
 ok   event: a ping inside a fragmented message is answered first
@@ -20,9 +44,35 @@ ok   event: a plain GET to a websocket route gets 426
 ok   event: a malformed key gets 400
 ok   event: a custom upgrade hands the connection to the handler
 ok   event: hijack writes the raw response
+ok   event: an idle upgraded connection is closed after idle_timeout
+ok   event: an explicit read timeout returns an empty chunk and keeps the tunnel open
 ok   event: shutdown closes open websockets
 ok   base: the handshake answers 101 with the RFC 6455 accept key
 ok   base: close validates code and UTF-8 and truncates on a character boundary
+ok   base: an empty text message has a complete frame
+ok   base: an empty binary message has a complete frame
+ok   base: an empty ping receives a complete pong
+ok   base: frame opcode 1 length 125 round-trips
+ok   base: frame opcode 2 length 125 round-trips
+ok   base: frame opcode 1 length 126 round-trips
+ok   base: frame opcode 2 length 126 round-trips
+ok   base: frame opcode 1 length 127 round-trips
+ok   base: frame opcode 2 length 127 round-trips
+ok   base: frame opcode 1 length 128 round-trips
+ok   base: frame opcode 2 length 128 round-trips
+ok   base: frame opcode 1 length 255 round-trips
+ok   base: frame opcode 2 length 255 round-trips
+ok   base: frame opcode 1 length 256 round-trips
+ok   base: frame opcode 2 length 256 round-trips
+ok   base: frame opcode 1 length 65535 round-trips
+ok   base: frame opcode 2 length 65535 round-trips
+ok   base: frame opcode 1 length 65536 round-trips
+ok   base: frame opcode 2 length 65536 round-trips
+ok   base: a nonminimal 16-bit frame length closes with 1002
+ok   base: a nonminimal 64-bit frame length closes with 1002
+ok   base: by default a handshake from another origin gets 403 and the same host gets 101
+ok   base: an HTTPS page reaching a plain backend through TLS termination gets 101
+ok   base: origins: accepts '*' and an exact list
 ok   base: a text message is echoed
 ok   base: a binary message is echoed
 ok   base: a ping inside a fragmented message is answered first
@@ -43,5 +93,7 @@ ok   base: a plain GET to a websocket route gets 426
 ok   base: a malformed key gets 400
 ok   base: a custom upgrade hands the connection to the handler
 ok   base: hijack writes the raw response
+ok   base: an idle upgraded connection is closed after idle_timeout
+ok   base: an explicit read timeout returns an empty chunk and keeps the tunnel open
 ok   base: shutdown closes open websockets
 ok   Testing.call reports the 101 of a websocket route

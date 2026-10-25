@@ -41,6 +41,10 @@ INT or TERM, then shuts the server down. Pass `tasks:` to stop a `Kiln::Runtime:
 in the same grace period. `start` and `shutdown(grace:)` are for a process
 that handles signals itself.
 
+Without `host:` the server listens on all interfaces (`0.0.0.0`) on both
+backends. Pass `host: "127.0.0.1"` to accept only local connections, for
+example behind a reverse proxy on the same machine.
+
 Kiln does not spawn or supervise child processes: configure Spinel M:N
 parallelism via `SPINEL_WORKERS`, and use a process supervisor outside Kiln
 if independent processes or rolling upgrades are required.
@@ -250,6 +254,14 @@ end
 router.seal!
 ```
 
+Path segments are percent-decoded before routes are matched, so
+`/%61dmin/stats` reaches `/admin/stats`. A `*path` parameter never contains a
+`.` or `..` segment or a `/` decoded from `%2F`; a `:name` parameter is one
+decoded segment and can contain `/`, `.` or `..`, so check it before using it
+in a file path. A proxy that allows or denies requests by the raw path (HAProxy
+`path_beg`, for example) sees `/%61dmin` and not `/admin`: check access in the
+handler, or normalize the path at the proxy.
+
 ## Request data
 
 ```ruby
@@ -264,7 +276,13 @@ router.seal!
 ```
 
 Send this route JSON with `Content-Type: application/json`; `query_params` and
-`cookie` read the URL query and `Cookie` header.
+`cookie` read the URL query and `Cookie` header. Repeated `Cookie` header
+fields are joined with `; `, so each cookie keeps its own name.
+
+An absolute-form request target (`GET http://example.com/path HTTP/1.1`)
+replaces the `Host` header, as RFC 9112 requires. `Host` and every other header
+come from the client: compare them with a list of known hosts before using them
+for access decisions or absolute URLs.
 
 `ctx.req.form` reads an `application/x-www-form-urlencoded` body.
 `Kiln::HTTP::Json.parse` and `Kiln::HTTP::Json.generate` are the direct calls. Inside a
@@ -327,10 +345,15 @@ and a chunked body that grows past it raises `Kiln::HTTP::PayloadTooLarge` (413)
 when it is read. A chunk size too large to represent gets 413 as well, on both
 backends. `ctx.req.limit_body(n)` lowers it inside a handler. A body
 that stalls for `read_timeout` raises `Kiln::HTTP::RequestTimeout` (408).
-`Expect: 100-continue` is answered when the handler first reads the body; a
-handler that answers without reading never sends it. An unread body up to 256
-KiB is discarded so the connection stays open; a larger one, or one the client
-announced with `Expect`, closes the connection after the response. With
+A body up to `buffer_body` is read before the handler runs, so a request with
+`Expect: 100-continue` and such a body gets `100 Continue` at once. For a
+streamed body, `100 Continue` is sent when the handler first reads the body; a
+handler that answers without reading never sends it. When a handler answers
+without reading all of a streamed body, the rest is discarded so the connection
+stays open if it is at most 256 KiB; a larger rest, or a body the client
+announced with `Expect`, closes the connection after the response. On the event
+backend a body that has already been read in full when the handler answers also
+keeps the connection open. With
 `handlers: 0` a request with a streamed body runs on its own thread so the
 event loop keeps serving other connections.
 
@@ -359,12 +382,32 @@ message over `max_message` (1 MiB) with 1009. With `ping_interval:` kiln pings
 an idle peer and drops one that does not answer within the next interval.
 Server shutdown closes open sockets with 1001.
 
+A browser handshake carries `Origin`. By default (`origins: nil`) it has to
+name the request host and port: `https://example.com` matches
+`Host: example.com` or `Host: example.com:443`. On an HTTPS connection the
+origin has to be HTTPS as well, so an HTTP page cannot open a socket to the
+HTTPS endpoint of the same host. An HTTPS origin is accepted on a plain-HTTP
+connection, so the default also works behind a proxy that terminates TLS.
+Any other origin, including `null`, gets 403.
+`origins: ["https://app.example.com"]` accepts exactly the listed origins
+(ignoring case) and `origins: ["*"]` accepts any. A handshake without `Origin`
+(a non-browser client) is accepted. Behind a proxy that rewrites `Host`,
+forward the original host and port (nginx
+`proxy_set_header Host $http_host;`) or list the origins.
+
 `ctx.res.upgrade("protocol") { |conn| ... }` answers `101 Switching Protocols`
 with `Upgrade: protocol` and hands the connection to the block;
 `ctx.res.hijack { |conn| ... }` hands it over without writing anything. `conn`
 has `read(max, timeout:)` (a String, `""` when the timeout passes, nil at end
-of stream or once the server shuts down), `write`, `close` and `closed?`. Bytes the client sent right after
-the upgrade request are not lost. Upgraded connections count towards
+of stream or once the server shuts down), `write`, `close` and `closed?`.
+Bytes the client sent right after the upgrade request are not lost. Without
+`timeout:`, `read` waits at most `idle_timeout:` seconds (default 60) for
+data; when none arrives it marks `conn` closed and returns nil, and the
+connection is released when the block returns. This limits each read; it is
+not a separate reaper, so a block that keeps running without reading keeps
+its connection. Pass `idle_timeout:` to `upgrade` or `hijack` to change the
+limit, or `idle_timeout: nil` to wait without one. WebSocket connections are
+not affected: they use `ping_interval:`. Upgraded connections count towards
 `max_streams` on the event backend and end when the block returns.
 
 ## Static files

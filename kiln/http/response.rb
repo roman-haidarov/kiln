@@ -102,23 +102,23 @@ module Kiln
     end
 
     module ResponseTunnel
-      def upgrade(protocol, &body)
+      def upgrade(protocol, idle_timeout: Response::TUNNEL_IDLE, &body)
         raise ArgumentError, 'upgrade needs a block' unless body
         raise ArgumentError, 'upgrade protocol must be a token' unless Native.token?(protocol.to_s)
 
-        open_tunnel(protocol.to_s, body)
+        open_tunnel(protocol.to_s, body, idle_seconds(idle_timeout))
       end
 
-      def hijack(&body)
+      def hijack(idle_timeout: Response::TUNNEL_IDLE, &body)
         raise ArgumentError, 'hijack needs a block' unless body
 
-        open_tunnel('', body)
+        open_tunnel('', body, idle_seconds(idle_timeout))
       end
 
-      def websocket(ctx, protocols: [], max_message: WebSocket::MAX_MESSAGE, ping_interval: nil, &body)
+      def websocket(ctx, protocols: [], max_message: WebSocket::MAX_MESSAGE, ping_interval: nil, origins: nil, &body)
         raise ArgumentError, 'websocket needs a block' unless body
 
-        WebSocket.accept(ctx, protocols, max_message, ping_interval, body)
+        WebSocket.accept(ctx, protocols, max_message, ping_interval, WsOrigins.policy(origins), body)
       end
 
       def tunnel? = !@tunnel.nil?
@@ -127,6 +127,11 @@ module Kiln
       def tunnel_body
         tunnel = @tunnel
         tunnel&.tunnel_proc
+      end
+
+      def tunnel_idle
+        tunnel = @tunnel
+        tunnel ? tunnel.tunnel_idle : Response::NO_IDLE
       end
 
       def protocol
@@ -146,11 +151,23 @@ module Kiln
 
       private
 
-      def open_tunnel(protocol, body)
+      def idle_seconds(value)
+        return Response::NO_IDLE if value.nil?
+
+        finite = value.is_a?(Integer) || (value.is_a?(Float) && value.finite?)
+        raise ArgumentError, 'idle_timeout must be a positive number of seconds or nil' unless finite && value.positive?
+
+        seconds = value.to_f
+        raise ArgumentError, 'idle_timeout must be finite' unless seconds.finite?
+
+        seconds
+      end
+
+      def open_tunnel(protocol, body, idle)
         @status = Response::SWITCHING
         @body = ''
         @stream_body = nil
-        @tunnel = Response::Upgrade.new(protocol, body)
+        @tunnel = Response::Upgrade.new(protocol, body, idle)
       end
     end
 
@@ -198,16 +215,19 @@ module Kiln
       UPGRADE_LINE = "HTTP/1.1 101 Switching Protocols\r\n".b.freeze
       CONNECTION_UPGRADE = "Connection: Upgrade\r\n".b.freeze
       UPGRADE_PREFIX = 'Upgrade: '.b.freeze
+      TUNNEL_IDLE = 60.0
+      NO_IDLE = -1.0
 
       attr_accessor :status, :body
       attr_reader :headers, :stream_body, :stream_length, :noted_length, :noted_type
 
       class Upgrade
-        attr_reader :tunnel_protocol, :tunnel_proc
+        attr_reader :tunnel_protocol, :tunnel_proc, :tunnel_idle
 
-        def initialize(protocol, body)
+        def initialize(protocol, body, idle)
           @tunnel_protocol = protocol
           @tunnel_proc = body
+          @tunnel_idle = idle
         end
       end
 
