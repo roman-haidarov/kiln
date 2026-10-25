@@ -14,7 +14,7 @@ def start_test_server(server_object)
 end
 
 def local_base(klass, max_conns:, &handler)
-  klass.new(handler, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
+  klass.new(handler, log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
                           max_conns: max_conns)
 end
 
@@ -108,7 +108,7 @@ class GatedFinalizeServer < Kiln::Server::Base
   end
 end
 
-reaper_server = GatedFinalizeServer.new(nil, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0,
+reaper_server = GatedFinalizeServer.new(nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0,
                                                   host: '127.0.0.1', max_conns: 1)
 reaper_server.finalize_entered = Queue.new
 reaper_server.continue_finalize = Queue.new

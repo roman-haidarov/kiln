@@ -3,7 +3,7 @@ require 'socket'
 
 reader, writer = Socket.pair(Socket::AF_UNIX, Socket::SOCK_STREAM, 0)
 writer.write("3;\r\nabc\r\n0\r\n\r\n".b)
-server = Kiln::Server::Base.new(nil, nil, log: nil, port: 0)
+server = Kiln::Server::Base.new(nil, log: nil, port: 0)
 _body, error = server.send(:read_chunked, reader, Kiln::HTTP::ReadBuffer.new, Kiln::Runtime.now + 1.0)
 reader.close
 writer.close

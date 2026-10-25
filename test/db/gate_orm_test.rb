@@ -159,7 +159,7 @@ def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)
     line(db, 'mail', "#{mailed.input_status(0)} #{left}")
   else
     begin
-      GateMail.import([{ 'id' => 1, 'email' => 'a@b.c', 'name' => 'a' }], { on_duplicate_key_update: true })
+      GateMail.import([{ 'id' => 1, 'email' => 'a@b.c', 'name' => 'a' }], { on_duplicate_key_update: true, returning: true })
       line(db, 'mail', 'miss')
     rescue Kiln::DB::AmbiguousConflict
       left = GateMail.all.count

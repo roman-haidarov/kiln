@@ -119,13 +119,12 @@ module Kiln
 
       include Tasks
 
-      attr_reader :req, :res, :app, :id, :deadline
+      attr_reader :req, :res, :id, :deadline
       attr_accessor :gone, :prepared
 
-      def initialize(req, res, app, id, deadline)
+      def initialize(req, res, id, deadline)
         @req = req
         @res = res
-        @app = app
         @id = id
         @deadline = deadline
         @gone = false

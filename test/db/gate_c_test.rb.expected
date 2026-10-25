@@ -46,7 +46,7 @@ mysql84 pk id
 mysql84 gen yes
 mysql84 empty COMMITTED 0
 mysql84 option rejected
-mysql84 ignore blocked
+mysql84 ignore kept ada
 mariadb114 tx rollback
 mariadb114 join 3
 mariadb114 left 4
@@ -62,5 +62,5 @@ mariadb114 pk id
 mariadb114 gen yes
 mariadb114 empty COMMITTED 0
 mariadb114 option rejected
-mariadb114 ignore blocked
+mariadb114 ignore kept ada
 ok gate-c

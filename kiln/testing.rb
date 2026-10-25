@@ -1,8 +1,8 @@
 module Kiln
   module Testing
     class << self
-      CALL_KEYS = %i[headers body state timeout].freeze
-      JSON_KEYS = %i[headers state timeout].freeze
+      CALL_KEYS = %i[headers body timeout].freeze
+      JSON_KEYS = %i[headers timeout].freeze
 
       def call(app, verb, target, **options)
         check_options(options, CALL_KEYS)
@@ -26,7 +26,7 @@ module Kiln
       def build_context(verb, target, options, res, deadline)
         headers = lower(options.fetch(:headers) { {} })
         req = HTTP::Request.new(verb, target, headers, options[:body])
-        Routing::Context.new(req, res, options[:state], 'test', deadline)
+        Routing::Context.new(req, res, 'test', deadline)
       end
 
       def check_options(options, keys)

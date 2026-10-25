@@ -1,0 +1,7 @@
+kiln/db/batch.rb
+  L251  Using each_with_index is slower than while loop
+
+kiln/db/import_options.rb
+  L117  Using each_with_index is slower than while loop
+
+122 files inspected, 2 offenses detected

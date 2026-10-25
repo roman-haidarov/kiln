@@ -7,7 +7,7 @@ module Kiln
         def serve(req, slot, deadline, id, box)
           current = Thread.current
           enter_request(current, id, deadline, slot.sock.fileno)
-          ctx = Routing::Context.new(req, HTTP::Response.new, @app, id, deadline)
+          ctx = Routing::Context.new(req, HTTP::Response.new, id, deadline)
           dispatch(ctx)
           respond_after(ctx, slot, box, claim_write(slot))
         ensure
@@ -149,12 +149,7 @@ module Kiln
         end
 
         def fixed_wire(req, res, keep)
-          raw_status = res.status
-          body = HTTP::Response.payload(raw_status, res.body)
-          head = HTTP::Response.build_head(raw_status, res.headers, body.bytesize, keep, version: req.http_version)
-          status = HTTP::Response.valid_status?(raw_status) ? raw_status : 500
-          body = EMPTY_BODY if req.verb == 'HEAD' || HTTP::Response.no_body?(status)
-          [head, body]
+          HTTP::Response.fixed_parts(req, res, keep)
         end
 
         def send_fixed(sock, box, head, body, keep)

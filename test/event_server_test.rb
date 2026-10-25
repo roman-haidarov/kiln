@@ -76,7 +76,7 @@ router = Kiln::Routing::Router.new
 
 pipe_marker = -> {}
 old_pipe_handler = Signal.trap('PIPE', pipe_marker)
-pipe_server = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+pipe_server = Kiln::Server::Event.new(router, log: log, port: 0)
 pipe_server.start
 pipe_after_start = Signal.trap('PIPE', 'DEFAULT')
 Signal.trap('PIPE', pipe_marker)
@@ -86,7 +86,7 @@ Signal.trap('PIPE', old_pipe_handler)
 check 'event server preserves the process SIGPIPE handler',
       pipe_after_start.equal?(pipe_marker) && pipe_after_stop.equal?(pipe_marker)
 
-inline = Kiln::Server::Event.new(router, nil, log: log, port: 0, request_timeout: 0.2)
+inline = Kiln::Server::Event.new(router, log: log, port: 0, request_timeout: 0.2)
 inline.start
 ip = inline.port
 absolute = exchange(ip, "GET http://example.test/absolute HTTP/1.1\r\nHost: ignored.test\r\nConnection: close\r\n\r\n")
@@ -176,7 +176,7 @@ pipe_response = pipe_client.value
 check 'inline: shutdown finishes every request already parsed from a pipeline',
       pipe_shutdown_left.zero? && SHUTDOWN_CALLS.size == 2 && pipe_response.scan('HTTP/1.1 200 ').size == 3
 check 'inline: shutdown releases connections', inline.connections.zero?
-hung = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+hung = Kiln::Server::Event.new(router, log: log, port: 0)
 hung.start
 hung_data = (1..3).map { |i| "GET /hang HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n" }.join
 hung_client = Thread.new { exchange(hung.port, hung_data, 3.0) }
@@ -185,7 +185,7 @@ hung_left = hung.shutdown(grace: 0.2)
 hung_client.join
 check 'inline: unfinished count includes queued requests when the handler is stopped', hung_left == 3
 
-last = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+last = Kiln::Server::Event.new(router, log: log, port: 0)
 last.start
 last_out = Queue.new
 last_client = Thread.new { last_out << exchange(last.port, "GET /pause HTTP/1.1\r\nHost: x\r\n\r\n", 3.0) }
@@ -204,7 +204,7 @@ rescue SystemCallError
 end
 v6_served = true
 if ipv6
-  v6 = Kiln::Server::Event.new(router, nil, log: log, host: '::1', port: 0)
+  v6 = Kiln::Server::Event.new(router, log: log, host: '::1', port: 0)
   v6.start
   v6_client = TCPSocket.new('::1', v6.port)
   v6_client.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
@@ -214,7 +214,7 @@ if ipv6
 end
 check 'inline: listens on ::1 when the host has IPv6', v6_served
 
-more = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+more = Kiln::Server::Event.new(router, log: log, port: 0)
 more.start
 mp = more.port
 half = TCPSocket.new('127.0.0.1', mp)
@@ -235,7 +235,7 @@ wide << "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
 check 'inline: 17 pipelined requests -> 17 responses', exchange(mp, wide, 3).scan('HTTP/1.1 200 ').size == 17
 more.shutdown(grace: 0.5)
 
-slow = Kiln::Server::Event.new(->(ctx) { ctx.res.text('z' * (8 << 20)) }, nil,
+slow = Kiln::Server::Event.new(->(ctx) { ctx.res.text('z' * (8 << 20)) },
                                log: log, port: 0, write_timeout: 0.2)
 slow.start
 slow_sock = TCPSocket.new('127.0.0.1', slow.port)
@@ -255,7 +255,7 @@ slow.shutdown(grace: 0.5)
 check 'inline: a slow reader is closed by write_timeout', slow_closed
 
 def serve_once(log)
-  again = Kiln::Server::Event.new(->(ctx) { ctx.res.text('again') }, nil, log:, port: 0)
+  again = Kiln::Server::Event.new(->(ctx) { ctx.res.text('again') }, log:, port: 0)
   again.start
   again_sock = TCPSocket.new('127.0.0.1', again.port)
   again_sock.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
@@ -281,7 +281,7 @@ deadline_router.get('/blocked', lambda do |ctx|
   ctx.res.text('late')
 end)
 deadline_router.get('/fast', ->(ctx) { ctx.res.text('fast') })
-deadline_server = Kiln::Server::Event.new(deadline_router, nil, log: log, port: 0,
+deadline_server = Kiln::Server::Event.new(deadline_router, log: log, port: 0,
                                                                 request_timeout: 0.3, handlers: 2)
 deadline_server.start
 blocked_client = Thread.new do
@@ -309,7 +309,7 @@ stream_router = Kiln::Routing::Router.new.get('/stream', lambda do |ctx|
   end
 end).seal!
 gzip_streams = Kiln::Middleware::Compress.new(stream_router, min_size: 1)
-limited_streams = Kiln::Server::Event.new(gzip_streams, nil, log: log, port: 0, max_streams: 1)
+limited_streams = Kiln::Server::Event.new(gzip_streams, log: log, port: 0, max_streams: 1)
 limited_streams.start
 stream_client = TCPSocket.new('127.0.0.1', limited_streams.port)
 stream_client.write("GET /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
@@ -326,7 +326,7 @@ stream_client.close
 limited_streams.shutdown(grace: 1)
 check 'a stream below max_streams completes', stream_reply.include?('streamed')
 
-drip = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+drip = Kiln::Server::Event.new(router, log: log, port: 0)
 drip.start
 drip_req = "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
 whole = exchange(drip.port, drip_req)

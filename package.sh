@@ -12,7 +12,7 @@ rm -f "$temporary"
 (
   cd "$root"
   if [ -d .git ] && command -v git >/dev/null 2>&1; then
-    git ls-files --cached
+    git ls-files --cached --others --exclude-standard
   else
     find . -type d \( -name .git -o -name build -o -name __pycache__ -o -name .ruby-lsp -o -name validation -o -name __MACOSX -o -path ./ext/croaring \) -prune -o \
       -type f ! -name .DS_Store ! -name '._*' ! -name '*.zip' ! -name '*.tmp' -print |

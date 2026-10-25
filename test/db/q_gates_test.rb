@@ -246,12 +246,8 @@ def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)
   end
   ignore = 'pg'
   if conn.dialect == :mysql
-    begin
-      QUser.import([{ 'id' => 1, 'name' => 'ada' }], { on_duplicate_key_ignore: true })
-      ignore = 'passed'
-    rescue Kiln::DB::UnsafeImportSchema
-      ignore = 'blocked'
-    end
+    QUser.import([{ 'id' => 1, 'name' => 'ada' }], { on_duplicate_key_ignore: true })
+    ignore = 'passed'
   end
   warned = 'pg'
   if conn.dialect == :mysql

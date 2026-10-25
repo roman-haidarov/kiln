@@ -1,6 +1,17 @@
 module Kiln
   module HTTP
     module ResponseWire
+      def fixed_parts(req, res, keep)
+        status = res.status
+        body = payload(status, res.body)
+        head = build_head(status, res.headers, body.bytesize, keep, version: req.http_version)
+        [head, body_for(req.verb, status, body)]
+      end
+
+      def body_for(verb, status, body)
+        verb == 'HEAD' || no_body?(status) ? Response::EMPTY_BODY : body
+      end
+
       def build_wire(status_value, headers, body_value, keep_alive, version: '1.1')
         status = valid_status?(status_value) ? status_value : 500
         body = payload(status_value, body_value)
@@ -167,6 +178,7 @@ module Kiln
         504 => 'Gateway Timeout'
       }.freeze
       HTTP_10 = '1.0'.freeze
+      EMPTY_BODY = ''.b.freeze
       CRLF = "\r\n".b.freeze
       FIELD_SEP = ': '.b.freeze
       PREFIX_11 = 'HTTP/1.1 '.b.freeze

@@ -7,6 +7,7 @@ limit=${TEST_TIMEOUT:-120}
 results_dir=${KILN_VALIDATION_DIR:-/tmp/kiln-validation}/db-tests
 cd "$(dirname "$0")/.."
 spinel_cc=$(pwd)/ci/spinel-cc.sh
+. ./ci/test-process.sh
 mkdir -p build/test
 mkdir -p "$results_dir"
 pattern=${1:-}
@@ -38,25 +39,7 @@ for source in "$@"; do
     continue
   fi
   result="$results_dir/$name.out"
-  "$binary" > "$result" 2>&1 &
-  pid=$!
-  ticks=0
-  status=0
-  timed_out=0
-  while kill -0 "$pid" 2> /dev/null; do
-    process_state=$(ps -p "$pid" -o stat= 2> /dev/null || true)
-    case "$process_state" in
-      Z*) break ;;
-    esac
-    if [ "$ticks" -ge "$((limit * 10))" ]; then
-      kill -9 "$pid" 2> /dev/null || true
-      timed_out=1
-      break
-    fi
-    sleep 0.1
-    ticks=$((ticks + 1))
-  done
-  wait "$pid" || status=$?
+  run_test_process "$binary" "$result" "$limit"
   if [ "$status" -ne 0 ]; then
     cat "$result" >&2
     if [ "$timed_out" -eq 1 ]; then

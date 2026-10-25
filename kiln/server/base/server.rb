@@ -63,9 +63,8 @@ module Kiln
       module Setup
         private
 
-        def init_endpoints(config, handler, app)
+        def init_endpoints(config, handler)
           @handler = handler
-          @app = app
           @log = config.log
           @port = config.port
           @listen = config.listen
@@ -609,9 +608,9 @@ module Kiln
       include Reaping
       include Connections
 
-      def initialize(handler, app = nil, **options)
+      def initialize(handler, **options)
         config = Settings.base(options)
-        init_endpoints(config, handler, app)
+        init_endpoints(config, handler)
         init_timeouts(config)
         init_limits(config)
         init_shards(config.shards)

@@ -22,6 +22,7 @@ if [ "${CI_NATIVE_C:-0}" = 1 ]; then
     printf 'native C compiler not found: %s\n' "$native_compiler" >&2
     exit 1
   }
+  CC="$native_compiler" ci/uv-state.sh
   printf '== native C analysis, fuzzing, TSan and coverage\n'
   KILN_NATIVE_CC="$native_compiler" KILN_C_ARTIFACTS="$artifacts/c-native" \
     ci/c-native.sh all

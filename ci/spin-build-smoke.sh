@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+cd "$root"
+spinel_cc=$(pwd)/ci/spinel-cc.sh
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 spinel=${SPINEL:-spinel}
 spinel_path=$(command -v "$spinel")
 spinel_dir=$(CDPATH= cd -- "$(dirname -- "$spinel_path")" && pwd -P)
@@ -37,7 +40,7 @@ raise 'JSON mismatch' unless json == '{"x":"ё"}'
 raise 'version mismatch' unless Kiln::VERSION == ENV.fetch('KILN_EXPECTED_VERSION')
 puts 'kiln spin build ok'
 RUBY
-SPIN_NO_NATIVE_CACHE=1 SPIN_NATIVE_CACHE="$scratch/native-cache" "$spin" build
+CC="$spinel_cc" SPIN_NO_NATIVE_CACHE=1 SPIN_NATIVE_CACHE="$scratch/native-cache" "$spin" build
 result=$(KILN_EXPECTED_VERSION="$expected" "$scratch/kiln_smoke/build/bin/kiln_smoke")
 if [ "$result" != 'kiln spin build ok' ]; then
   printf 'unexpected spin output: %s\n' "$result" >&2

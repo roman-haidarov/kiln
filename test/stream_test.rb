@@ -169,7 +169,7 @@ log = Kiln::Observability::Log.new(log_io)
   name = backend == :event ? "event/#{handlers}" : 'base'
   options = { log:, port: 0, host: '127.0.0.1', backend:, request_timeout: 0.3, write_timeout: 0.5 }
   options[:handlers] = handlers if backend == :event
-  server = Kiln::Server.new(Kiln::Middleware::Rescue.new(build_router, log), nil, **options)
+  server = Kiln::Server.new(Kiln::Middleware::Rescue.new(build_router, log), **options)
   server.start
   port = server.port
 

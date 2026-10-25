@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+spinel_cc=$(pwd)/ci/spinel-cc.sh
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 spinel_bin=${SPINEL:-/tmp/spinel-d12-prefix/bin/spinel}
 export SPINEL="$spinel_bin"
 out=${KILN_GATE_B_DIR:-/tmp/kiln-gate-b-run}
@@ -8,7 +10,7 @@ gate_iters=${KILN_GATE_B_ITERS:-2000}
 mkdir -p "$out"
 rm -f build/ext/kiln_db_*.o
 links=$(KILN_DB=1 ./ext/build.sh)
-"$spinel_bin" $links -I . bench/db/gate_b.rb -o "$out/gate_b"
+"$spinel_bin" "--cc=$spinel_cc" $links -I . bench/db/gate_b.rb -o "$out/gate_b"
 export SPINEL_WORKERS=1
 KILN_GATE_B_ITERS=$gate_iters /usr/bin/time -l -o "$out/time-all.txt" "$out/gate_b" > "$out/all.out" 2>"$out/all.err"
 for round in 1 2 3; do

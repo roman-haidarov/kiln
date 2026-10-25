@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include "kiln_tls.h"
 #include "kiln_uv_parse.h"
+#include "kiln_uv_state.h"
 #include "libuv/include/uv.h"
 
 #ifdef SP_THREADS
@@ -116,32 +117,23 @@ typedef struct kuv_conn {
     uint64_t linger_since;
     size_t sending;
     const char *deferred_error;
-    int closing;
-    int close_after_flush;
+    kuv_conn_state state;
+    kuv_parse_state parse_state;
+    kuv_body_state body_state;
+    kuv_expect_state expect_state;
+    kuv_head_state head_state;
     int queued_flush;
     int pending;
     int awaiting;
     int writes;
-    int stop_parse;
-    int want_continue;
-    int continue_sent;
     int read_paused;
     int read_eof;
     int reading;
     int served;
-    int head_active;
-    int body_wait;
     int handshaking;
     int body_mode;
-    int body_active;
-    int body_done;
     int body_error;
     int body_discard;
-    int body_paused;
-    int body_expect;
-    int hold;
-    int tunnel;
-    int lingering;
     int resume_parse;
     int out_paused;
     int refused;
@@ -229,6 +221,36 @@ static void kuv_alloc(uv_handle_t *handle, size_t suggested, uv_buf_t *buf);
 static void kuv_parse(kuv_conn *c);
 static void kuv_flush_tls(kuv_conn *c);
 
+static void kuv_stop_parsing(kuv_conn *c) {
+    if (c->parse_state != KUV_PARSE_TUNNEL) {
+        c->parse_state = KUV_PARSE_STOPPED;
+    }
+}
+
+static void kuv_release_upgrade(kuv_conn *c) {
+    if (c->parse_state == KUV_PARSE_UPGRADE) {
+        c->parse_state = KUV_PARSE_OPEN;
+    }
+}
+
+static void kuv_body_complete(kuv_conn *c) {
+    if (!c->body_error) {
+        c->body_state = KUV_BODY_DONE;
+    }
+}
+
+static void kuv_body_pause(kuv_conn *c) {
+    if (c->body_state == KUV_BODY_READING) {
+        c->body_state = KUV_BODY_PAUSED;
+    }
+}
+
+static void kuv_body_resume(kuv_conn *c) {
+    if (c->body_state == KUV_BODY_PAUSED) {
+        c->body_state = KUV_BODY_READING;
+    }
+}
+
 static uv_stream_t *kuv_stream(kuv_conn *c) {
     return (uv_stream_t *)&c->h;
 }
@@ -238,19 +260,19 @@ static size_t kuv_out_bytes(const kuv_conn *c) {
 }
 
 static int kuv_wants_read(const kuv_conn *c) {
-    if (c->closing || c->read_eof) {
+    if (c->state == KUV_CONN_CLOSING || c->read_eof) {
         return 0;
     }
-    if (c->lingering) {
+    if (c->state == KUV_CONN_LINGERING) {
         return 1;
     }
     if (c->tls_wait == KILN_TLS_WANT_READ) {
         return 1;
     }
-    if (c->body_active) {
-        return !c->body_done && !c->body_paused && !c->body_error;
+    if (c->body_mode != KUV_BODY_NONE) {
+        return c->body_state != KUV_BODY_DONE && c->body_state != KUV_BODY_PAUSED && !c->body_error;
     }
-    return !c->stop_parse && !c->hold && !c->read_paused && !c->out_paused;
+    return c->parse_state == KUV_PARSE_OPEN && !c->read_paused && !c->out_paused;
 }
 
 static void kuv_sync_read(kuv_conn *c) {
@@ -301,10 +323,10 @@ static void kuv_on_close(uv_handle_t *handle) {
 }
 
 static void kuv_close(kuv_conn *c) {
-    if (c->closing) {
+    if (c->state == KUV_CONN_CLOSING) {
         return;
     }
-    c->closing = 1;
+    c->state = kuv_conn_next(c->state, KUV_CONN_CLOSE);
     c->reading = 0;
     uv_close((uv_handle_t *)&c->h, kuv_on_close);
 }
@@ -339,7 +361,7 @@ static int kuv_tls_push(kuv_conn *c) {
 }
 
 static void kuv_end(kuv_conn *c) {
-    if (c->closing || c->lingering) {
+    if (c->state == KUV_CONN_CLOSING || c->state == KUV_CONN_LINGERING) {
         return;
     }
     if (kuv_linger_ms == 0 || c->read_eof || c->handshaking || !kuv_listening) {
@@ -353,7 +375,7 @@ static void kuv_end(kuv_conn *c) {
             return;
         }
     }
-    c->lingering = 1;
+    c->state = kuv_conn_next(c->state, KUV_CONN_LINGER);
     c->linger_since = uv_now(kuv_loop);
     c->in_len = 0;
     if (uv_shutdown(&c->shut, kuv_stream(c), kuv_on_shutdown) != 0) {
@@ -424,7 +446,8 @@ static void kuv_spare_put(char *buf, size_t cap) {
 }
 
 static void kuv_release_idle(kuv_conn *c) {
-    if (c->closing || c->tls || c->tunnel || c->body_active || c->hold || c->in_len != 0 ||
+    if (c->state == KUV_CONN_CLOSING || c->tls || c->parse_state == KUV_PARSE_TUNNEL ||
+        c->body_mode != KUV_BODY_NONE || c->parse_state == KUV_PARSE_UPGRADE || c->in_len != 0 ||
         c->out_len != 0 || c->writes != 0) {
         return;
     }
@@ -502,8 +525,8 @@ static void kuv_reply_and_close(kuv_conn *c, const char *msg) {
         kuv_close(c);
         return;
     }
-    c->close_after_flush = 1;
-    c->stop_parse = 1;
+    c->state = kuv_conn_next(c->state, KUV_CONN_FINISH);
+    kuv_stop_parsing(c);
     kuv_sync_read(c);
     kuv_queue_flush(c);
 }
@@ -511,7 +534,7 @@ static void kuv_reply_and_close(kuv_conn *c, const char *msg) {
 static void kuv_error(kuv_conn *c, const char *msg) {
     if (c->pending > 0 || c->awaiting > 0) {
         c->deferred_error = msg;
-        c->stop_parse = 1;
+        kuv_stop_parsing(c);
         kuv_sync_read(c);
         return;
     }
@@ -519,14 +542,15 @@ static void kuv_error(kuv_conn *c, const char *msg) {
 }
 
 static void kuv_maybe_continue(kuv_conn *c) {
-    if (!c->want_continue || c->continue_sent || c->pending > 0 || c->awaiting > 0 || c->closing) {
+    if (c->expect_state != KUV_EXPECT_BUFFERED || c->pending > 0 || c->awaiting > 0 ||
+        c->state == KUV_CONN_CLOSING) {
         return;
     }
     if (kuv_append(&c->out, &c->out_len, &c->out_cap, KUV_CONTINUE, sizeof(KUV_CONTINUE) - 1) < 0) {
         kuv_close(c);
         return;
     }
-    c->continue_sent = 1;
+    c->expect_state = KUV_EXPECT_SENT;
     kuv_queue_flush(c);
 }
 
@@ -576,12 +600,10 @@ static void kuv_consume(kuv_conn *c, size_t used) {
 }
 
 static void kuv_body_release(kuv_conn *c) {
-    c->body_active = 0;
     c->body_mode = KUV_BODY_NONE;
-    c->body_done = 0;
+    c->body_state = KUV_BODY_IDLE;
     c->body_discard = 0;
-    c->body_paused = 0;
-    c->body_expect = 0;
+    c->expect_state = KUV_EXPECT_NONE;
     c->body_error = 0;
     c->body_len = 0;
     if (c->body_cap > KUV_BODY_HIGH) {
@@ -595,6 +617,7 @@ static void kuv_body_chunked(kuv_conn *c, size_t *used) {
     for (;;) {
         if (kuv_reserve(&c->body, c->body_len, &c->body_cap, 16384) < 0) {
             c->body_error = 400;
+            c->body_state = KUV_BODY_FAILED;
             return;
         }
         size_t consumed = 0;
@@ -607,6 +630,7 @@ static void kuv_body_chunked(kuv_conn *c, size_t *used) {
         }
         if (rc < KILN_UV_CHUNK_MORE) {
             c->body_error = 400;
+            c->body_state = KUV_BODY_FAILED;
             if (rc == KILN_UV_CHUNK_TOO_BIG) {
                 c->body_error = 431;
             }
@@ -616,7 +640,7 @@ static void kuv_body_chunked(kuv_conn *c, size_t *used) {
             return;
         }
         if (rc == KILN_UV_CHUNK_END) {
-            c->body_done = 1;
+            kuv_body_complete(c);
             return;
         }
         if (consumed == 0 && produced == 0) {
@@ -632,6 +656,7 @@ static size_t kuv_body_copy(kuv_conn *c) {
     }
     if (!c->body_discard && kuv_append(&c->body, &c->body_len, &c->body_cap, c->in, n) < 0) {
         c->body_error = 400;
+        c->body_state = KUV_BODY_FAILED;
         return 0;
     }
     if (c->body_mode == KUV_BODY_LENGTH) {
@@ -641,7 +666,7 @@ static size_t kuv_body_copy(kuv_conn *c) {
 }
 
 static void kuv_body_feed(kuv_conn *c) {
-    if (c->body_done || c->body_error || c->in_len == 0) {
+    if (c->body_state == KUV_BODY_DONE || c->body_error || c->in_len == 0) {
         return;
     }
     size_t used = 0;
@@ -654,25 +679,25 @@ static void kuv_body_feed(kuv_conn *c) {
 }
 
 static void kuv_body_pump(kuv_conn *c) {
-    if (!c->body_active) {
+    if (c->body_mode == KUV_BODY_NONE) {
         return;
     }
     kuv_body_feed(c);
     if (c->body_mode == KUV_BODY_LENGTH && c->body_left == 0) {
-        c->body_done = 1;
+        kuv_body_complete(c);
     }
     if (c->body_error) {
-        c->stop_parse = 1;
+        kuv_stop_parsing(c);
         c->in_len = 0;
-    } else if (c->body_done && c->stop_parse) {
+    } else if (c->body_state == KUV_BODY_DONE && c->parse_state >= KUV_PARSE_STOPPED) {
         c->in_len = 0;
     }
-    if (c->body_discard && c->body_done && !c->body_error) {
+    if (c->body_discard && c->body_state == KUV_BODY_DONE && !c->body_error) {
         kuv_body_release(c);
         c->resume_parse = 1;
     }
-    if (c->body_active && !c->body_discard && c->body_len >= KUV_BODY_HIGH) {
-        c->body_paused = 1;
+    if (c->body_mode != KUV_BODY_NONE && !c->body_discard && c->body_len >= KUV_BODY_HIGH) {
+        kuv_body_pause(c);
     }
     kuv_sync_read(c);
 }
@@ -708,44 +733,42 @@ static int kuv_enqueue(
     kuv_ready++;
     c->pending++;
     c->served++;
-    c->want_continue = 0;
-    c->continue_sent = 0;
-    c->body_wait = 0;
+    c->expect_state = KUV_EXPECT_NONE;
+
     return 0;
 }
 
 static void kuv_start_body(kuv_conn *c, const kiln_uv_parse_result *parsed, int close) {
-    c->body_active = 1;
+    c->body_state = KUV_BODY_READING;
     c->body_mode = parsed->chunked ? KUV_BODY_CHUNKED : KUV_BODY_LENGTH;
     c->body_left = parsed->chunked ? 0 : parsed->body_len;
-    c->body_done = 0;
     c->body_error = 0;
     c->body_discard = 0;
-    c->body_paused = 0;
+    kuv_body_resume(c);
     c->body_len = 0;
-    c->body_expect = parsed->expect_continue;
+    c->expect_state = parsed->expect_continue ? KUV_EXPECT_STREAMED : KUV_EXPECT_NONE;
     kiln_uv_chunk_init(&c->chunk);
     if (close) {
-        c->stop_parse = 1;
+        kuv_stop_parsing(c);
     }
 }
 
 static void kuv_track_head(kuv_conn *c) {
-    if (c->in_len > 0 && !c->body_active) {
-        if (!c->head_active) {
-            c->head_active = 1;
+    if (c->in_len > 0 && c->body_mode == KUV_BODY_NONE) {
+        if (c->head_state == KUV_HEAD_IDLE) {
+            c->head_state = KUV_HEAD_READING;
             c->head_since = uv_now(kuv_loop);
         }
     } else {
-        c->head_active = 0;
+        c->head_state = KUV_HEAD_IDLE;
     }
 }
 
 static void kuv_parse(kuv_conn *c) {
     size_t pos = 0;
     int partial_head = 0;
-    while (
-        !c->close_after_flush && !c->stop_parse && !c->hold && !c->body_active && pos < c->in_len) {
+    while (c->state == KUV_CONN_OPEN && c->parse_state == KUV_PARSE_OPEN &&
+           c->body_mode == KUV_BODY_NONE && pos < c->in_len) {
         if (c->pending + c->awaiting >= KUV_PIPELINE_MAX) {
             c->read_paused = 1;
             break;
@@ -771,10 +794,12 @@ static void kuv_parse(kuv_conn *c) {
             break;
         }
         if (state == KILN_UV_PARSE_INCOMPLETE) {
-            c->body_wait = parsed.head_len > 0;
+            c->head_state = parsed.head_len > 0 ? KUV_HEAD_BODY : KUV_HEAD_READING;
             partial_head = parsed.head_len == 0;
             if (parsed.expect_continue) {
-                c->want_continue = 1;
+                if (c->expect_state == KUV_EXPECT_NONE) {
+                    c->expect_state = KUV_EXPECT_BUFFERED;
+                }
                 kuv_maybe_continue(c);
             }
             break;
@@ -790,25 +815,25 @@ static void kuv_parse(kuv_conn *c) {
             c->head_scanned = 0;
             kuv_consume(c, pos);
             kuv_start_body(c, &parsed, close);
-            c->head_active = 0;
+            c->head_state = KUV_HEAD_IDLE;
             kuv_body_pump(c);
             return;
         }
         if (close) {
-            c->stop_parse = 1;
+            kuv_stop_parsing(c);
         } else if (parsed.upgrade) {
-            c->hold = 1;
+            c->parse_state = KUV_PARSE_UPGRADE;
         }
         if (pos < c->in_len) {
-            c->head_active = 1;
+            c->head_state = KUV_HEAD_READING;
             c->head_since = uv_now(kuv_loop);
         } else {
-            c->head_active = 0;
+            c->head_state = KUV_HEAD_IDLE;
         }
     }
-    if (c->stop_parse && !c->body_active) {
+    if (c->parse_state >= KUV_PARSE_STOPPED && c->body_mode == KUV_BODY_NONE) {
         c->in_len = 0;
-        c->head_active = 0;
+        c->head_state = KUV_HEAD_IDLE;
         c->head_scanned = 0;
     } else {
         kuv_consume(c, pos);
@@ -818,11 +843,11 @@ static void kuv_parse(kuv_conn *c) {
 }
 
 static void kuv_out_resume(kuv_conn *c) {
-    if (!c->out_paused || c->closing || kuv_out_bytes(c) >= KUV_OUT_LOW) {
+    if (!c->out_paused || c->state == KUV_CONN_CLOSING || kuv_out_bytes(c) >= KUV_OUT_LOW) {
         return;
     }
     c->out_paused = 0;
-    if (!c->stop_parse && !c->hold && !c->body_active && !kuv_draining) {
+    if (c->parse_state == KUV_PARSE_OPEN && c->body_mode == KUV_BODY_NONE && !kuv_draining) {
         kuv_track_head(c);
         kuv_parse(c);
     } else {
@@ -831,15 +856,16 @@ static void kuv_out_resume(kuv_conn *c) {
 }
 
 static void kuv_ingest(kuv_conn *c) {
-    if (c->body_active) {
+    if (c->body_mode != KUV_BODY_NONE) {
         kuv_body_pump(c);
-        if (c->body_active || !c->resume_parse || c->stop_parse || c->closing || kuv_draining) {
+        if (c->body_mode != KUV_BODY_NONE || !c->resume_parse ||
+            c->parse_state >= KUV_PARSE_STOPPED || c->state == KUV_CONN_CLOSING || kuv_draining) {
             return;
         }
         c->resume_parse = 0;
     }
     kuv_track_head(c);
-    if (!c->hold) {
+    if (c->parse_state != KUV_PARSE_UPGRADE) {
         kuv_parse(c);
     }
 }
@@ -847,7 +873,7 @@ static void kuv_ingest(kuv_conn *c) {
 static void kuv_alloc(uv_handle_t *handle, size_t suggested, uv_buf_t *buf) {
     kuv_conn *c = (kuv_conn *)handle->data;
     (void)suggested;
-    if (c->tls || c->lingering) {
+    if (c->tls || c->state == KUV_CONN_LINGERING) {
         buf->base = kuv_tls_scratch;
         buf->len = sizeof(kuv_tls_scratch);
         return;
@@ -894,7 +920,7 @@ static int kuv_tls_in(kuv_conn *c, const char *data, size_t len) {
     if (c->tls_pending && c->tls_wait == KILN_TLS_WANT_READ) {
         c->tls_wait = 0;
         kuv_flush_tls(c);
-        if (c->closing) {
+        if (c->state == KUV_CONN_CLOSING) {
             return KILN_TLS_FAIL;
         }
         kuv_sync_read(c);
@@ -919,15 +945,16 @@ static int kuv_tls_in(kuv_conn *c, const char *data, size_t len) {
 }
 
 static int kuv_body_eof(kuv_conn *c) {
-    if (!c->body_done && !c->body_error) {
+    if (c->body_state != KUV_BODY_DONE && !c->body_error) {
         kuv_body_pump(c);
         if (c->body_mode == KUV_BODY_TUNNEL) {
-            c->body_done = 1;
-        } else if (!c->body_done) {
+            kuv_body_complete(c);
+        } else if (c->body_state != KUV_BODY_DONE) {
             c->body_error = KUV_GONE;
+            c->body_state = KUV_BODY_FAILED;
         }
     }
-    return c->tunnel || c->pending > 0 || c->awaiting > 0;
+    return c->parse_state == KUV_PARSE_TUNNEL || c->pending > 0 || c->awaiting > 0;
 }
 
 static void kuv_finish_eof(kuv_conn *c) {
@@ -937,7 +964,7 @@ static void kuv_finish_eof(kuv_conn *c) {
         kuv_reply_and_close(c, error);
         return;
     }
-    c->close_after_flush = 1;
+    c->state = kuv_conn_next(c->state, KUV_CONN_FINISH);
     if (c->out_len > 0) {
         kuv_queue_flush(c);
     } else if (c->writes == 0) {
@@ -948,23 +975,23 @@ static void kuv_finish_eof(kuv_conn *c) {
 static void kuv_on_read_end(kuv_conn *c) {
     c->read_eof = 1;
     kuv_sync_read(c);
-    if (c->lingering) {
+    if (c->state == KUV_CONN_LINGERING) {
         kuv_close(c);
         return;
     }
-    if (c->body_active && kuv_body_eof(c)) {
+    if (c->body_mode != KUV_BODY_NONE && kuv_body_eof(c)) {
         return;
     }
-    if (!c->stop_parse && !c->closing && !c->hold) {
+    if (c->parse_state == KUV_PARSE_OPEN && c->state != KUV_CONN_CLOSING) {
         kuv_parse(c);
     }
-    if (c->closing) {
+    if (c->state == KUV_CONN_CLOSING) {
         return;
     }
-    if (c->read_paused && c->in_len > 0 && !c->stop_parse) {
+    if (c->read_paused && c->in_len > 0 && c->parse_state < KUV_PARSE_STOPPED) {
         return;
     }
-    c->stop_parse = 1;
+    kuv_stop_parsing(c);
     c->read_paused = 0;
     c->in_len = 0;
     if (c->pending == 0 && c->awaiting == 0) {
@@ -986,7 +1013,7 @@ static void kuv_on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
         return;
     }
     c->last_active = uv_now(kuv_loop);
-    if (c->lingering) {
+    if (c->state == KUV_CONN_LINGERING) {
         return;
     }
     if (c->tls) {
@@ -997,7 +1024,7 @@ static void kuv_on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf)
         }
         if (rc == KILN_TLS_CLOSED) {
             kuv_ingest(c);
-            if (!c->closing) {
+            if (c->state != KUV_CONN_CLOSING) {
                 kuv_on_read_end(c);
             }
             return;
@@ -1034,7 +1061,7 @@ static void kuv_accept_one(kuv_listener *l) {
     c->h.tcp.data = c;
     c->listener = (int)(l - kuv_listeners);
     c->last_active = uv_now(kuv_loop);
-    c->head_active = 1;
+    c->head_state = KUV_HEAD_READING;
     c->head_since = c->last_active;
     kuv_slots[c->slot] = c;
     long open = __atomic_add_fetch(&kuv_open, 1, __ATOMIC_RELAXED);
@@ -1092,8 +1119,9 @@ static void kuv_expire_waiting(kuv_conn *c, uint64_t now) {
         }
         return;
     }
-    if (c->head_active) {
-        uint64_t limit = c->body_wait ? kuv_header_ms + kuv_read_ms : kuv_header_ms;
+    if (c->head_state != KUV_HEAD_IDLE) {
+        uint64_t limit =
+            c->head_state == KUV_HEAD_BODY ? kuv_header_ms + kuv_read_ms : kuv_header_ms;
         if (now - c->head_since <= limit) {
             return;
         }
@@ -1111,7 +1139,7 @@ static void kuv_expire_waiting(kuv_conn *c, uint64_t now) {
 }
 
 static void kuv_expire(kuv_conn *c, uint64_t now) {
-    if (c->lingering) {
+    if (c->state == KUV_CONN_LINGERING) {
         if (now - c->linger_since > kuv_linger_ms) {
             kuv_close(c);
         }
@@ -1127,8 +1155,8 @@ static void kuv_expire(kuv_conn *c, uint64_t now) {
         if (now - c->last_active > kuv_read_ms) {
             kuv_close(c);
         }
-    } else if (!c->tunnel && !c->body_active && c->pending == 0 && c->awaiting == 0 &&
-               !c->close_after_flush) {
+    } else if (c->parse_state != KUV_PARSE_TUNNEL && c->body_mode == KUV_BODY_NONE &&
+               c->pending == 0 && c->awaiting == 0 && c->state != KUV_CONN_FLUSHING) {
         kuv_expire_waiting(c, now);
     }
 }
@@ -1138,7 +1166,7 @@ static void kuv_on_timer(uv_timer_t *timer) {
     uint64_t now = uv_now(kuv_loop);
     for (long i = 0; i < KUV_MAX_SLOTS; i++) {
         kuv_conn *c = kuv_slots[i];
-        if (c && !c->closing) {
+        if (c && c->state != KUV_CONN_CLOSING) {
             kuv_expire(c, now);
         }
     }
@@ -1297,7 +1325,7 @@ static kuv_req *kuv_take_ready(void) {
     kuv_req *r = kuv_head;
     while (r) {
         kuv_conn *c = kuv_slots[r->slot];
-        int live = c && c->gen == r->gen && !c->closing;
+        int live = c && c->gen == r->gen && c->state != KUV_CONN_CLOSING;
         if (!live || !kuv_out_blocked(c)) {
             if (prev) {
                 prev->next = r->next;
@@ -1336,7 +1364,7 @@ const char *kiln_uv_next(int64_t *scan, long cap, int64_t *meta) {
         if (live) {
             c->pending--;
         }
-        if (!live || c->closing || c->close_after_flush || c->refused) {
+        if (!live || c->state >= KUV_CONN_FLUSHING || c->refused) {
             if (kuv_draining && !(live && c->refused)) {
                 kuv_aborted++;
             }
@@ -1378,13 +1406,13 @@ static void kuv_after_write(uv_write_t *req, int status) {
     if (c->tls_pending && c->tls_wait == KILN_TLS_WANT_WRITE && c->writes == 0) {
         c->tls_wait = 0;
         kuv_flush_tls(c);
-        if (!c->closing && !c->tls_pending) {
+        if (c->state != KUV_CONN_CLOSING && !c->tls_pending) {
             int read_rc = kuv_tls_in(c, NULL, 0);
             if (read_rc == KILN_TLS_FAIL) {
                 kuv_close(c);
             } else if (read_rc == KILN_TLS_CLOSED) {
                 kuv_ingest(c);
-                if (!c->closing) {
+                if (c->state != KUV_CONN_CLOSING) {
                     kuv_on_read_end(c);
                 }
             } else if (c->in_len > 0) {
@@ -1393,8 +1421,7 @@ static void kuv_after_write(uv_write_t *req, int status) {
         }
     }
     kuv_out_resume(c);
-    if (!c->closing && c->close_after_flush && c->writes == 0 && c->out_len == 0 &&
-        !c->tls_pending) {
+    if (c->state == KUV_CONN_FLUSHING && c->writes == 0 && c->out_len == 0 && !c->tls_pending) {
         kuv_end(c);
     }
     kuv_release_idle(c);
@@ -1530,18 +1557,19 @@ static int kuv_try_direct(
 static void kuv_settle(kuv_conn *c) {
     if (c->out_len > 0) {
         kuv_queue_flush(c);
-    } else if (c->close_after_flush && c->writes == 0 && !c->tls_pending) {
+    } else if (c->state == KUV_CONN_FLUSHING && c->writes == 0 && !c->tls_pending) {
         kuv_end(c);
     }
 }
 
 static void kuv_send_finish(kuv_conn *c, long close_after) {
     int hit_zero = 0;
-    if (c->hold) {
-        c->hold = 0;
+    if (c->parse_state == KUV_PARSE_UPGRADE) {
+        kuv_release_upgrade(c);
         c->resume_parse = 1;
     }
-    if ((c->read_paused || c->resume_parse) && !c->stop_parse && !kuv_draining && !c->body_active) {
+    if ((c->read_paused || c->resume_parse) && c->parse_state < KUV_PARSE_STOPPED &&
+        !kuv_draining && c->body_mode == KUV_BODY_NONE) {
         c->read_paused = 0;
         c->resume_parse = 0;
         kuv_track_head(c);
@@ -1554,7 +1582,7 @@ static void kuv_send_finish(kuv_conn *c, long close_after) {
             kuv_reply_and_close(c, error);
         }
     }
-    if (c->read_eof && c->pending == 0 && c->awaiting == 0 && !c->body_active) {
+    if (c->read_eof && c->pending == 0 && c->awaiting == 0 && c->body_mode == KUV_BODY_NONE) {
         close_after = 1;
     }
     if (!close_after && kuv_draining && c->drain_remaining > 0) {
@@ -1562,11 +1590,11 @@ static void kuv_send_finish(kuv_conn *c, long close_after) {
         hit_zero = c->drain_remaining == 0;
     }
     if (close_after || hit_zero) {
-        c->close_after_flush = 1;
-        c->stop_parse = 1;
+        c->state = kuv_conn_next(c->state, KUV_CONN_FINISH);
+        kuv_stop_parsing(c);
     }
     c->last_active = uv_now(kuv_loop);
-    if (c->head_active) {
+    if (c->head_state != KUV_HEAD_IDLE) {
         c->head_since = c->last_active;
     }
     kuv_sync_read(c);
@@ -1580,7 +1608,7 @@ long kiln_uv_send(long slot, long gen, const char *head, long head_len, const ch
         return -1;
     }
     kuv_conn *c = kuv_slots[slot];
-    if (!c || c->gen != (uint32_t)gen || c->closing || c->close_after_flush) {
+    if (!c || c->gen != (uint32_t)gen || c->state != KUV_CONN_OPEN) {
         return -1;
     }
     if (c->awaiting > 0) {
@@ -1603,7 +1631,7 @@ static kuv_conn *kuv_live(long slot, long gen) {
         return NULL;
     }
     kuv_conn *c = kuv_slots[slot];
-    if (!c || c->gen != (uint32_t)gen || c->closing || c->close_after_flush) {
+    if (!c || c->gen != (uint32_t)gen || c->state >= KUV_CONN_FLUSHING) {
         return NULL;
     }
     return c;
@@ -1636,7 +1664,7 @@ long kiln_uv_refuse(long slot, long gen) {
         return -1;
     }
     c->refused = 1;
-    c->stop_parse = 1;
+    kuv_stop_parsing(c);
     kuv_sync_read(c);
     return 0;
 }
@@ -1646,14 +1674,14 @@ long kiln_uv_abort(long slot, long gen) {
         return -1;
     }
     kuv_conn *c = kuv_slots[slot];
-    if (!c || c->gen != (uint32_t)gen || c->closing) {
+    if (!c || c->gen != (uint32_t)gen || c->state == KUV_CONN_CLOSING) {
         return -1;
     }
     if (c->awaiting > 0) {
         c->awaiting--;
     }
-    c->stop_parse = 1;
-    c->close_after_flush = 1;
+    kuv_stop_parsing(c);
+    c->state = kuv_conn_next(c->state, KUV_CONN_FINISH);
     kuv_sync_read(c);
     kuv_settle(c);
     return 0;
@@ -1664,13 +1692,14 @@ long kiln_uv_end(long slot, long gen) {
         return -1;
     }
     kuv_conn *c = kuv_slots[slot];
-    if (!c || c->gen != (uint32_t)gen || c->closing) {
+    if (!c || c->gen != (uint32_t)gen || c->state == KUV_CONN_CLOSING) {
         return -1;
     }
-    c->stop_parse = 1;
-    c->close_after_flush = 1;
-    c->body_active = 0;
-    c->tunnel = 0;
+    kuv_stop_parsing(c);
+    c->state = kuv_conn_next(c->state, KUV_CONN_FINISH);
+    c->body_mode = KUV_BODY_NONE;
+    c->body_state = KUV_BODY_IDLE;
+    c->parse_state = KUV_PARSE_STOPPED;
     kuv_sync_read(c);
     kuv_settle(c);
     return 0;
@@ -1681,7 +1710,7 @@ long kiln_uv_closes_after(long slot, long gen, long stopping) {
         return 1;
     }
     const kuv_conn *c = kuv_slots[slot];
-    if (!c || c->gen != (uint32_t)gen || c->closing || c->close_after_flush) {
+    if (!c || c->gen != (uint32_t)gen || c->state >= KUV_CONN_FLUSHING) {
         return 1;
     }
     if (kuv_keepalive_ms == 0) {
@@ -1694,8 +1723,8 @@ long kiln_uv_closes_after(long slot, long gen, long stopping) {
 }
 
 static int kuv_body_continue(kuv_conn *c) {
-    c->body_expect = 0;
-    if (c->body_done || c->body_len > 0) {
+    c->expect_state = KUV_EXPECT_NONE;
+    if (c->body_state == KUV_BODY_DONE || c->body_len > 0) {
         return 0;
     }
     if (kuv_append(&c->out, &c->out_len, &c->out_cap, KUV_CONTINUE, sizeof(KUV_CONTINUE) - 1) < 0) {
@@ -1720,8 +1749,8 @@ static const char *kuv_body_hand(kuv_conn *c, size_t max, int64_t *state) {
     memcpy(kuv_take_buf, c->body, n);
     memmove(c->body, c->body + n, c->body_len - n);
     c->body_len -= n;
-    if (c->body_paused && c->body_len < KUV_BODY_LOW) {
-        c->body_paused = 0;
+    if (c->body_state == KUV_BODY_PAUSED && c->body_len < KUV_BODY_LOW) {
+        kuv_body_resume(c);
         kuv_body_pump(c);
     }
     state[0] = KUV_TAKE_DATA;
@@ -1732,7 +1761,8 @@ static const char *kuv_body_hand(kuv_conn *c, size_t max, int64_t *state) {
 const char *kiln_uv_body_take(long slot, long gen, long max, int64_t *state) {
     sp_ffi_bin_len = 0;
     kuv_conn *c = kuv_live(slot, gen);
-    if (!c || !c->body_active || max <= 0 || (c->body_expect && kuv_body_continue(c) < 0)) {
+    if (!c || c->body_mode == KUV_BODY_NONE || max <= 0 ||
+        (c->expect_state == KUV_EXPECT_STREAMED && kuv_body_continue(c) < 0)) {
         state[0] = KUV_TAKE_GONE;
         return "";
     }
@@ -1743,7 +1773,7 @@ const char *kiln_uv_body_take(long slot, long gen, long max, int64_t *state) {
         state[0] = c->body_error == KUV_GONE ? KUV_TAKE_GONE : -c->body_error;
         return "";
     }
-    state[0] = c->body_done ? KUV_TAKE_EOF : KUV_TAKE_WAIT;
+    state[0] = c->body_state == KUV_BODY_DONE ? KUV_TAKE_EOF : KUV_TAKE_WAIT;
     kuv_sync_read(c);
     return "";
 }
@@ -1753,34 +1783,35 @@ long kiln_uv_body_finish(long slot, long gen, long failed) {
     if (!c) {
         return 1;
     }
-    if (!c->body_active) {
+    if (c->body_mode == KUV_BODY_NONE) {
         return 0;
     }
     if (failed) {
-        c->stop_parse = 1;
+        kuv_stop_parsing(c);
         return 1;
     }
-    if (c->body_done && !c->body_error) {
+    if (c->body_state == KUV_BODY_DONE && !c->body_error) {
         kuv_body_release(c);
         c->resume_parse = 1;
         return 0;
     }
     int drainable = c->body_mode == KUV_BODY_LENGTH && !c->body_error && !c->read_eof &&
-                    !c->body_expect && c->body_left + (long)c->body_len <= KUV_DRAIN_MAX;
+                    c->expect_state != KUV_EXPECT_STREAMED &&
+                    c->body_left + (long)c->body_len <= KUV_DRAIN_MAX;
     if (!drainable) {
-        c->stop_parse = 1;
+        kuv_stop_parsing(c);
         return 1;
     }
     c->body_discard = 1;
     c->body_len = 0;
-    c->body_paused = 0;
+    kuv_body_resume(c);
     kuv_body_pump(c);
     return 0;
 }
 
 long kiln_uv_tunnel(long slot, long gen, const char *head, long head_len) {
     kuv_conn *c = kuv_live(slot, gen);
-    if (!c || c->body_active || head_len < 0) {
+    if (!c || c->body_mode != KUV_BODY_NONE || head_len < 0) {
         return -1;
     }
     if (c->awaiting > 0) {
@@ -1790,15 +1821,14 @@ long kiln_uv_tunnel(long slot, long gen, const char *head, long head_len) {
         kuv_close(c);
         return -1;
     }
-    c->hold = 0;
-    c->tunnel = 1;
-    c->stop_parse = 1;
-    c->body_active = 1;
+    kuv_release_upgrade(c);
+    c->parse_state = KUV_PARSE_TUNNEL;
+    kuv_stop_parsing(c);
     c->body_mode = KUV_BODY_TUNNEL;
-    c->body_done = c->read_eof;
+    c->body_state = c->read_eof ? KUV_BODY_DONE : KUV_BODY_READING;
     c->body_error = 0;
     c->body_len = 0;
-    c->head_active = 0;
+    c->head_state = KUV_HEAD_IDLE;
     c->last_active = uv_now(kuv_loop);
     kuv_queue_flush(c);
     kuv_body_pump(c);
@@ -1914,7 +1944,7 @@ long kiln_uv_flush(void) {
     for (long i = 0; i < kuv_flush_count; i++) {
         kuv_conn *c = kuv_flush_list[i];
         c->queued_flush = 0;
-        if (c->closing) {
+        if (c->state == KUV_CONN_CLOSING) {
             continue;
         }
         if (c->out_len > 0 || c->tls) {
@@ -1923,12 +1953,12 @@ long kiln_uv_flush(void) {
             } else {
                 kuv_flush_plain(c);
             }
-            if (c->closing) {
+            if (c->state == KUV_CONN_CLOSING) {
                 continue;
             }
             kuv_out_resume(c);
         }
-        if (c->close_after_flush && c->writes == 0 && !c->tls_pending) {
+        if (c->state == KUV_CONN_FLUSHING && c->writes == 0 && !c->tls_pending) {
             kuv_end(c);
         }
     }
@@ -2004,18 +2034,19 @@ long kiln_uv_drain(void) {
     }
     for (long i = 0; i < KUV_MAX_SLOTS; i++) {
         kuv_conn *c = kuv_slots[i];
-        if (!c || c->closing || c->tunnel || c->lingering) {
+        if (!c || c->state == KUV_CONN_CLOSING || c->parse_state == KUV_PARSE_TUNNEL ||
+            c->state == KUV_CONN_LINGERING) {
             continue;
         }
         c->drain_remaining = c->pending + c->awaiting;
-        c->stop_parse = 1;
-        c->hold = 0;
-        if (!c->body_active) {
+        kuv_stop_parsing(c);
+        kuv_release_upgrade(c);
+        if (c->body_mode == KUV_BODY_NONE) {
             c->in_len = 0;
         }
         kuv_sync_read(c);
         if (c->drain_remaining == 0) {
-            c->close_after_flush = 1;
+            c->state = kuv_conn_next(c->state, KUV_CONN_FINISH);
             kuv_settle(c);
         }
     }
@@ -2023,14 +2054,15 @@ long kiln_uv_drain(void) {
 }
 
 static int kuv_idle(const kuv_conn *c) {
-    return !c->tunnel && c->pending == 0 && c->awaiting == 0 && c->out_len == 0 && c->writes == 0;
+    return c->parse_state != KUV_PARSE_TUNNEL && c->pending == 0 && c->awaiting == 0 &&
+           c->out_len == 0 && c->writes == 0;
 }
 
 long kiln_uv_busy(void) {
     long busy = kuv_ready;
     for (long i = 0; i < KUV_MAX_SLOTS; i++) {
         kuv_conn *c = kuv_slots[i];
-        if (!c || c->closing) {
+        if (!c || c->state == KUV_CONN_CLOSING) {
             continue;
         }
         if (!kuv_idle(c)) {

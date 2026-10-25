@@ -1,0 +1,16 @@
+test/architecture_contract_test.rb
+  L20  Using each_with_index is slower than while loop
+
+test/db/architecture_contract_test.rb
+  L14  Using each_with_index is slower than while loop
+
+test/db/docs_examples_test.rb
+  L50  Use symbol-to-proc (&:method) instead of block
+
+test/db/stream_import_test.rb
+  L79  Use symbol-to-proc (&:method) instead of block
+
+test/json_test.rb
+  L74  Use symbol-to-proc (&:method) instead of block
+
+59 files inspected, 5 offenses detected

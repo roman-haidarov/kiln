@@ -80,65 +80,25 @@ module Kiln
         end
 
         def chunked_source(sock, buf, head, coding)
-          codings = coding.split(',', -1).map { |item| item.strip.downcase }
-          return :bad if codings.any?(&:empty?) || codings.last != 'chunked' || codings.count('chunked') > 1
-          return :unsupported_te if codings.size > 1
+          problem = HTTP::RequestPolicy.chunked_problem(coding)
+          return problem if problem
 
           BodySource.new(self, sock, buf, nil, continue?(head.headers, head.version))
         end
 
         def continue?(headers, version)
-          version == '1.1' && headers['expect'].to_s.split(',').any? { |part| part.strip.casecmp?('100-continue') }
+          HTTP::RequestPolicy.continue?(headers, version)
         end
 
         def check_head(version, verb, target, headers)
-          problem = head_problem(version, verb, target, headers)
+          problem = HTTP::RequestPolicy.head_problem(version, verb, target, headers)
           return HTTP::Syntax.error_tuple(problem, version: version) if problem
 
-          target = absolute_origin(target, headers) if absolute_form?(target)
+          target = HTTP::RequestPolicy.origin(target, headers)
           return HTTP::Syntax.error_tuple(:bad, version: version) unless target
 
-          problem = framing_problem(version, headers)
+          problem = HTTP::RequestPolicy.framing_problem(version, headers)
           problem ? HTTP::Syntax.error_tuple(problem, version: version) : target
-        end
-
-        def head_problem(version, verb, target, headers)
-          return :not_implemented if verb == 'CONNECT'
-          return :bad unless target_shape?(verb, target)
-
-          host_problem(version, headers['host'], absolute_form?(target))
-        end
-
-        def target_shape?(verb, target)
-          return verb == 'OPTIONS' if target == '*'
-
-          target.start_with?('/') || absolute_form?(target)
-        end
-
-        def absolute_form?(target) = !target.start_with?('/') && target.match?(HTTP::Syntax::ABSOLUTE_FORM)
-
-        def host_problem(version, host, absolute)
-          return :bad if version == '1.1' && host_missing?(host, absolute)
-          return :bad if host && !host.empty? && !HTTP::Native.host?(host)
-
-          nil
-        end
-
-        def host_missing?(host, absolute) = host.nil? || (!absolute && host.empty?)
-
-        def absolute_origin(target, headers)
-          target, authority = HTTP::Syntax.absolute_target(target)
-          headers['host'] = authority if target
-          target
-        end
-
-        def framing_problem(version, headers)
-          return :bad if headers.key?('transfer-encoding') && (version == '1.0' || headers.key?('content-length'))
-
-          expect = headers['expect']
-          return :expectation if expect && !expect.empty? && expect.strip.downcase != '100-continue'
-
-          nil
         end
       end
 

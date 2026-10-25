@@ -139,369 +139,210 @@ importing models is covered under [Writes and transactions](#writes-and-transact
 
 ## Queries and results
 
-Relations start with `Model.all`. Conditions use column expressions, and values
-are bound separately from SQL. Identifiers come from declared columns or
-validated aliases. Relations can also be composed with `distinct`, `from`,
-`group`, `having`, `order`, `limit`, and `offset`.
-
-Some column types reach Ruby without a text round trip. On MySQL and MariaDB
-these are the integer types except `BIGINT UNSIGNED`, and `DOUBLE`. On
-PostgreSQL they are `int2`, `int4`, `int8`, `bool`, and `float8`, and only for
-a statement served from the statement cache: once a cached statement has run,
-later runs ask for a binary result when every result column is one of those
-types or `text`, `varchar`, or `bytea`. `FLOAT`, `float4`, `numeric`,
-decimals, `YEAR`, `BIT`, dates, and times arrive as text. The Ruby values,
-classes, and encodings are the same either way.
-
-The results below are PostgreSQL's; `test/db/docs_examples_test.rb` runs every
-example on PostgreSQL and MySQL. On MySQL the `active` column is `TINYINT(1)`
-and reads back as `1` / `0`. For the examples below, assume these rows in `users`:
-
-```text
-id  name     active
-1   Rebecca  true
-2   Ada      false
-3   Leon     true
-```
-
-and these rows in `posts`:
-
-```text
-id  user_id  title
-10  1        Notes
-11  1        Draft
-12  2        Guide
-```
-
-and these rows in `tags`:
-
-```text
-id  label
-1   Alpha
-4   Umbrella
-```
-
-### Loading records and associations
-
-**Load users in ID order and read their attributes.**
+Start with `User.table` and use the Arel vocabulary. Table attributes accept
+symbols or strings; SQL fragments are never needed by the builder. Values stay
+in the separate bind array, including values inside projections, JOINs,
+subqueries, functions, CASE expressions, and CTEs.
 
 ```ruby
-users = User.all.order(User.col("id").asc).models
-users.map { |user| user.attrs }
-=> [{"id" => 1, "name" => "Rebecca", "active" => true}, {"id" => 2, "name" => "Ada", "active" => false}, {"id" => 3, "name" => "Leon", "active" => true}]
+user = User.table
+User.where(user[:name].eq("Criss").and(user[:male].eq(true)).or(
+  user[:age].gt(18).and(user[:age].lteq(40))
+))
 ```
 
-**Preload each user's posts and collect their titles.**
+`User.arel_table` is another entry point. Simple filters accept hashes:
 
 ```ruby
-users = User.all.order(User.col("id").asc).preload(:posts).models
-users.map { |user| user.assoc(:posts).map { |post| post.attrs["title"] } }
-=> [["Notes", "Draft"], ["Guide"], []]
+User.where(name: "Criss", active: true)
+User.where(id: [1, 2, 3])
+User.where(age: 18...40)
+User.where(name: [nil, "Criss"])
 ```
 
-### Filters, boolean conditions, and ordering
-
-Column expressions include `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`,
-`not_in`, `between`, `like`, `null` (alias `is_null`), and `not_null`. Combine predicates
-with `and`, `or`, and `not`.
-
-**Select active users and order them by name.**
+Relations and expression trees are immutable. Keep the returned relation when
+building a query in several statements. `project` appends projections;
+`select` replaces them. Compiling or reusing a query does not change its binds.
 
 ```ruby
-users = User.all.where(User.col("active").eq(true))
-users.order(User.col("name").asc).pluck(User.col("name"))
-=> ["Leon", "Rebecca"]
+users = User.where(active: true)
+page = users.order(user[:id].asc).limit(20).offset(40)
+sql, binds = page.compile
+page.to_sql
+page.to_binds
+page.to_a
 ```
 
-**Combine an active-user condition with a name match using `or`.**
+`to_sql` contains placeholders; `to_binds` contains values in SQL order.
+PostgreSQL uses `$1`, `$2`, etc.; MySQL/MariaDB use `?`.
+
+### Predicates and expressions
+
+| Operation | Interface |
+| --- | --- |
+| Comparison | `eq`, `not_eq`, `gt`, `gteq`, `lt`, `lteq` |
+| Boolean composition | `and`, `or`, `not` |
+| NULL | `eq(nil)`, `not_eq(nil)` |
+| Lists and subqueries | `in`, `not_in` |
+| Ranges | `between(18..40)`, `between(18...40)`, `not_between(18..40)` |
+| Pattern matching | `matches(pattern, escape = nil, case_sensitive = false)`, `does_not_match` |
+| Ordering | `asc`, `desc` |
+| Projection alias | `as(:name)` |
+| Arithmetic | `+`, `-`, `*`, `/` |
+| Aggregates | `count`, `count(true)`, `sum`, `average`, `minimum`, `maximum` |
+| Text and defaults | `lower`, `upper`, `coalesce` |
+| Function | `Kiln::DB::Arel::Nodes::NamedFunction.new(name, arguments)` |
+| Wildcard | `table[:*]`, `Kiln::DB::Arel.star` |
+
+Empty `in([])` compiles to FALSE and empty `not_in([])` to TRUE. Hash arrays
+containing nil combine `IN` with `IS NULL`. Exclusive, beginless, and endless
+ranges retain their boundary semantics. PostgreSQL `matches` uses ILIKE by
+default and LIKE with `case_sensitive: true` supplied positionally as its third
+argument; MySQL LIKE follows the column's collation.
 
 ```ruby
-users = User.all.where(User.col("active").eq(true).or(User.col("name").eq("Ada")))
-users.order(User.col("id").asc).pluck(User.col("name"))
-=> ["Rebecca", "Ada", "Leon"]
+user = User.table
+User.where(user[:age].gteq(18).and(user[:name].not_eq(nil)))
+User.where(user[:name].matches("Cr%"))
+User.select(user[:name].lower.as(:normalized_name))
+User.select((user[:age] + 1).as(:next_age))
 ```
 
-**Find users whose IDs are in an inclusive range.**
+Legacy `Model.col`, `ne`, `gte`, `lte`, `like`, `null`, `not_null`, and the
+existing `inner_join(other, on:)` family remain available.
+
+### JOINs and aliases
+
+Use `.join(...).on(...)` and compose the ON expression exactly like WHERE.
+`join_sources` passes the resulting JOIN nodes to a model relation.
 
 ```ruby
-users = User.all.where(User.col("id").between(1, 2))
-users.order(User.col("id").asc).pluck(User.col("name"))
-=> ["Rebecca", "Ada"]
+user = User.table
+post = Post.table
+joins = user.join(post).on(
+  post[:user_id].eq(user[:id]).and(post[:score].gt(5))
+)
+User.joins(joins.join_sources).select(user[:name], post[:title])
 ```
 
-**Select users whose IDs match one of the listed values.**
+Outer JOINs use the Arel node names under `Kiln::DB::Arel::Nodes`:
 
 ```ruby
-users = User.all.where(User.col("id").in([1, 3]))
-users.order(User.col("id").asc).pluck(User.col("name"))
-=> ["Rebecca", "Leon"]
+user = User.table
+post = Post.table
+user.join(post, Kiln::DB::Arel::Nodes::OuterJoin)
+    .on(post[:user_id].eq(user[:id]))
+    .project(user[:name], post[:title])
 ```
 
-**Exclude users whose IDs appear in a list.**
+`InnerJoin`, `OuterJoin`, `RightOuterJoin`, `FullOuterJoin`, and `CrossJoin`
+are supported. `outer_join(other)` is the LEFT JOIN shortcut. A CROSS JOIN
+has no ON clause. A missing ON clause on another JOIN raises before execution.
 
 ```ruby
-User.all.where(User.col("id").not_in([1, 3])).pluck(User.col("name"))
-=> ["Ada"]
+user = User.table
+manager = user.alias(:manager)
+user.join(manager).on(user[:manager_id].eq(manager[:id]))
+    .project(user[:name], manager[:name].as(:manager_name))
 ```
 
-**Match names with a SQL `LIKE` pattern.**
+PostgreSQL supports chains of FULL JOINs. MySQL's existing FULL JOIN rewrite
+supports one FULL JOIN, using LEFT JOIN plus the unmatched right rows with
+`UNION ALL` and `NOT EXISTS`; unsupported FULL JOIN chains raise `Unsupported`.
+
+### Subqueries, set operations, and CTEs
 
 ```ruby
-User.all.where(User.col("name").like("R%")).pluck(User.col("name"))
-=> ["Rebecca"]
+user = User.table
+post = Post.table
+ids = post.project(post[:user_id]).where(post[:score].gteq(10))
+User.where(user[:id].in(ids))
+User.where(post.where(post[:user_id].eq(user[:id])).exists)
+User.where(user[:age].gt(post.project(post[:score].average)))
 ```
 
-**Return one row from the second page with `limit` and `offset`.**
+`IN` subqueries require one projected column. `.exists` builds a predicate;
+`.exists?` executes a relation. Use `.as` to give a subquery a table alias:
 
 ```ruby
-users = User.all.order(User.col("id").asc).limit(1).offset(1)
-users.pluck(User.col("name"))
-=> ["Ada"]
+post = Post.table
+user = User.table
+scores = post.project(post[:user_id], post[:score].sum.as(:total))
+             .group(post[:user_id]).as(:scores)
+user.join(scores).on(scores[:user_id].eq(user[:id]))
+    .project(user[:name], scores[:total])
 ```
-
-### Selecting columns and reading rows
-
-`pluck` returns an array of values for one column, or arrays of values for
-multiple columns. `to_a` returns arrays in selected-column order. `first`
-returns a row view that supports numeric indexing and `get(name)`.
-
-**Select two columns and return each row as an array.**
 
 ```ruby
-users = User.all.order(User.col("id").asc)
-users.select(User.col("name"), User.col("active")).to_a
-=> [["Rebecca", true], ["Ada", false], ["Leon", true]]
+user = User.table
+young = user.project(user[:id]).where(user[:age].lt(18))
+old = user.project(user[:id]).where(user[:age].gt(40))
+ages = young.union(:all, old).as(:ages)
+ages.project(ages[:id])
 ```
 
-**Read IDs and names as two-value arrays.**
+`union(other)`, `union(:all, other)`, `union_all`, `intersect`, and `except`
+compose queries with matching projection widths. Server support for INTERSECT
+and EXCEPT depends on the selected database version.
 
 ```ruby
-users = User.all.order(User.col("id").asc)
-users.pluck(User.col("id"), User.col("name"))
-=> [[1, "Rebecca"], [2, "Ada"], [3, "Leon"]]
+post = Post.table
+scores = post.project(post[:user_id], post[:score].sum.as(:total))
+             .group(post[:user_id]).as(:scores)
+scores.project(scores[:user_id], scores[:total])
+      .with(scores).where(scores[:total].gt(10))
 ```
 
-**Read a named value from the first selected row.**
+`.with(Kiln::DB::Arel::Nodes::As.new(scores, scores.query))` also accepts the
+Arel node form. CTEs are nonrecursive. JOINs can reference the same CTE.
+
+### Aggregates, CASE, and windows
 
 ```ruby
-user = User.all.order(User.col("id").asc).select(User.col("name")).first
-user.get("name")
-=> "Rebecca"
+post = Post.table
+Post.select(post[:user_id], post[:score].sum.as(:total))
+    .group(post[:user_id]).having(post[:score].sum.gt(10))
+    .order(post[:user_id].asc)
 ```
-
-**Map row views to values with `collect`.**
 
 ```ruby
-users = User.all.order(User.col("id").asc)
-users.collect { |row| row.get("name") }
-=> ["Rebecca", "Ada", "Leon"]
+user = User.table
+kind = Kiln::DB::Arel::Nodes::Case.new
+       .when(user[:age].gteq(18)).then("adult").else("child")
+User.select(user[:name], kind.as(:kind))
 ```
-
-**Read values by numeric row index with `map`.**
 
 ```ruby
-users = User.all.order(User.col("id").asc).select(User.col("id"), User.col("name"))
-users.map { |row| row[1] }
-=> ["Rebecca", "Ada", "Leon"]
+post = Post.table
+window = Kiln::DB::Arel::Nodes::Window.new
+         .partition(post[:user_id]).order(post[:score].desc)
+position = Kiln::DB::Arel::Nodes::NamedFunction.new("ROW_NUMBER", [])
+           .over(window).as(:position)
+Post.select(post[:id], position)
 ```
 
-### Counts and single-value results
+Windows support PARTITION BY and ORDER BY. Give computed derived-table columns
+an explicit `.as` name before accessing them with `table[:name]`.
 
-`count` returns an integer. `ids` returns one key array per row, `pick` returns
-one value, and `exists?` returns a boolean.
+### Reading and loading
 
-#### Count all users
+`to_a` returns arrays; `each`, `collect`, `map`, and `stream` expose `View::Row`.
+`pluck` with one expression returns a flat array. `pick`, `first`, `first!`,
+`ids`, `count`, `count_rows`, `count_root`, `exists?`, `sum`, `average`,
+`minimum` through expression projections, and the existing `min`/`max`
+relation methods remain available. `models` restores model instances for plain
+model relations. `preload` retains the existing explicit association API.
 
 ```ruby
-User.all.count
-=> 3
+user = User.table
+User.where(active: true).order(user[:id].asc).pluck(user[:name])
+User.where(active: true).order(user[:id].asc).models
+User.all.order(user[:id].asc).preload(:posts).models
 ```
 
-#### Count active users
-
-```ruby
-User.all.where(User.col("active").eq(true)).count
-=> 2
-```
-
-#### Check for active users
-
-```ruby
-User.all.where(User.col("active").eq(true)).exists?
-=> true
-```
-
-#### Count rows from a subquery
-
-```ruby
-users = User.all.from(User.all.where(User.col("id").eq(1)))
-users.count
-=> 1
-```
-
-#### Read primary keys
-
-```ruby
-User.all.order(User.col("id").asc).ids
-=> [[1], [2], [3]]
-```
-
-#### Read one value with `pick`
-
-```ruby
-User.all.pick(User.col("name"))
-=> "Rebecca"
-```
-
-#### Check for a specific user
-
-```ruby
-User.all.where(User.col("name").eq("Leon")).exists?
-=> true
-```
-
-### Joins
-
-Join conditions use column expressions. `count` on a joined relation counts
-joined rows; `count_root` counts distinct root models.
-
-#### Left join users and posts
-
-Keep users with and without posts, and include the post title when present.
-
-```ruby
-users = User.all.left_join(Post, on: Post.col("user_id").eq(User.col("id")))
-users = users.order(User.col("id").asc, Post.col("id").asc)
-users.select(User.col("name"), Post.col("title")).to_a
-=> [["Rebecca", "Notes"], ["Rebecca", "Draft"], ["Ada", "Guide"], ["Leon", nil]]
-```
-
-#### Count joined rows
-
-```ruby
-users = User.all.inner_join(Post, on: Post.col("user_id").eq(User.col("id")))
-users.count
-=> 3
-```
-
-#### Count distinct root users
-
-```ruby
-users = User.all.inner_join(Post, on: Post.col("user_id").eq(User.col("id")))
-users.count_root
-=> 2
-```
-
-#### Join a table to itself
-
-Use a second SQL alias for the joined copy of `users`.
-
-```ruby
-users = User.all.join_as(User, "u2", on: User.col("id").eq(Kiln::DB::Col.new("u2", "id")))
-users.count
-=> 3
-```
-
-#### Right join users and tags
-
-Keep tags with or without a matching user.
-
-```ruby
-tags = User.all.right_join(Tag, on: Tag.col("id").eq(User.col("id")))
-tags = tags.order(Tag.col("id").asc)
-tags.select(User.col("name"), Tag.col("label")).to_a
-=> [["Rebecca", "Alpha"], [nil, "Umbrella"]]
-```
-
-#### Count full-join rows
-
-Include unmatched rows from either side.
-
-```ruby
-User.all.full_join(Tag, on: Tag.col("id").eq(User.col("id"))).count
-=> 4
-```
-
-#### Count cross-join pairs
-
-```ruby
-User.all.cross_join(Tag).count
-=> 6
-```
-
-`right_join` and `full_join` keep unmatched rows from the joined table;
-`cross_join` returns every pair of rows. Relations also support `through`.
-
-### Subquery existence
-
-Find users with at least one related post:
-
-```ruby
-users = User.all.where_exists(Post.all.where(Post.col("user_id").eq(User.col("id"))))
-users.order(User.col("id").asc).pluck(User.col("name"))
-=> ["Rebecca", "Ada"]
-```
-
-Find users with no related posts:
-
-```ruby
-users = User.all.where_missing(Post.all.where(Post.col("user_id").eq(User.col("id"))))
-users.order(User.col("id").asc).pluck(User.col("name"))
-=> ["Leon"]
-```
-
-### Grouping and aggregates
-
-Use `group` with `having` for grouped counts. `count` on a grouped relation
-returns a `GroupedResult`; `to_a` returns pairs of group-key arrays and counts.
-`sum`, `avg`, and `average` return `ExactDecimal`; `min` and `max` return the
-database value.
-
-Count posts per user:
-
-```ruby
-posts = Post.all.group(Post.col("user_id")).order(Post.col("user_id").asc)
-posts.count.to_a
-=> [[[1], 2], [[2], 1]]
-```
-
-Keep only groups with user ID 1:
-
-```ruby
-posts = Post.all.group(Post.col("user_id"))
-posts.having(Post.col("user_id").eq(1)).count.to_a
-=> [[[1], 2]]
-```
-
-Count posts for one user without grouping:
-
-```ruby
-Post.all.where(Post.col("user_id").eq(1)).count
-=> 2
-```
-
-Sum post IDs and convert the exact decimal result to text:
-
-```ruby
-Post.all.sum(Post.col("id")).to_s
-=> "33"
-```
-
-Other terminal methods include `models`, `to_a`, `each`, `map`, `pluck`,
-`pick`, `ids`, `exists?`, `sum`, `sum_or_zero`, `avg`, `min`, and `max`.
-`each`, `map` and `collect` load the whole result first, so the block can run
-other queries.
-
-`stream` reads the result in batches while the block runs, for results too
-large to hold in memory. The connection is busy until the block returns: a
-query, transaction or pipeline on it inside the block raises `Kiln::DB::Error`
-and leaves the connection usable. Leaving the block early cancels the rest of
-the query on PostgreSQL; on MySQL the remaining rows are read and dropped, and
-the connection is discarded if that takes longer than two seconds.
-
-```ruby
-User.all.order(User.col("id").asc).stream { |row| out.write(row.get("name")) }
-```
+Typed decoding is unchanged: PostgreSQL int2/int4/int8/bool/float8 and MySQL
+integer/DOUBLE fast paths keep their existing Ruby representations. Decimal,
+unsigned big integer, dates, and binary values retain the codec contracts.
 
 ### Direct SQL
 
@@ -565,72 +406,118 @@ user.assign("name", "Chris Redfield")
 user.save!
 ```
 
-`Model.import` accepts arrays of hashes or model instances. Hash keys may be
-strings or symbols. `import!` raises when validation rejects a row.
+`Model.import` follows activerecord-import's input forms and conflict-option
+names. It accepts hashes, models, or an explicit list of columns followed by
+rows. String and symbol column names are accepted.
 
 ```ruby
-result = User.import([
-  { "id" => 3, "name" => "Leon", "active" => true },
-  { :id => 4, :name => "Chris", :active => true }
-])
-
-result.state
-result.length
-result.input_status(0)
+User.import([{ id: 1, name: "Ada" }, { id: 2, name: "Criss" }])
+User.import([User.new(id: 1, name: "Ada")])
+User.import([:id, :name], [[1, "Ada"], [2, "Criss"]])
+User.import([:id, :name], models)
 ```
 
-`ImportResult` exposes the overall state, input row count, per-input status,
-and returned rows. Import options include `timestamps:`, `all_or_none:`,
-`returning:`, `on_duplicate_key_ignore:`, and `on_duplicate_key_update:`.
+### Conflicts
 
-A PostgreSQL import without `returning` or conflict options uses `COPY` when
-the table is a plain or partitioned table without rules, row-level security,
-`GENERATED ALWAYS` identity columns (on the table or its partition root), or
-statement-level `INSERT` triggers: `COPY` skips rules, fails under row-level
-security, writes given identity values that `INSERT` refuses, and fires
-statement triggers once per `COPY`. Any other table, and a group of rows that
-holds a binary String, uses `INSERT`. Before the check the import takes `ROW
-EXCLUSIVE` on the table (the lock `INSERT` takes anyway), so rules, policies
-and triggers cannot change until the transaction ends. `REPEATABLE READ` and
-`SERIALIZABLE` transactions use `INSERT`, because their catalog snapshot can
-predate a concurrent schema change. With `timestamps: true`, `COPY` writes the server's `CURRENT_TIMESTAMP`, the same
-value `INSERT` writes. A `COPY` interrupted by a timeout breaks the connection,
-and the pool discards it.
+```ruby
+User.import(rows, on_duplicate_key_ignore: true)
+User.import(rows, ignore: true)
+User.import(rows, on_duplicate_key_update: [:name, :age])
+```
 
-A plain PostgreSQL import compares the affected row count with the rows sent,
-for `COPY` and for every `INSERT` page. When a `BEFORE` trigger skips rows it
-raises `InvariantViolation` and the import rolls back instead of reporting
-those inputs as inserted.
+Ignore skips a conflicting input without updating the existing record or
+raising a duplicate-key exception. Rows without conflicts are inserted. Update
+inserts new rows and updates the selected columns when a conflict occurs.
+There are no `ignore_conflict` or `conflict_update` options.
 
-A new model whose single primary key is missing gets the generated key back
-after `save` (`RETURNING` on PostgreSQL, `LAST_INSERT_ID()` on MySQL).
-`import` writes up to 1000 rows per `INSERT`, also with `returning: true`.
-Returned rows are matched to inputs by primary key and listed in input order.
-`returning: true` raises `UnsupportedReturn` before anything is written when
-the table (or one of its partitions) has a `BEFORE` row trigger on `INSERT`,
-or on `UPDATE` together with `on_duplicate_key_update:`, and on PostgreSQL
-when it has a rule: a trigger or rule can change the key that the match relies
-on. It also rejects views, PostgreSQL transactions in `REPEATABLE READ` or
-`SERIALIZABLE` (their catalog snapshot can miss a new trigger), and, on MySQL
-and MariaDB, users without a directly granted `TRIGGER` privilege on the
-table, database, or server: without it `information_schema.triggers` hides
-the table's triggers. A grant through a role counts as missing. The trigger
-check covers the partitions that exist when it runs; a partition that another
-session attaches during the import is not checked, because blocking `ATTACH
-PARTITION` would need a lock that also serializes concurrent imports. Inputs whose
-key text differs from every returned key are resolved with one primary-key
-lookup per page inside the import transaction, so the database's own
-comparison (padding, collation, numeric formatting) decides the match;
-equivalent inputs keep first-writer matching with `on_duplicate_key_ignore:`
-and last-writer matching with `on_duplicate_key_update:`. If a key still
-cannot be resolved, a single unmatched
-input is paired with a single unmatched row; with more than one, no row is
-assigned to an input by position: each such input keeps its write status
-(`applied_unknown` with conflict options) and the rows are listed after the
-matched ones. Inside an outer transaction
-`ImportResult#state` is `PENDING_COMMIT`: the outer transaction decides the
-outcome. On MySQL, `on_duplicate_key_update:` uses the row alias form
-(`VALUES (...) AS kiln_new`); MariaDB keeps `VALUES(col)`.
+PostgreSQL's array form uses the model primary key as the conflict target.
+Choose another unique key or a named constraint with the AR Import hash form:
+
+```ruby
+User.import(rows, on_duplicate_key_update: {
+  conflict_target: [:email], columns: [:name, :age]
+})
+User.import(rows, on_duplicate_key_update: {
+  constraint_name: :users_email_key, columns: [:name]
+})
+User.import(rows, on_duplicate_key_update: {
+  conflict_target: [:id], columns: { name: :display_name }
+})
+```
+
+MySQL and MariaDB use any conflicting primary or unique index, as their servers
+define. MySQL uses `INSERT IGNORE` and row-alias upserts; MariaDB uses
+`INSERT IGNORE` and `VALUES(column)`. Column-to-column mappings use
+`on_duplicate_key_update: { name: :display_name }` on MySQL/MariaDB.
+Duplicate-key warnings do not become exceptions; other reported warnings retain
+Kiln's rollback policy. The server's diagnostic-buffer limit applies when
+inspecting MySQL warnings.
+
+`:all` updates the imported non-key fields; the older `true` form remains
+supported. An explicit update list must be nonempty and its source columns must
+be present in every input shape. Timestamps are enabled by default, including
+`updated_at`/`updated_on` on an upsert. `:all` preserves creation timestamps.
+`timestamps: false` disables automatic timestamps and leaves exactly the supplied
+update fields. Empty hashes use database default values.
+
+### Batches and validation
+
+```ruby
+result = User.import(rows, batch_size: 500, on_duplicate_key_update: [:name])
+result.failed_instances
+result.num_inserts
+result.affected_rows
+result.ids
+result.results
+```
+
+`batch_size` limits rows per SQL statement, including COPY chunks. The existing
+1000-row and 32,767-bind safety limits still apply. All batches run inside one
+transaction or the existing transaction's savepoint; failures roll them back.
+
+Validation uses `Model#validate`. By default valid rows are imported and invalid
+instances appear in `failed_instances`. Use `all_or_none: true` to reject the
+whole input on validation failure, `validate: false` to skip validation,
+`raise_error: true` to raise on the first invalid instance, or `import!` to force
+validation and raise on failure. `track_validation_failures: true` returns
+`[input_index, instance]` entries. `bulk_import` and `bulk_import!` are the AR
+Import method aliases. Save callbacks are skipped.
+
+The result preserves `state`, `length`, `input_status(index)`, and `returned`.
+`num_inserts` counts write statements/COPY chunks; `affected_rows` sums the
+server's affected-row counts. MySQL upserts can report two affected rows for one
+updated input. Per-input status remains `applied_unknown` where the server
+cannot distinguish inserts, updates, or skipped rows reliably.
+
+```ruby
+result = User.import(rows, returning: [:name])
+result.ids
+result.results
+result.returned
+```
+
+`returning: true` returns all declared columns. A symbol or array selects
+`results`; `returned` keeps the full rows. One requested result column yields a
+flat array. `ids` is populated when rows are returned. Existing returning guards
+remain: inputs need explicit complete primary keys; trigger/rule checks protect
+matching, and MySQL returning upserts require a single unambiguous primary-key
+conflict. These extra returning guards do not restrict ordinary MySQL imports
+or upserts. Imported model instances are not refreshed automatically.
+
+`require_exact_status` remains an explicit Kiln extension: it raises before
+writing when the requested per-input status cannot be established. Recursive
+association imports, ActiveRecord validators, callbacks, SQL-string update
+clauses, synchronization, and partial-index SQL clauses are outside this API.
+Unknown options raise; no Rails/ActiveRecord runtime dependency is added.
+
+Plain eligible PostgreSQL imports retain the COPY path. COPY eligibility,
+transaction ownership, native codecs, and FFI signatures are unchanged. Rules,
+row-level security, identity columns, statement triggers, binary values, and
+unstable catalog snapshots retain their existing INSERT fallback.
+
+Reference interfaces: [activerecord-import](https://github.com/zdennis/activerecord-import)
+and [Arel](https://github.com/rails/arel). The runnable builder and import
+contracts are in `test/db/arel_builder_test.rb` and `test/db/ar_import_test.rb`.
 
 Use `Kiln::DB.transaction` to group writes. Nested calls use savepoints; an
 exception rolls back the current transaction scope and propagates to the

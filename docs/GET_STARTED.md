@@ -27,7 +27,7 @@ router.seal!
 
 log = Kiln::Observability::Log.new
 app = Kiln::Middleware::Rescue.new(router, log)
-server = Kiln::Server.new(app, nil, log: log, host: "127.0.0.1", port: 8080)
+server = Kiln::Server.new(app, log: log, host: "127.0.0.1", port: 8080)
 begin
   server.run(grace: 30.0)
 ensure
@@ -63,7 +63,7 @@ handler because worker 0 runs the main thread. Set `handlers` to at most
 
 ```ruby
 tls = Kiln::Transport::Tls.new(cert: "cert.pem", key: "key.pem")
-server = Kiln::Server.new(router, nil, log: log, listen: [
+server = Kiln::Server.new(router, log: log, listen: [
   Kiln::Transport::Listen.tcp("0.0.0.0", 8443, tls: tls),
   Kiln::Transport::Listen.tcp("0.0.0.0", 8080),
   Kiln::Transport::Listen.unix("/run/app.sock", mode: 0o660)
@@ -189,7 +189,7 @@ router.configure(Routers::Users)
 router.configure(Routers::Posts)
 router.seal!
 log = Kiln::Observability::Log.new($stdout)
-server = Kiln::Server.new(router, nil, log: log, host: "127.0.0.1", port: 8080)
+server = Kiln::Server.new(router, log: log, host: "127.0.0.1", port: 8080)
 begin
   server.run(grace: 5.0)
 ensure
@@ -430,7 +430,7 @@ tasks.every("heartbeat", 60.0) { |_token| log.info("still running") }
 router = Kiln::Routing::Router.new
 router.get("/", ->(ctx) { ctx.res.text("Hello, world!\n") })
 router.seal!
-server = Kiln::Server.new(router, nil, log: log, host: "127.0.0.1", port: 8080)
+server = Kiln::Server.new(router, log: log, host: "127.0.0.1", port: 8080)
 begin
   server.run(grace: 30.0, tasks: tasks)
 ensure
@@ -510,7 +510,7 @@ router = Kiln::Routing::Router.new
 router.get("/health", ->(ctx) { ctx.res.text("ok") })
 router.seal!
 log = Kiln::Observability::Log.new($stdout)
-server = Kiln::Server.new(router, nil, log: log, host: "127.0.0.1", port: 8080, handlers: 4)
+server = Kiln::Server.new(router, log: log, host: "127.0.0.1", port: 8080, handlers: 4)
 begin
   server.run(grace: 5.0)
 ensure

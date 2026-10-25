@@ -2,7 +2,7 @@ require 'kiln'
 require 'json'
 require 'stringio'
 
-server = Kiln::Server::Base.new(nil, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0)
+server = Kiln::Server::Base.new(nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0)
 reader, writer = Socket.pair(Socket::AF_UNIX, Socket::SOCK_STREAM, 0)
 writer.shutdown(Socket::SHUT_WR)
 scan = Kiln::HTTP::Native.scratch

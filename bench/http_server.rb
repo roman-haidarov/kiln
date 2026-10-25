@@ -26,7 +26,7 @@ router.get('/big', Big.new)
 router.seal!
 guarded = Kiln::Middleware::Rescue.new(router, log)
 handler = Kiln::Middleware::RequestId.new(Kiln::Middleware::AccessLog.new(guarded, log))
-server = Kiln::Server::Base.new(handler, nil, log: log, port: (ENV['PORT'] || '19091').to_i,
+server = Kiln::Server::Base.new(handler, log: log, port: (ENV['PORT'] || '19091').to_i,
                                               host: '127.0.0.1', request_timeout: 5.0, max_conns: 1000,
                                               coop_budget: (ENV['COOP'] || '4').to_i)
 server.start

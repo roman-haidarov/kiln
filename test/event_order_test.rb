@@ -97,7 +97,7 @@ def ordered_error(port, bad)
 end
 
 [2, 0].each do |handlers|
-  server = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: handlers, write_timeout: 60)
+  server = Kiln::Server::Event.new(router, log: log, port: 0, handlers: handlers, write_timeout: 60)
   server.start
   started, total = unread_backlog(server)
   check "handlers #{handlers}: an unread pipeline of 1 MiB replies runs a bounded number of handlers",
@@ -107,7 +107,7 @@ end
   server.shutdown(grace: 1)
 end
 
-ordered = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: 2)
+ordered = Kiln::Server::Event.new(router, log: log, port: 0, handlers: 2)
 ordered.start
 check 'a request without Host is answered after the earlier response',
       ordered_error(ordered.port, "GET /x HTTP/1.1\r\n\r\n")
