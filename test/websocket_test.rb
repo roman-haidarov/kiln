@@ -170,7 +170,7 @@ router.seal!
 long = 'w' * 70_000
 
 %i[event base].each do |backend|
-  server = Kiln::Server.new(router, nil, log: log, backend: backend, host: '127.0.0.1', port: 0)
+  server = Kiln::Server.new(router, log: log, backend: backend, host: '127.0.0.1', port: 0)
   server.start
   port = server.port
 

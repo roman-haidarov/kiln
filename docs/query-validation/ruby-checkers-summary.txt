@@ -1,0 +1,2 @@
+{"offense_count"=>1122, "target_file_count"=>217, "inspected_file_count"=>217}
+runtime warning/error/fatal: 0

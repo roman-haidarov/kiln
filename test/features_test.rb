@@ -227,7 +227,7 @@ wait_for { finished.size.zero? }
 check 'a finished task is forgotten', finished.size.zero?
 
 puts '-- run with signals'
-server = Kiln::Server.new(say('up'), nil, log:, port: 0, host: '127.0.0.1')
+server = Kiln::Server.new(say('up'), log:, port: 0, host: '127.0.0.1')
 run_tasks = Kiln::Runtime::Tasks.new(log)
 run_tasks.every('noop', 0.05) { |_t| nil }
 reply = Queue.new
@@ -259,11 +259,11 @@ rescue SystemCallError
 end
 check 'listener is closed after run', refused
 
-held = Kiln::Server.new(say('hold'), nil, log:, port: 0, host: '127.0.0.1')
+held = Kiln::Server.new(say('hold'), log:, port: 0, host: '127.0.0.1')
 held.start
 trap_reader, trap_writer = IO.pipe
 Signal.trap('USR1') { trap_writer.write_nonblock('1', exception: false) }
-failed = Kiln::Server.new(say('no'), nil, log:, port: 0, host: '127.0.0.1')
+failed = Kiln::Server.new(say('no'), log:, port: 0, host: '127.0.0.1')
 failed_run = begin
   failed.run(grace: 0.5, signals: ['USR1'])
   false
@@ -289,7 +289,7 @@ held.shutdown(grace: 0.5)
 
 again_reader, again_writer = IO.pipe
 Signal.trap('USR2') { again_writer.write_nonblock('1', exception: false) }
-again = Kiln::Server.new(say('up'), nil, log:, port: 0, host: '127.0.0.1')
+again = Kiln::Server.new(say('up'), log:, port: 0, host: '127.0.0.1')
 Thread.new do
   port = 0
   wait_for do

@@ -125,7 +125,7 @@ r.draw do |routes|
   routes.get('/huge',    Handler.new { |c| c.res.text(HUGE_BODY) })
 end
 
-srv = Kiln::Server::Base.new(Kiln::Middleware::Rescue.new(r, LOG), nil, log: LOG, port: 0, host: '127.0.0.1',
+srv = Kiln::Server::Base.new(Kiln::Middleware::Rescue.new(r, LOG), log: LOG, port: 0, host: '127.0.0.1',
                                                                         request_timeout: 0.3, kill_grace: 0.2,
                                                                         write_timeout: 0.5, max_conns: 50, shards: 4)
 srv.start
@@ -427,7 +427,7 @@ class GatedTimeoutServer < Kiln::Server::Base
   end
 end
 
-slow_srv = GatedTimeoutServer.new(->(ctx) { ctx.res.text(HUGE_BODY) }, nil,
+slow_srv = GatedTimeoutServer.new(->(ctx) { ctx.res.text(HUGE_BODY) },
                                   log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
                                   write_timeout: 0.2, max_conns: 1)
 write_entered = Queue.new
@@ -474,7 +474,7 @@ class Lingering
 end
 lr = Kiln::Routing::Router.new
 lr.get('/linger', Lingering.new)
-lsrv = Kiln::Server::Base.new(Kiln::Middleware::Rescue.new(lr, LOG), nil, log: LOG, port: 0, host: '127.0.0.1',
+lsrv = Kiln::Server::Base.new(Kiln::Middleware::Rescue.new(lr, LOG), log: LOG, port: 0, host: '127.0.0.1',
                                                                           request_timeout: 0.2, kill_grace: 0.1,
                                                                           max_conns: 2)
 lsrv.start

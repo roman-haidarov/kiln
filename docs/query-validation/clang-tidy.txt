@@ -1,0 +1,172 @@
+[1/2] Processing file /workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c.
+2341 warnings generated.
+[2/2] Processing file /workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c.
+6248 warnings generated.
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:2:9: warning: declaration uses identifier '_GNU_SOURCE', which is a reserved identifier [bugprone-reserved-identifier]
+    2 | #define _GNU_SOURCE
+      |         ^~~~~~~~~~~
+      |         GNU_SOURCE
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:13:1: warning: included header uio.h is not used directly [misc-include-cleaner]
+   13 | #include <sys/uio.h>
+      | ^~~~~~~~~~~~~~~~~~~~
+   14 | #include "kiln_ascii.h"
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:42:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+   42 |     memcpy(copy, path, (size_t)len);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:42:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+   42 |     memcpy(copy, path, (size_t)len);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:300:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  300 |         memcpy(&word, s + i, sizeof word);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:300:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  300 |         memcpy(&word, s + i, sizeof word);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:406:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  406 |     memcpy(buf, head, (size_t)len);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:406:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  406 |     memcpy(buf, head, (size_t)len);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:407:5: warning: the result from calling 'memcpy' is not null-terminated [bugprone-not-null-terminated-result]
+  402 |     char buf[KILN_HTTP_HEAD_MAX + 4];
+      |                                    
+      |                                     + 1
+  403 |     if (len <= 0 || len > KILN_HTTP_HEAD_MAX) {
+  404 |         return -1;
+  405 |     }
+  406 |     memcpy(buf, head, (size_t)len);
+  407 |     memcpy(buf + len, "\r\n\r\n", 4);
+      |     ^~~~~~                      ~~~
+      |     strcpy
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:407:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  407 |     memcpy(buf + len, "\r\n\r\n", 4);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:407:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  407 |     memcpy(buf + len, "\r\n\r\n", 4);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:715:12: warning: no header providing "iovec" is directly included [misc-include-cleaner]
+    3 |     struct iovec iov[2];
+      |            ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:748:12: warning: no header providing "pollfd" is directly included [misc-include-cleaner]
+    3 |     struct pollfd p;
+      |            ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:754:13: warning: no header providing "poll" is directly included [misc-include-cleaner]
+  754 |         r = poll(&p, 1, 0);
+      |             ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:756:15: warning: statement should be inside braces [readability-braces-around-statements]
+  756 |     if (r < 0)
+      |               ^
+      |                {
+  757 |         return 1;
+      |                  
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:758:38: warning: no header providing "POLLHUP" is directly included [misc-include-cleaner]
+  758 |     return (p.revents & (POLLRDHUP | POLLHUP | POLLERR | POLLNVAL)) ? 1 : 0;
+      |                                      ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:758:48: warning: no header providing "POLLERR" is directly included [misc-include-cleaner]
+  758 |     return (p.revents & (POLLRDHUP | POLLHUP | POLLERR | POLLNVAL)) ? 1 : 0;
+      |                                                ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_http.c:758:58: warning: no header providing "POLLNVAL" is directly included [misc-include-cleaner]
+  758 |     return (p.revents & (POLLRDHUP | POLLHUP | POLLERR | POLLNVAL)) ? 1 : 0;
+      |                                                          ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:2:9: warning: declaration uses identifier '_GNU_SOURCE', which is a reserved identifier [bugprone-reserved-identifier]
+    2 | #define _GNU_SOURCE
+      |         ^~~~~~~~~~~
+      |         GNU_SOURCE
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:4:1: warning: included header inet.h is not used directly [misc-include-cleaner]
+    4 | #include <arpa/inet.h>
+      | ^~~~~~~~~~~~~~~~~~~~~~
+    5 | #include <limits.h>
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:8:1: warning: included header pthread.h is not used directly [misc-include-cleaner]
+    8 | #include <pthread.h>
+      | ^~~~~~~~~~~~~~~~~~~~
+    9 | #include <stdint.h>
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:46:17: warning: no header providing "sigset_t" is directly included [misc-include-cleaner]
+    3 | static __thread sigset_t kuv_old_sigmask;
+      |                 ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:219:46: warning: no header providing "ssize_t" is directly included [misc-include-cleaner]
+    3 | static void kuv_on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf);
+      |                                              ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:219:67: warning: no header providing "uv_buf_t" is directly included [misc-include-cleaner]
+    3 | static void kuv_on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf);
+      |                                                                   ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:496:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  496 |     memcpy(*buf + *len, data, n);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:496:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  496 |     memcpy(*buf + *len, data, n);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:510:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  510 |     memcpy(c->out + c->out_len, head, head_len);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:510:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  510 |     memcpy(c->out + c->out_len, head, head_len);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:513:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  513 |         memcpy(c->out + c->out_len, body, body_len);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:513:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  513 |         memcpy(c->out + c->out_len, body, body_len);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:589:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  589 |     memcpy(r->scan, scan, nscan * sizeof(int64_t));
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:589:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  589 |     memcpy(r->scan, scan, nscan * sizeof(int64_t));
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:590:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  590 |     memcpy(r->data, bytes, total);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:590:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+  590 |     memcpy(r->data, bytes, total);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:598:5: warning: Call to function 'memmove' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memmove_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+  598 |     memmove(c->in, c->in + used, c->in_len - used);
+      |     ^~~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:598:5: note: Call to function 'memmove' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memmove_s' in case of C11
+  598 |     memmove(c->in, c->in + used, c->in_len - used);
+      |     ^~~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1214:5: warning: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1214 |     memset(l, 0, sizeof *l);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1214:5: note: Call to function 'memset' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memset_s' in case of C11
+ 1214 |     memset(l, 0, sizeof *l);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1222:55: warning: no header providing "uv_file" is directly included [misc-include-cleaner]
+ 1222 |     rc = kind == KUV_UNIX ? uv_pipe_open(&l->h.pipe, (uv_file)fd)
+      |                                                       ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1223:53: warning: no header providing "uv_os_sock_t" is directly included [misc-include-cleaner]
+ 1223 |                           : uv_tcp_open(&l->h.tcp, (uv_os_sock_t)fd);
+      |                                                     ^
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1376:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1376 |         memcpy(scan, r->scan, sizeof(int64_t) * (size_t)(5 + (5 * r->nheaders)));
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1376:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+ 1376 |         memcpy(scan, r->scan, sizeof(int64_t) * (size_t)(5 + (5 * r->nheaders)));
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1498:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1498 |         memcpy(copy, head + done, n);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1498:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+ 1498 |         memcpy(copy, head + done, n);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1505:9: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1505 |         memcpy(copy + filled, body + done, body_len - done);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1505:9: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+ 1505 |         memcpy(copy + filled, body + done, body_len - done);
+      |         ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1749:5: warning: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1749 |     memcpy(kuv_take_buf, c->body, n);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1749:5: note: Call to function 'memcpy' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memcpy_s' in case of C11
+ 1749 |     memcpy(kuv_take_buf, c->body, n);
+      |     ^~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1750:5: warning: Call to function 'memmove' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memmove_s' in case of C11 [clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling]
+ 1750 |     memmove(c->body, c->body + n, c->body_len - n);
+      |     ^~~~~~~
+/workspace/scratch/0a28ecd40c4a/query-work/ext/kiln_uv.c:1750:5: note: Call to function 'memmove' is insecure as it does not provide security checks introduced in the C11 standard. Replace with analogous functions that support length arguments or provides boundary checks such as 'memmove_s' in case of C11
+ 1750 |     memmove(c->body, c->body + n, c->body_len - n);
+      |     ^~~~~~~
+Suppressed 6214 warnings (6214 in non-user code).
+Use -header-filter=.* to display errors from all non-system headers. Use -system-headers to display errors from system headers as well.

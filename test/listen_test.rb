@@ -31,7 +31,7 @@ FileUtils.rm_f(path)
 
 %i[event base].each do |backend|
   listen = [Kiln::Transport::Listen.tcp('127.0.0.1', 0), Kiln::Transport::Listen.unix(path, mode: 0o660)]
-  server = Kiln::Server.new(router, nil, log: log, backend: backend, listen: listen, backlog: 64, tcp_nodelay: false)
+  server = Kiln::Server.new(router, log: log, backend: backend, listen: listen, backlog: 64, tcp_nodelay: false)
   server.start
   tcp_reply = exchange(server.port, REQUEST)
   unix_reply = over_unix(path, REQUEST)
@@ -45,7 +45,7 @@ end
 
 fd = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, false)
 inherited_port = Kiln::Transport::Sock.kiln_sock_port(fd)
-adopted = Kiln::Server.new(router, nil, log: log, listen: [Kiln::Transport::Listen.fd(fd)])
+adopted = Kiln::Server.new(router, log: log, listen: [Kiln::Transport::Listen.fd(fd)])
 adopted.start
 check 'event: a listening descriptor handed over is served', adopted.port == inherited_port &&
                                                              exchange(inherited_port, REQUEST).end_with?('http ok')
@@ -53,12 +53,12 @@ adopted.shutdown(grace: 0.5)
 
 base_fd = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, false)
 base_port = Kiln::Transport::Sock.kiln_sock_port(base_fd)
-base_adopted = Kiln::Server.new(router, nil, log: log, backend: :base, listen: ["fd:#{base_fd}"])
+base_adopted = Kiln::Server.new(router, log: log, backend: :base, listen: ["fd:#{base_fd}"])
 base_adopted.start
 check 'base: a listening descriptor named as fd:N is served', exchange(base_port, REQUEST).end_with?('http ok')
 base_adopted.shutdown(grace: 0.5)
 
-parsed = Kiln::Server.new(router, nil, log: log, listen: ['127.0.0.1:0', "unix:#{path}"])
+parsed = Kiln::Server.new(router, log: log, listen: ['127.0.0.1:0', "unix:#{path}"])
 parsed.start
 check 'listen strings name TCP and unix addresses', exchange(parsed.port, REQUEST).end_with?('http ok') &&
                                                     over_unix(path, REQUEST).end_with?('http ok')
@@ -67,16 +67,16 @@ parsed.shutdown(grace: 0.5)
 stale = UNIXServer.new(path)
 stale.close
 check 'a stale unix socket file is left behind by a dead server', File.exist?(path)
-replaced = Kiln::Server.new(router, nil, log: log, listen: ["unix:#{path}"])
+replaced = Kiln::Server.new(router, log: log, listen: ["unix:#{path}"])
 replaced.start
 check 'a stale unix socket file is replaced', over_unix(path, REQUEST).end_with?('http ok')
 rejects('a unix socket that still accepts is not taken over') do
-  Kiln::Server.new(router, nil, log: log, backend: :base, listen: ["unix:#{path}"]).start
+  Kiln::Server.new(router, log: log, backend: :base, listen: ["unix:#{path}"]).start
 end
 replaced.shutdown(grace: 0.5)
 
 %i[event base].each do |backend|
-  owner = Kiln::Server.new(router, nil, log: log, backend: backend, listen: ["unix:#{path}"])
+  owner = Kiln::Server.new(router, log: log, backend: backend, listen: ["unix:#{path}"])
   owner.start
   File.delete(path)
   successor = UNIXServer.new(path)
@@ -88,8 +88,8 @@ end
 
 shared = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, true)
 shared_port = Kiln::Transport::Sock.kiln_sock_port(shared)
-first = Kiln::Server.new(router, nil, log: log, port: shared_port, host: '127.0.0.1', reuse_port: true)
-second = Kiln::Server.new(router, nil, log: log, backend: :base, port: shared_port, host: '127.0.0.1',
+first = Kiln::Server.new(router, log: log, port: shared_port, host: '127.0.0.1', reuse_port: true)
+second = Kiln::Server.new(router, log: log, backend: :base, port: shared_port, host: '127.0.0.1',
                                        reuse_port: true)
 first.start
 second.start
@@ -99,38 +99,38 @@ check 'reuse_port lets two servers bind one port', answers.all?
 first.shutdown(grace: 0.5)
 second.shutdown(grace: 0.5)
 
-busy = Kiln::Server.new(router, nil, log: log, host: '127.0.0.1', port: 0)
+busy = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0)
 busy.start
 rejects('a second listener on a taken port reports the address') do
-  Kiln::Server.new(router, nil, log: log, backend: :base, host: '127.0.0.1', port: busy.port).start
+  Kiln::Server.new(router, log: log, backend: :base, host: '127.0.0.1', port: busy.port).start
 end
 busy.shutdown(grace: 0.5)
 
 rejects('reuse_port cannot use an ephemeral port') do
-  Kiln::Server.new(router, nil, log: log, port: 0, reuse_port: true)
+  Kiln::Server.new(router, log: log, port: 0, reuse_port: true)
 end
 rejects('base also refuses ephemeral reuse_port') do
-  Kiln::Server.new(router, nil, log: log, backend: :base, port: 0, reuse_port: true)
+  Kiln::Server.new(router, log: log, backend: :base, port: 0, reuse_port: true)
 end
 rejects('workers option is no longer available') do
-  Kiln::Server.new(router, nil, log: log, workers: 2)
+  Kiln::Server.new(router, log: log, workers: 2)
 end
 rejects('buffer_body cannot exceed max_body on event') do
-  Kiln::Server.new(router, nil, log: log, max_body: 1024, buffer_body: 4096)
+  Kiln::Server.new(router, log: log, max_body: 1024, buffer_body: 4096)
 end
 rejects('buffer_body cannot exceed max_body on base') do
-  Kiln::Server.new(router, nil, log: log, backend: :base, max_body: 1024, buffer_body: 4096)
+  Kiln::Server.new(router, log: log, backend: :base, max_body: 1024, buffer_body: 4096)
 end
 check 'Transport::Listen.systemd is empty without LISTEN_FDS', Kiln::Transport::Listen.systemd.empty?
 check 'Transport::Listen.parse reads an IPv6 address', Kiln::Transport::Listen.parse('[::1]:8080').host == '::1'
 rejects('listen needs a port') { Kiln::Transport::Listen.parse('localhost') }
-rejects('backlog must be positive') { Kiln::Server.new(router, nil, log: log, port: 0, backlog: 0) }
+rejects('backlog must be positive') { Kiln::Server.new(router, log: log, port: 0, backlog: 0) }
 rejects('max_connection_rate must not be negative') do
-  Kiln::Server.new(router, nil, log: log, port: 0, max_connection_rate: -1)
+  Kiln::Server.new(router, log: log, port: 0, max_connection_rate: -1)
 end
 rejects('base refuses TLS') do
   tls = Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem')
-  Kiln::Server.new(router, nil, log: log, backend: :base, port: 0, tls: tls)
+  Kiln::Server.new(router, log: log, backend: :base, port: 0, tls: tls)
 end
 rejects('TLS refuses unsupported h2 ALPN') do
   Kiln::Transport::Tls.new(cert: 'test/fixtures/tls_cert.pem', key: 'test/fixtures/tls_key.pem', alpn: ['h2'])

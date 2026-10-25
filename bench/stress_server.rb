@@ -38,7 +38,7 @@ log = Kiln::Observability::Log.new(StringIO.new)
 router = Kiln::Routing::Router.new
 %w[/health /hang /cpu /big].each { |path| router.get(path, handler) }
 router.seal!
-server = Kiln::Server::Base.new(router, nil, log: log, port: 0, host: '127.0.0.1',
+server = Kiln::Server::Base.new(router, log: log, port: 0, host: '127.0.0.1',
                                              max_conns: Integer(ENV.fetch('MAX_CONNS') { '10000' }),
                                              read_timeout: Float(ENV.fetch('READ_TIMEOUT') { '60' }),
                                              request_timeout: Float(ENV.fetch('REQUEST_TIMEOUT') { '0.4' }),

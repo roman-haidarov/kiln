@@ -4,13 +4,11 @@ require 'fileutils'
 require 'stringio'
 require 'test/support'
 
-class WiringApp
-  def message = 'wired app'
-end
+WIRED_MESSAGE = 'wired app'
 
 class WiringHandler
   def call(ctx)
-    ctx.res.text(ctx.app.message)
+    ctx.res.text(WIRED_MESSAGE)
   end
 end
 
@@ -24,28 +22,28 @@ def need(label, condition)
   raise label unless condition
 end
 
-def wired_server(mode, handler, app, log)
+def wired_server(mode, handler, log)
   options = { log: log, host: '127.0.0.1', port: 0 }
   case mode
   when :facade_base
-    Kiln::Server.new(handler, app, backend: :base, **options)
+    Kiln::Server.new(handler, backend: :base, **options)
   when :facade_inline
-    Kiln::Server.new(handler, app, **options)
+    Kiln::Server.new(handler, **options)
   when :facade_workers
-    Kiln::Server.new(handler, app, handlers: 2, **options)
+    Kiln::Server.new(handler, handlers: 2, **options)
   when :direct_base
-    Kiln::Server::Base.new(handler, app, **options)
+    Kiln::Server::Base.new(handler, **options)
   when :direct_inline
-    Kiln::Server::Event.new(handler, app, **options)
+    Kiln::Server::Event.new(handler, **options)
   when :direct_workers
-    Kiln::Server::Event.new(handler, app, handlers: 2, **options)
+    Kiln::Server::Event.new(handler, handlers: 2, **options)
   else
     raise 'unknown wiring mode'
   end
 end
 
-def wired_request(mode, handler, app, log, expected)
-  server = wired_server(mode, handler, app, log)
+def wired_request(mode, handler, log, expected)
+  server = wired_server(mode, handler, log)
   server.start
   raw = exchange(server.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", 3)
   need("#{mode} #{expected}", raw.start_with?('HTTP/1.1 200 ') && raw.end_with?(expected))
@@ -53,10 +51,10 @@ ensure
   server&.shutdown(grace: 1)
 end
 
-def wired_failure(mode, app)
+def wired_failure(mode)
   buffer = StringIO.new
   log = Kiln::Observability::Log.new(buffer)
-  server = wired_server(mode, WiringFailure.new, app, log)
+  server = wired_server(mode, WiringFailure.new, log)
   server.start
   raw = exchange(server.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", 3)
   need("#{mode} error response", raw.start_with?('HTTP/1.1 500 '))
@@ -66,10 +64,10 @@ ensure
   need("#{mode} error logger", buffer.string.include?('wiring failure'))
 end
 
-def wired_signal(app)
+def wired_signal
   buffer = StringIO.new
   log = Kiln::Observability::Log.new(buffer)
-  server = wired_server(:facade_base, WiringHandler.new, app, log)
+  server = wired_server(:facade_base, WiringHandler.new, log)
   signaler = Thread.new do
     wait_for { server.port.positive? }
     Process.kill('USR2', Process.pid)
@@ -86,23 +84,22 @@ end
 root = Dir.mktmpdir('kiln-wiring')
 begin
   File.write(File.join(root, 'index.html'), 'wired static')
-  app = WiringApp.new
   log = Kiln::Observability::Log.new(StringIO.new)
-  callback = ->(ctx) { ctx.res.text(ctx.app.message) }
+  callback = ->(ctx) { ctx.res.text(WIRED_MESSAGE) }
   router = Kiln::Routing::Router.new.get('/', callback).seal!
   files = Kiln::Static.new(root)
   object = WiringHandler.new
   bound = object.method(:call)
   %i[facade_base facade_inline facade_workers direct_base direct_inline direct_workers].each do |mode|
-    wired_request(mode, callback, app, log, 'wired app')
-    wired_request(mode, router, app, log, 'wired app')
-    wired_request(mode, object, app, log, 'wired app')
-    wired_request(mode, bound, app, log, 'wired app')
-    wired_request(mode, files, app, log, 'wired static')
-    wired_failure(mode, app)
+    wired_request(mode, callback, log, 'wired app')
+    wired_request(mode, router, log, 'wired app')
+    wired_request(mode, object, log, 'wired app')
+    wired_request(mode, bound, log, 'wired app')
+    wired_request(mode, files, log, 'wired static')
+    wired_failure(mode)
     puts "ok wiring #{mode}"
   end
-  wired_signal(app)
+  wired_signal
   log.close
   puts 'ok signal logger'
 ensure
@@ -118,7 +115,7 @@ end
   invalid.each do |options|
     rejected = false
     begin
-      Kiln::Server.new(nil, nil, log: nil, backend: backend, **options)
+      Kiln::Server.new(nil, log: nil, backend: backend, **options)
     rescue ArgumentError => error
       rejected = options.keys.any? { |key| error.message.include?(key.to_s) }
     end

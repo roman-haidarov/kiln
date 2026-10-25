@@ -27,7 +27,7 @@ router = Kiln::Routing::Router.new
                               .get('/slow', ->(ctx) { ctx.sleep(0.15); ctx.res.text('FIRST') })
                               .seal!
 [0, 2].each do |handlers|
-  server = PressureServer.new(router, nil, port: 0, handlers: handlers, write_timeout: 10,
+  server = PressureServer.new(router, port: 0, handlers: handlers, write_timeout: 10,
                               log: Kiln::Observability::Log.new(StringIO.new))
   server.reports = Queue.new
   server.start
@@ -63,7 +63,7 @@ router = Kiln::Routing::Router.new
   puts "ok pressure handlers=#{handlers}"
 end
 
-server = Kiln::Server::Event.new(router, nil, port: 0, handlers: 2,
+server = Kiln::Server::Event.new(router, port: 0, handlers: 2,
                                 log: Kiln::Observability::Log.new(StringIO.new))
 server.start
 bad = ["GET / HTTP/1.1\r\nConnection: close\r\n\r\n",
@@ -87,7 +87,7 @@ router = Kiln::Routing::Router.new
                               .get('/hold', ->(ctx) { started << true; release.pop; ctx.res.text('held') })
                               .get('/effect', ->(ctx) { effects << true; ctx.res.text('effect') })
                               .seal!
-server = Kiln::Server::Event.new(router, nil, port: 0, handlers: 2,
+server = Kiln::Server::Event.new(router, port: 0, handlers: 2,
                                 log: Kiln::Observability::Log.new(StringIO.new))
 server.start
 sock = TCPSocket.new('127.0.0.1', server.port)

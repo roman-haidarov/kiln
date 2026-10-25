@@ -276,7 +276,7 @@ log = Kiln::Observability::Log.new(StringIO.new)
   name = backend == :event ? "event/#{handlers}" : 'base'
   options = { log:, port: 0, host: '127.0.0.1', backend: }
   options[:handlers] = handlers if backend == :event
-  server = Kiln::Server.new(build_app, nil, **options)
+  server = Kiln::Server.new(build_app, **options)
   server.start
   port = server.port
   sock = TCPSocket.new('127.0.0.1', port)

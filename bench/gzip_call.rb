@@ -57,7 +57,7 @@ end
 def middleware_body(stack)
   headers = { 'host' => 'x', 'accept-encoding' => 'gzip' }
   req = Kiln::HTTP::Request.new('GET', '/', headers, ''.b, Kiln::HTTP::Request::Wire.new('1.1', nil, nil))
-  ctx = Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, nil, 1, now + 3600.0)
+  ctx = Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, 1, now + 3600.0)
   stack.call(ctx)
   ctx.res.body.to_s
 end

@@ -78,7 +78,7 @@ router.seal!
 
 [[:event, {}], [:event, { handlers: 2 }], [:base, {}]].each do |backend, extra|
   label = extra.empty? ? backend.to_s : "#{backend} lanes"
-  server = Kiln::Server.new(router, nil, log: log, backend: backend, host: '127.0.0.1', port: 0,
+  server = Kiln::Server.new(router, log: log, backend: backend, host: '127.0.0.1', port: 0,
                                          buffer_body: 1024, request_timeout: 10.0, **extra)
   server.start
   port = server.port
@@ -168,7 +168,7 @@ stalled.seal!
 
 [[:event, {}], [:event, { handlers: 1 }], [:base, {}]].each do |backend, extra|
   label = extra.empty? ? backend.to_s : "#{backend} lanes"
-  server = Kiln::Server.new(stalled, nil, log: log, backend: backend, host: '127.0.0.1', port: 0, buffer_body: 16,
+  server = Kiln::Server.new(stalled, log: log, backend: backend, host: '127.0.0.1', port: 0, buffer_body: 16,
                                           request_timeout: 0.3, read_timeout: 5.0, **extra)
   server.start
   port = server.port

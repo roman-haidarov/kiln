@@ -178,12 +178,9 @@ def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)
     kept = GateUser.all.where(GateUser.col('id').eq(1)).pluck(GateUser.col('name'))
     line(db, 'ignore', "#{again.input_status(0)} #{kept[0]}")
   else
-    begin
-      GateUser.import([{ 'id' => 1, 'name' => 'nope' }], { on_duplicate_key_ignore: true })
-      line(db, 'ignore', 'miss')
-    rescue Kiln::DB::UnsafeImportSchema
-      line(db, 'ignore', 'blocked')
-    end
+    GateUser.import([{ 'id' => 1, 'name' => 'nope' }], { on_duplicate_key_ignore: true })
+    kept = GateUser.all.where(GateUser.col('id').eq(1)).pluck(GateUser.col('name'))
+    line(db, 'ignore', "kept #{kept[0]}")
   end
   drop_all(conn)
   conn.close

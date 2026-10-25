@@ -9,11 +9,11 @@ end
 def router_server(mode, router, log)
   case mode
   when :base
-    Kiln::Server.new(router, nil, log: log, backend: :base, host: '127.0.0.1')
+    Kiln::Server.new(router, log: log, backend: :base, host: '127.0.0.1')
   when :inline
-    Kiln::Server.new(router, nil, log: log, host: '127.0.0.1')
+    Kiln::Server.new(router, log: log, host: '127.0.0.1')
   when :workers
-    Kiln::Server.new(router, nil, log: log, handlers: 2, host: '127.0.0.1')
+    Kiln::Server.new(router, log: log, handlers: 2, host: '127.0.0.1')
   else
     raise 'unknown router mode'
   end

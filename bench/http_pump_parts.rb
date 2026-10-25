@@ -46,7 +46,7 @@ t = now
 i = 0
 while i < n
   req = Kiln::HTTP::Request.new(verb, target, headers, empty, Kiln::HTTP::Request::Wire.new(version, nil, nil))
-  Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, nil, i, deadline)
+  Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, i, deadline)
   i += 1
 end
 per('request_context_new', now - t, n)
@@ -55,14 +55,14 @@ t = now
 i = 0
 while i < n
   req = Kiln::HTTP::Request.new(verb, target, headers, empty, Kiln::HTTP::Request::Wire.new(version, nil, nil))
-  ctx = Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, nil, i, deadline)
+  ctx = Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, i, deadline)
   router.call(ctx)
   i += 1
 end
 per('request_context_plus_app', now - t, n)
 
 req = Kiln::HTTP::Request.new(verb, target, headers, empty, Kiln::HTTP::Request::Wire.new(version, nil, nil))
-ctx = Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, nil, 1, deadline)
+ctx = Kiln::Routing::Context.new(req, Kiln::HTTP::Response.new, 1, deadline)
 router.call(ctx)
 res = ctx.res
 t = now

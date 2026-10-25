@@ -1,12 +1,15 @@
 module Kiln
   module DB
-    class ImportMode
-      attr_reader :skip_conflicts, :update_conflicts, :return_rows
+    ImportPart = Struct.new(:key, :columns, :rows, :originals)
 
-      def initialize(ignore, update, returning)
+    class ImportMode
+      attr_reader :skip_conflicts, :update_conflicts, :return_rows, :settings
+
+      def initialize(ignore, update, returning, settings = nil)
         @skip_conflicts = ignore
         @update_conflicts = update
         @return_rows = returning
+        @settings = settings || ImportSettings.new(nil, nil, nil, nil, nil)
       end
     end
 
@@ -84,16 +87,22 @@ module Kiln
 
         def prove_mysql(conn)
           Import.prove_session(conn)
-          Schema.prove_update_key(conn, @model) if @update
+          Schema.prove_update_key(conn, @model) if @update && @returning
         end
 
         def write_part(conn, part, alias_rows)
-          shape = copy_shape_for(conn, part[2])
+          if part.columns.empty?
+            part.rows.length.times { |index| write_page(conn, part, index, 1, alias_rows) }
+            return
+          end
+
+          shape = copy_shape_for(conn, part.rows)
           return write_copy(conn, part, shape.positive? ? Import.copy_stamp(conn) : nil) unless shape.negative?
 
-          step = Import.page_rows(part[1].length)
+          step = Import.page_rows(part.columns.length)
+          step = [step, @mode.settings.batch_size].min unless @mode.settings.batch_size.nil?
           offset = 0
-          while offset < part[2].length
+          while offset < part.rows.length
             write_page(conn, part, offset, step, alias_rows)
             offset += step
           end
@@ -108,13 +117,16 @@ module Kiln
         end
 
         def write_copy(conn, part, stamp)
-          rows = part[2]
+          rows = part.rows
           offset = 0
-          sql = Import.copy_sql(@model, part[1])
+          sql = Import.copy_sql(@model, part.columns)
           while offset < rows.length
-            payload, count = Import.copy_chunk(rows, offset, Import::COPY_LIMIT, stamp)
+            last = @mode.settings.batch_size.nil? ? rows.length : [rows.length, offset + @mode.settings.batch_size].min
+            payload, count = Import.copy_chunk(rows, offset, Import::COPY_LIMIT, stamp, last)
             conn.copy_in(sql, payload, count)
-            mark_inserted(ImportPage.new(part[3], offset, offset + count))
+            @num_inserts += 1
+            @affected_rows += count
+            mark_inserted(ImportPage.new(part.originals, offset, offset + count))
             offset += count
           end
         end
@@ -122,9 +134,12 @@ module Kiln
         def write_page(conn, part, offset, step, alias_rows)
           sql, binds = Import.insert_sql(@model, Import.page_part(part, offset, step), @mode, alias_rows)
           got = conn.exec(sql, binds)
-          raise Error, 'warnings' if @model.dialect != :postgres && conn.warning_count.positive?
+          affected = conn.affected_rows
+          check_warnings(conn)
+          @num_inserts += 1
+          @affected_rows += affected
 
-          page = ImportPage.new(part[3], offset, [offset + step, part[2].length].min)
+          page = ImportPage.new(part.originals, offset, [offset + step, part.rows.length].min)
           check_affected(conn, page)
           @returning ? record_returned(conn, got, page) : mark_inserted(page)
         end
@@ -136,6 +151,20 @@ module Kiln
             @status[page.originals[j]] = value
             j += 1
           end
+        end
+
+        def check_warnings(conn)
+          return if @model.dialect == :postgres
+
+          count = conn.warning_count
+          return if count.zero?
+
+          if @ignore
+            warnings = conn.exec('SHOW WARNINGS', [])
+            return if warnings.all? { |row| row[1].to_i == 1062 }
+          end
+
+          raise Error, 'import warnings'
         end
 
         def record_returned(conn, got, page)
@@ -332,7 +361,8 @@ module Kiln
           j = page.from
           while j < page.upto
             original = page.originals[j]
-            @status[original] = @update ? 'applied_unknown' : 'inserted' if @picks[original] >= 0
+            unknown = @update || (@ignore && @model.dialect != :postgres)
+            @status[original] = unknown ? 'applied_unknown' : 'inserted' if @picks[original] >= 0
             j += 1
           end
         end
@@ -354,7 +384,8 @@ module Kiln
 
       def write(masks)
         DB.transaction { |conn| write_masks(conn, masks) }
-        ImportResult.committed(@status, collect_returned, @state)
+        ImportResult.committed(@status, collect_returned, @state).annotate(@model, [], @num_inserts, @affected_rows,
+                                                                         @mode.settings.return_columns)
       end
 
       private
@@ -366,6 +397,8 @@ module Kiln
         @orphaned = []
         @copy_table = 0
         @state = 'COMMITTED'
+        @num_inserts = 0
+        @affected_rows = 0
       end
 
       def collect_returned
@@ -389,12 +422,46 @@ module Kiln
     end
 
     class ImportResult
-      attr_reader :state, :returned
+      attr_reader :state, :returned, :failed_instances, :num_inserts, :affected_rows
 
       def initialize(state, status, returned)
         @state = state
         @status = status
         @returned = returned
+        @failed_instances = []
+        @num_inserts = 0
+        @affected_rows = 0
+        @model = nil
+        @return_columns = nil
+      end
+
+      def annotate(model, failed, inserts, affected, columns = nil)
+        @model = model
+        @failed_instances = failed
+        @num_inserts = inserts
+        @affected_rows = affected
+        @return_columns = columns
+        self
+      end
+
+      def ids
+        return [] if @model.nil?
+
+        indexes = @model.primary_key.map { |name| Import.column_index(@model, name) }
+        @returned.map do |row|
+          values = indexes.map { |index| row[index] }
+          values.length == 1 ? values[0] : values
+        end
+      end
+
+      def results
+        return @returned if @return_columns.nil? || @model.nil?
+
+        indexes = @return_columns.map { |name| Import.column_index(@model, name) }
+        @returned.map do |row|
+          values = indexes.map { |index| row[index] }
+          values.length == 1 ? values[0] : values
+        end
       end
 
       def input_status(index)
@@ -431,25 +498,37 @@ module Kiln
       MAX_PAGE_PARAMS = 32_767
       COPY_LIMIT = 16 * 1024 * 1024
       OPTION_KEYS = %i[on_duplicate_key_ignore on_duplicate_key_update returning require_exact_status validate
-                       validate_uniqueness all_or_none timestamps raise_error].freeze
+                       validate_uniqueness all_or_none timestamps raise_error ignore
+                       batch_size track_validation_failures].freeze
 
       module Checks
+        def call(model, rows, values, options, bang)
+          if values.is_a?(Array)
+            rows = ImportOptions.input(model, rows, values)
+          else
+            raise ArgumentError, 'options' unless options.nil?
+
+            options = values
+          end
+          run(model, rows, options, bang)
+        end
+
         def run(model, rows, options, bang)
           options = {} if options.nil?
           raise ArgumentError, 'rows' unless rows.is_a?(Array)
           raise ArgumentError, 'options' unless options.is_a?(Hash)
 
-          check_options(options, bang)
+          options = options.merge(validate: true, raise_error: true) if bang
+          check_options(options)
           mode = import_mode(model, rows, options)
           raise InvariantViolation, 'pipeline' if Scope.current&.pipelined?
           return ImportResult.empty if rows.empty?
 
-          write_valid(model, rows, options, bang, mode)
+          write_valid(model, rows, options, bang || options[:raise_error] == true, mode)
         end
 
-        def check_options(options, bang)
+        def check_options(options)
           raise ArgumentError, 'option' unless (options.keys - OPTION_KEYS).empty?
-          raise ArgumentError, 'import!' if bang && options[:validate] == false
         end
 
         def split_rows(rows, bang, validate)
@@ -489,25 +568,43 @@ module Kiln
 
         def write_valid(model, rows, options, bang, mode)
           valid, failed = split_rows(rows, bang, options[:validate] != false)
-          rejected = failed.length.positive? && options[:all_or_none] != false
-          return ImportResult.rejected(rows.length) if rejected || valid.empty?
+          rejected = failed.length.positive? && options[:all_or_none] == true
+          failed_rows = failed.map do |index|
+            record = original_row(rows[index])
+            options[:track_validation_failures] == true ? [index, record] : record
+          end
+          if rejected || valid.empty?
+            return ImportResult.rejected(rows.length).annotate(model, failed_rows, 0, 0)
+          end
 
-          Batch.new(model, rows, mode).write(group_rows(model, valid, options[:timestamps] == true))
+          parts = group_rows(model, valid, options[:timestamps] != false)
+          validate_parts(model, parts, mode)
+          result = Batch.new(model, rows, mode).write(parts)
+          result.annotate(model, failed_rows, result.num_inserts, result.affected_rows, mode.settings.return_columns)
         end
 
         def import_mode(model, rows, options)
-          ignore = options[:on_duplicate_key_ignore] == true
-          update = options[:on_duplicate_key_update] == true
-          returning = options[:returning] == true
-          check_conflict(model, ignore, update)
+          ignore = ImportOptions.ignore?(options)
+          update = ImportOptions.update?(options)
+          settings = ImportOptions.settings(model, options)
+          returning = !options[:returning].nil? && options[:returning] != false
+          check_conflict(ignore, update)
+          if update && model.dialect == :postgres && settings.target.empty? && settings.constraint.nil?
+            raise ArgumentError, 'conflict target'
+          end
           check_exact(options[:require_exact_status] == true, ignore, update, returning)
+          if options[:require_exact_status] == true && ignore && model.dialect != :postgres
+            raise UnsupportedExactStatus, 'mysql ignore status'
+          end
           check_returning(model, rows) if returning
-          ImportMode.new(ignore, update, returning)
+          if returning && update && (settings.target != model.primary_key || !settings.constraint.nil?)
+            raise UnsupportedReturn, 'returning: primary key conflict target required'
+          end
+          ImportMode.new(ignore, update, returning, settings)
         end
 
-        def check_conflict(model, ignore, update)
+        def check_conflict(ignore, update)
           raise ArgumentError, 'conflict' if ignore && update
-          raise UnsafeImportSchema, 'ignore' if ignore && model.dialect != :postgres
         end
 
         def check_exact(exact, ignore, update, returning)
@@ -521,7 +618,18 @@ module Kiln
           raise UnsupportedReturn, 'returning' if model.dialect != :postgres && model.primary_key.length != 1
         end
 
-        def row_error(row, validate) = validate && row.is_a?(Model) ? row.validate : nil
+        def original_row(row) = row.is_a?(ImportRow) ? row.record : row
+
+        def row_error(row, validate)
+          record = original_row(row)
+          validate && record.is_a?(Model) ? record.validate : nil
+        end
+
+        def validate_parts(model, parts, mode)
+          return unless mode.update_conflicts
+
+          parts.each { |part| conflict_sql(model, part.columns, mode, false) }
+        end
 
         def safe_session?(rows)
           return false if rows.empty?
@@ -552,6 +660,9 @@ module Kiln
         end
 
         def fields_of(columns, row, timestamps)
+          row.each_key do |key|
+            raise ArgumentError, 'column' unless columns.include?(key.to_s)
+          end
           names = []
           values = []
           i = 0
@@ -566,10 +677,10 @@ module Kiln
 
         def column_field(row, name, timestamps)
           found = field(row, name)
-          return found unless found.nil?
-          return [true, :timestamp] if timestamps && %w[created_at updated_at].include?(name)
+          stamp = ImportOptions::CREATE_STAMPS.include?(name) || ImportOptions::UPDATE_STAMPS.include?(name)
+          return [true, :timestamp] if timestamps && stamp && (found.nil? || found[1].nil?)
 
-          nil
+          found
         end
 
         def field(row, name)
@@ -585,11 +696,11 @@ module Kiln
         def place_mask(groups, names, values, original_index)
           key = mask_key(names)
           last = groups.length - 1
-          if last >= 0 && groups[last][0] == key
-            groups[last][2] << values
-            groups[last][3] << original_index
+          if last >= 0 && groups[last].key == key
+            groups[last].rows << values
+            groups[last].originals << original_index
           else
-            groups << [key, names, [values], [original_index]]
+            groups << ImportPart.new(key, names, [values], [original_index])
           end
         end
 
@@ -609,12 +720,12 @@ module Kiln
           matrix = []
           i = offset
           last = offset + step
-          last = part[2].length if last > part[2].length
+          last = part.rows.length if last > part.rows.length
           while i < last
-            matrix << part[2][i]
+            matrix << part.rows[i]
             i += 1
           end
-          [part[0], part[1], matrix]
+          ImportPart.new(part.key, part.columns, matrix, nil)
         end
       end
 
@@ -643,6 +754,7 @@ module Kiln
         def row_hash(row)
           return row if row.is_a?(Hash)
           return row.attrs if row.is_a?(Model)
+          return row.attrs if row.is_a?(ImportRow)
 
           raise ArgumentError, 'row'
         end
@@ -653,9 +765,15 @@ module Kiln
           dialect = model.dialect
           binds = []
           table = Sql.quote(dialect, model.table_name)
-          sql = "INSERT INTO #{table} (#{quoted_names(dialect, part[1])}) VALUES #{value_rows(dialect, part[2], binds)}"
+          verb = mode.skip_conflicts && dialect != :postgres ? 'INSERT IGNORE' : 'INSERT'
+          values = if part.columns.empty? && dialect == :postgres
+                     'DEFAULT VALUES'
+                   else
+                     "(#{quoted_names(dialect, part.columns)}) VALUES #{value_rows(dialect, part.rows, binds)}"
+                   end
+          sql = "#{verb} INTO #{table} #{values}"
           sql += " AS #{Sql.quote(dialect, 'kiln_new')}" if mode.update_conflicts && alias_rows
-          sql += conflict_sql(model, part[1], mode, alias_rows)
+          sql += conflict_sql(model, part.columns, mode, alias_rows)
           sql += " RETURNING #{returning_list(dialect, model)}" if mode.return_rows && dialect == :postgres
           [sql, binds]
         end
@@ -666,15 +784,19 @@ module Kiln
           return '' unless ignore || update
 
           dialect = model.dialect
-          return mysql_update_sql(dialect, model, names, alias_rows) if update && dialect != :postgres
-          return ' ON CONFLICT DO NOTHING' if ignore
+          return dialect == :postgres ? ' ON CONFLICT DO NOTHING' : '' if ignore
 
-          keys = model.primary_key
-          " ON CONFLICT (#{quoted_names(dialect, keys)}) DO UPDATE SET #{excluded_sets(dialect, keys, names)}"
+          columns = conflict_columns(model, names, mode)
+          return mysql_update_sql(dialect, columns, alias_rows) if dialect != :postgres
+
+          settings = mode.settings
+          target = settings.constraint.nil? ? "(#{quoted_names(dialect, settings.target || model.primary_key)})" :
+                     "ON CONSTRAINT #{Sql.quote(dialect, settings.constraint)}"
+          " ON CONFLICT #{target} DO UPDATE SET #{excluded_sets(dialect, columns)}"
         end
 
-        def mysql_update_sql(dialect, model, names, alias_rows)
-          sets = update_columns(model.primary_key, names).map { |name| mysql_set(dialect, name, alias_rows) }
+        def mysql_update_sql(dialect, columns, alias_rows)
+          sets = columns.map { |pair| mysql_set(dialect, pair[0], pair[1], alias_rows) }
           " ON DUPLICATE KEY UPDATE #{sets.join(', ')}"
         end
 
@@ -724,16 +846,27 @@ module Kiln
           cols
         end
 
-        def excluded_sets(dialect, keys, names)
-          update_columns(keys, names).map do |name|
-            quoted = Sql.quote(dialect, name)
-            "#{quoted} = EXCLUDED.#{quoted}"
+        def conflict_columns(model, names, mode)
+          available = mode.settings.timestamps ? names - ImportOptions::CREATE_STAMPS : names
+          columns = mode.settings.updates || update_columns(model.primary_key, available).map { |name| [name, name] }
+          raise ArgumentError, 'missing update source column' unless columns.all? { |pair| names.include?(pair[1]) }
+          if mode.return_rows && columns.any? { |pair| model.primary_key.include?(pair[0]) }
+            raise UnsupportedReturn, 'returning: updated primary key'
+          end
+
+          columns
+        end
+
+        def excluded_sets(dialect, columns)
+          columns.map do |pair|
+            "#{Sql.quote(dialect, pair[0])} = EXCLUDED.#{Sql.quote(dialect, pair[1])}"
           end.join(', ')
         end
 
-        def mysql_set(dialect, name, alias_rows)
+        def mysql_set(dialect, name, source, alias_rows)
           quoted = Sql.quote(dialect, name)
-          alias_rows ? "#{quoted} = #{Sql.quote(dialect, 'kiln_new')}.#{quoted}" : "#{quoted} = VALUES(#{quoted})"
+          value = Sql.quote(dialect, source)
+          alias_rows ? "#{quoted} = #{Sql.quote(dialect, 'kiln_new')}.#{value}" : "#{quoted} = VALUES(#{value})"
         end
       end
 
@@ -777,10 +910,11 @@ module Kiln
           copy_chunk(encoded_rows, 0, encoded_rows.length * COPY_LIMIT, stamp)[0]
         end
 
-        def copy_chunk(encoded_rows, offset, limit, stamp = nil)
+        def copy_chunk(encoded_rows, offset, limit, stamp = nil, last = nil)
           chunk = (+'').b
           i = offset
-          while i < encoded_rows.length
+          last ||= encoded_rows.length
+          while i < last
             row = copy_row(encoded_rows[i], stamp)
             break if i > offset && chunk.bytesize + row.bytesize > limit
 

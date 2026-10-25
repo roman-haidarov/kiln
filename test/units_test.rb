@@ -18,7 +18,7 @@ end
 def route_call(router, verb, path)
   req = Kiln::HTTP::Request.new(verb, path, {}, nil)
   res = Kiln::HTTP::Response.new
-  router.call(Kiln::Routing::Context.new(req, res, nil, 'route', 0.0))
+  router.call(Kiln::Routing::Context.new(req, res, 'route', 0.0))
   [req, res]
 end
 
@@ -230,7 +230,7 @@ check 'Date header is recognized case-insensitively',
       wire.scan(/(?:\A|\r\n)Date:/i).size == 1 && wire.include?("DATE: custom\r\n")
 
 r = begin
-  Kiln::Server::Base.new(nil, nil, log: nil, port: 0, coop_budget: -1)
+  Kiln::Server::Base.new(nil, log: nil, port: 0, coop_budget: -1)
   :accepted
 rescue ArgumentError
   :rejected
@@ -327,7 +327,7 @@ check 'nested scope prefixes routes', res.body == 'ok'
 req, res = route_call(configured, 'GET', '/api/users/42')
 check 'configure mounts module routes', res.body == 'user=42' && req.params['id'] == '42'
 direct_res = Kiln::HTTP::Response.new
-RouterBookController.index(Kiln::Routing::Context.new(nil, direct_res, nil, 'resource', 0.0))
+RouterBookController.index(Kiln::Routing::Context.new(nil, direct_res, 'resource', 0.0))
 check 'resource controller procedure accepts context', direct_res.body == 'index'
 resource_router = Kiln::Routing::Router.new.namespace('/api') do |api|
   api.configure(RouterBookController)
@@ -342,18 +342,18 @@ end
 ].each do |verb, path, expected|
   req = Kiln::HTTP::Request.new(verb, path, {}, nil)
   res = Kiln::HTTP::Response.new
-  resource_router.call(Kiln::Routing::Context.new(req, res, nil, 'resource', 0.0))
+  resource_router.call(Kiln::Routing::Context.new(req, res, 'resource', 0.0))
   check "resources maps #{verb} #{path}", res.body == expected
 end
 book_actions = { show: RouterBookController.method(:show), create: RouterBookController.method(:create) }
 limited_resources = Kiln::Routing::Router.new.resources('/books', book_actions, only: [:show])
 req = Kiln::HTTP::Request.new('POST', '/books', {}, nil)
 res = Kiln::HTTP::Response.new
-limited_resources.call(Kiln::Routing::Context.new(req, res, nil, 'resource', 0.0))
+limited_resources.call(Kiln::Routing::Context.new(req, res, 'resource', 0.0))
 check 'resources only registers selected actions', res.status == 404
 
 puts '-- Routing::Context'
-ctx = Kiln::Routing::Context.new(nil, nil, nil, 't1', Kiln::Runtime.now + 0.5)
+ctx = Kiln::Routing::Context.new(nil, nil, 't1', Kiln::Runtime.now + 0.5)
 check 'all: result order preserved; nil and false are valid', ctx.all([lambda {
   Kernel.sleep 0.02
   1
@@ -391,14 +391,14 @@ ctx.all([lambda {
   seen << Kiln::Runtime.deadline.positive?
 }])
 check 'subtask inherits request id and deadline', seen.pop == 't1' && seen.pop == true
-late = Kiln::Routing::Context.new(nil, nil, nil, 't2', Kiln::Runtime.now - 1)
+late = Kiln::Routing::Context.new(nil, nil, 't2', Kiln::Runtime.now - 1)
 r = begin
   late.all([-> { 1 }])
 rescue Kiln::Runtime::DeadlineExceeded
   :deadline
 end
 check 'all does not start tasks after deadline', r == :deadline
-standalone = Kiln::Routing::Context.new(nil, nil, nil, 'sleep', Kiln::Runtime.now + 0.03)
+standalone = Kiln::Routing::Context.new(nil, nil, 'sleep', Kiln::Runtime.now + 0.03)
 t = Kiln::Runtime.now
 r = begin
   standalone.sleep(1)
@@ -472,7 +472,7 @@ class FailHandler
   def call(_ctx) = raise(ArgumentError, 'boom')
 end
 guard_req = Kiln::HTTP::Request.new('GET', '/', {}, nil)
-guard_ctx = Kiln::Routing::Context.new(guard_req, Kiln::HTTP::Response.new, nil, 'g', 0.0)
+guard_ctx = Kiln::Routing::Context.new(guard_req, Kiln::HTTP::Response.new, 'g', 0.0)
 r = begin
   Kiln::Middleware::AccessLog.new(OkHandler.new, BrokenLog.new).call(guard_ctx)
   guard_ctx.res.status
@@ -481,7 +481,7 @@ rescue Exception => e
 end
 check 'Middleware::AccessLog: logging failure does not erase completed response', r == 201
 outer = Queue.new
-guard_ctx = Kiln::Routing::Context.new(guard_req, Kiln::HTTP::Response.new, nil, 'g', 0.0)
+guard_ctx = Kiln::Routing::Context.new(guard_req, Kiln::HTTP::Response.new, 'g', 0.0)
 def guarded(middleware, ctx, mark)
   middleware.call(ctx)
 ensure
@@ -639,7 +639,7 @@ end
 check 'routes cannot be added after seal!', r == :frozen && sealed.sealed?
 sreq = Kiln::HTTP::Request.new('DELETE', '/static', {}, nil)
 sres = Kiln::HTTP::Response.new
-sealed.call(Kiln::Routing::Context.new(sreq, sres, nil, 's', 0.0))
+sealed.call(Kiln::Routing::Context.new(sreq, sres, 's', 0.0))
 check 'DELETE route and shared empty params', sres.body == 'd' && sreq.params.frozen? && sreq.params.empty?
 
 puts '-- Runtime::Pool: boundary cases'
@@ -747,7 +747,7 @@ bad_cfg = [{ max_conns: 0 }, { read_timeout: 0 }, { request_timeout: -1 }, { wri
            { kill_grace: -0.1 }, { max_body: -1 }, { shards: 0 },
            { read_timeout: Float::INFINITY }, { kill_grace: Float::INFINITY }, { request_timeout: 0.0 / 0.0 }]
 rejected = bad_cfg.count do |cfg|
-  Kiln::Server::Base.new(nil, nil, log: nil, port: 0, **cfg)
+  Kiln::Server::Base.new(nil, log: nil, port: 0, **cfg)
   false
 rescue ArgumentError
   true

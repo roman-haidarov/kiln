@@ -147,7 +147,7 @@ class ClosedFlagSocket
   end
 end
 
-server = Kiln::Server::Base.new(nil, nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
+server = Kiln::Server::Base.new(nil, log: Kiln::Observability::Log.new(StringIO.new), port: 0, host: '127.0.0.1',
                                           max_conns: 1)
 server.instance_variable_set(:@finished, Queue.new)
 server.instance_variable_set(:@reap_wake, SizedQueue.new(1))

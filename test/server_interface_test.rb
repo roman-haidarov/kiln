@@ -25,21 +25,21 @@ end
 
 log = Kiln::Observability::Log.new(StringIO.new)
 
-event = Kiln::Server.new(->(ctx) { ctx.res.text('ok') }, nil, log: log, port: 0)
+event = Kiln::Server.new(->(ctx) { ctx.res.text('ok') }, log: log, port: 0)
 check('event is the default backend', event.backend == :event)
 exposes(event, 'event exposes the server contract')
 cycles(event, 'event starts and shuts down through the facade')
 
-base = Kiln::Server.new(->(ctx) { ctx.res.text('ok') }, nil, log: log, port: 0, host: '127.0.0.1', backend: :base)
+base = Kiln::Server.new(->(ctx) { ctx.res.text('ok') }, log: log, port: 0, host: '127.0.0.1', backend: :base)
 check('base backend is selectable', base.backend == :base)
 exposes(base, 'base exposes the server contract')
 cycles(base, 'base starts and shuts down through the facade')
 
 rejects('unsupported event option is rejected', 'kill_grace') do
-  Kiln::Server.new(nil, nil, log: log, port: 0, kill_grace: 1.0)
+  Kiln::Server.new(nil, log: log, port: 0, kill_grace: 1.0)
 end
 rejects('unknown backend is rejected', 'backend') do
-  Kiln::Server.new(nil, nil, log: log, port: 0, backend: :other)
+  Kiln::Server.new(nil, log: log, port: 0, backend: :other)
 end
 
 log.close

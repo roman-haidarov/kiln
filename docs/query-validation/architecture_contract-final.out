@@ -1,0 +1,10 @@
+ok   import preserves contiguous column groups
+ok   import retains original input indexes
+ok   import distinguishes missing fields from NULL
+ok   import page clamps its upper bound
+ok   import keeps SQL and bind ordering
+ok   import never changes source rows
+ok   predicate context preserves left-to-right binds
+ok   predicate context numbers each placeholder
+ok   database error classification preserves constraints
+ok   database error classification preserves fallback

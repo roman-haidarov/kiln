@@ -179,7 +179,7 @@ check 'If-Range with the date keeps the range',
       request(app, '/files/a.txt', { 'Range' => 'bytes=0-4', 'If-Range' => STAMP_TEXT }).status == 206
 head_req = Kiln::HTTP::Request.new('HEAD', '/files/a.txt', { 'range' => 'bytes=0-1' }, nil)
 head_res = Kiln::HTTP::Response.new
-app.call(Kiln::Routing::Context.new(head_req, head_res, nil, 'head', Kiln::Runtime.now + 2))
+app.call(Kiln::Routing::Context.new(head_req, head_res, 'head', Kiln::Runtime.now + 2))
 check 'HEAD ignores Range', head_res.status == 200 && head_res.stream_length == 12 &&
                             head_res.headers['Content-Range'].nil?
 
@@ -190,7 +190,7 @@ tail = request(app, '/files/big.bin', { 'Range' => 'bytes=1000-' })
 check 'a large range', tail.status == 206 && tail.body == BIG.byteslice(1000, BIG_SIZE - 1000)
 held_req = Kiln::HTTP::Request.new('GET', '/files/big.bin', {}, nil)
 held_res = Kiln::HTTP::Response.new
-app.call(Kiln::Routing::Context.new(held_req, held_res, nil, 'held', Kiln::Runtime.now + 2))
+app.call(Kiln::Routing::Context.new(held_req, held_res, 'held', Kiln::Runtime.now + 2))
 File.rename(big_path, "#{big_path}.old")
 File.symlink(File.join(outside, 'secret.txt'), big_path)
 held_body = (+'').b
@@ -217,7 +217,7 @@ network.seal!
   name = backend == :event ? "event/#{handlers}" : 'base'
   options = { log:, port: 0, host: '127.0.0.1', backend: }
   options[:handlers] = handlers if backend == :event
-  server = Kiln::Server.new(network, nil, **options)
+  server = Kiln::Server.new(network, **options)
   server.start
   port = server.port
 

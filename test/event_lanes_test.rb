@@ -38,7 +38,7 @@ router = Kiln::Routing::Router.new
                                                        ctx.res.text("piped\n")
                                                      })
                               .seal!
-lanes = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: 4)
+lanes = Kiln::Server::Event.new(router, log: log, port: 0, handlers: 4)
 lanes.start
 lp = lanes.port
 slow_result = Queue.new
@@ -77,7 +77,7 @@ graceful_client.join
 pipe_response = waiting.pop
 check 'lanes: shutdown finishes every request already parsed from a pipeline',
       left.zero? && SHUTDOWN_CALLS.size == 2 && pipe_response.scan('HTTP/1.1 200 ').size == 3 && lanes.connections.zero?
-stuck = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: 2)
+stuck = Kiln::Server::Event.new(router, log: log, port: 0, handlers: 2)
 stuck.start
 stuck_data = (1..3).map { |i| "GET /long HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n" }.join
 stuck_client = Thread.new { exchange(stuck.port, stuck_data, 3.0) }
@@ -88,7 +88,7 @@ took = Kiln::Runtime.now - t0
 stuck_client.join
 check 'lanes: grace expired -> active and queued handlers are counted',
       stuck_left == 3 && took < 2.0 && stuck.connections.zero?
-after_stuck = Kiln::Server::Event.new(router, nil, log: log, port: 0)
+after_stuck = Kiln::Server::Event.new(router, log: log, port: 0)
 restarted = begin
   after_stuck.start
   after_stuck.shutdown(grace: 0.5)
@@ -103,14 +103,14 @@ class CrashingPump < Kiln::Server::Event
     raise 'pump crashed'
   end
 end
-crashed = CrashingPump.new(router, nil, log: log, port: 0, handlers: 1)
+crashed = CrashingPump.new(router, log: log, port: 0, handlers: 1)
 crashed.start
 exchange(crashed.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", 0.5)
 t0 = Kiln::Runtime.now
 crashed.shutdown(grace: 0.2)
 check 'lanes: shutdown returns in bounded time when the loop thread has died', Kiln::Runtime.now - t0 < 3.0
 
-closing = Kiln::Server::Event.new(router, nil, log: log, port: 0, handlers: 2)
+closing = Kiln::Server::Event.new(router, log: log, port: 0, handlers: 2)
 closing.start
 pipe_out = Queue.new
 CALLS.clear
@@ -130,7 +130,7 @@ check 'lanes: during shutdown only the last response on a connection says Connec
       ).include?('Connection: close')
 
 late_app = ->(ctx) { ctx.res.text("ran\n") }
-expired = Kiln::Server::Event.new(late_app, nil, log:, port: 0, handlers: 1, request_timeout: 0.000001)
+expired = Kiln::Server::Event.new(late_app, log:, port: 0, handlers: 1, request_timeout: 0.000001)
 expired.start
 late_replies = Array.new(20) { exchange(expired.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n", 1.0) }
 expired.shutdown(grace: 0.5)
@@ -197,7 +197,7 @@ order_router = Kiln::Routing::Router.new
                                                  })
                                     .get('/fast', ->(ctx) { ctx.res.text('fast') })
                                     .seal!
-order_server = Kiln::Server::Event.new(order_router, nil, log: log, port: 0, handlers: 2, request_timeout: 60)
+order_server = Kiln::Server::Event.new(order_router, log: log, port: 0, handlers: 2, request_timeout: 60)
 order_server.start
 slow_sock = TCPSocket.new('127.0.0.1', order_server.port)
 slow_sock.write("GET /slow HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")

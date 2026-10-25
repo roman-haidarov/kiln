@@ -1,0 +1,25 @@
+ok   request policy 0
+ok   request policy 1
+ok   request policy 2
+ok   request policy 3
+ok   request policy 4
+ok   request policy 5
+ok   request policy 6
+ok   request policy 7
+ok   absolute form normalizes origin and authority
+ok   invalid absolute authority leaves headers intact
+ok   conflicting framing rejected
+ok   HTTP 1.0 transfer coding rejected
+ok   unsupported expectation rejected
+ok   continue is HTTP 1.1 only
+ok   chunked is accepted
+ok   repeated chunked rejected
+ok   coding after chunked rejected
+ok   empty coding rejected
+ok   unsupported coding distinguished
+ok   HEAD preserves representation length
+ok   body forbidden for 204
+ok   body forbidden for 205
+ok   body forbidden for 304
+ok   invalid fixed status becomes internal error
+ok   event configuration preserves native integer layout

@@ -128,12 +128,10 @@ rescue Kiln::DB::UnsupportedReturn
   print "bad-return\n"
 end
 
-begin
-  SqlUser.import([{ 'id' => 1, 'name' => 'a' }], { on_duplicate_key_ignore: true })
-  print "mysql-ignore-miss\n"
-rescue Kiln::DB::UnsafeImportSchema
-  print "mysql-ignore\n"
-end
+ignore_part = Kiln::DB::ImportPart.new('id,name', %w[id name], [[1, 'a']], [0])
+ignore_sql = Kiln::DB::Import.insert_sql(SqlUser, ignore_part, Kiln::DB::ImportMode.new(true, false, false), false)[0]
+need('mysql-ignore', ignore_sql == 'INSERT IGNORE INTO `users` (`id`, `name`) VALUES (?, ?)')
+print "mysql-ignore\n"
 
 empty = SqlUser.import([])
 print 'empty '

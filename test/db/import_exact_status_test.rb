@@ -58,7 +58,7 @@ def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)
   ambiguous = 'pg'
   if dialect == :mysql
     begin
-      ExactMail.import([{ 'id' => 1, 'name' => 'ada' }], { on_duplicate_key_update: true })
+      ExactMail.import([{ 'id' => 1, 'name' => 'ada' }], { on_duplicate_key_update: true, returning: true })
       ambiguous = 'passed'
     rescue Kiln::DB::AmbiguousConflict
       ambiguous = 'blocked'

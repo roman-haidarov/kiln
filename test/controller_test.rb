@@ -196,7 +196,7 @@ server_log = Kiln::Observability::Log.new(StringIO.new)
 [[:event, 0], [:event, 2], [:base, 0]].each do |backend, handlers|
   options = { log: server_log, host: '127.0.0.1', port: 0, backend: backend }
   options[:handlers] = handlers if backend == :event
-  server = Kiln::Server.new(router, nil, **options).start
+  server = Kiln::Server.new(router, **options).start
   label = backend == :event ? "event, handlers: #{handlers}" : 'base'
   begin
     check "#{label}: collection route", fetch_body(server.port, '/users/search?q=io').end_with?('search io')

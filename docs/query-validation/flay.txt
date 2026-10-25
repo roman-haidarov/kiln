@@ -1,0 +1,455 @@
+Total score (lower is better) = 8333
+
+1) IDENTICAL code found in :lasgn (mass*5 = 650)
+  bench/db/import_pluck.rb:102
+  bench/db/statement_reuse.rb:99
+  test/db/fix_regression_test.rb:460
+  test/db/stream_import_test.rb:311
+  test/db/tls_policy_test.rb:37
+
+2) IDENTICAL code found in :defn (mass*5 = 525)
+  test/compress_test.rb:13
+  test/features_test.rb:11
+  test/json_test.rb:11
+  test/static_test.rb:12
+  test/stream_test.rb:11
+
+3) Similar code found in :call (mass = 360)
+  test/db/gate_a_test.rb:230
+  test/db/gate_a_test.rb:232
+  test/db/gate_a_test.rb:234
+  test/db/gate_a_test.rb:236
+  test/db/gate_c_test.rb:201
+  test/db/gate_c_test.rb:203
+  test/db/gate_c_test.rb:205
+  test/db/gate_c_test.rb:207
+  test/db/gate_orm_test.rb:185
+  test/db/gate_orm_test.rb:187
+  test/db/gate_orm_test.rb:189
+  test/db/gate_orm_test.rb:191
+  test/db/import_exact_status_test.rb:92
+  test/db/import_exact_status_test.rb:94
+  test/db/import_exact_status_test.rb:96
+  test/db/import_exact_status_test.rb:98
+  test/db/q_gates_test.rb:320
+  test/db/q_gates_test.rb:322
+  test/db/q_gates_test.rb:324
+  test/db/q_gates_test.rb:326
+
+4) IDENTICAL code found in :defn (mass*2 = 336)
+  test/db/gate_c_test.rb:62
+  test/db/q_gates_test.rb:35
+
+5) IDENTICAL code found in :defn (mass*2 = 312)
+  test/event_lanes_test.rb:140
+  test/event_server_test.rb:383
+
+6) IDENTICAL code found in :defn (mass*3 = 252)
+  test/compress_test.rb:25
+  test/static_test.rb:42
+  test/stream_test.rb:33
+
+7) IDENTICAL code found in :while (mass*2 = 200)
+  test/support.rb:67
+  test/support.rb:100
+
+8) Similar code found in :defn (mass = 198)
+  test/db/copy_import_test.rb:60
+  test/db/copy_import_test.rb:72
+  test/db/row_batch_test.rb:62
+  test/db/row_batch_test.rb:74
+  test/db/typed_decode_test.rb:31
+  test/db/typed_decode_test.rb:43
+
+9) IDENTICAL code found in :defn (mass*2 = 160)
+  bench/db/plan_skew.rb:8
+  test/db/pg_stmt_cache_test.rb:22
+
+10) IDENTICAL code found in :lasgn (mass*3 = 153)
+  bench/http_pump_parts.rb:48
+  bench/http_pump_parts.rb:57
+  bench/http_pump_parts.rb:64
+
+11) Similar code found in :defn (mass = 150)
+  bench/db/gate_b.rb:328
+  test/db/gate_a_test.rb:58
+
+12) IDENTICAL code found in :defn (mass*2 = 148)
+  test/db/copy_import_test.rb:52
+  test/db/typed_decode_test.rb:23
+
+13) Similar code found in :defn (mass = 147)
+  bench/db/import_pluck.rb:14
+  bench/db/statement_reuse.rb:85
+  test/db/typed_decode_test.rb:16
+
+14) IDENTICAL code found in :lasgn (mass*2 = 124)
+  bench/compare.rb:96
+  bench/cpu_compare.rb:41
+
+15) Similar code found in :until (mass = 117)
+  bench/compare.rb:11
+  bench/cpu_compare.rb:11
+  bench/stress.rb:12
+
+16) IDENTICAL code found in :defn (mass*2 = 116)
+  test/db/pipeline_group_fault_test.rb:45
+  test/db/pipeline_tx_fault_test.rb:38
+
+17) IDENTICAL code found in :while (mass*2 = 108)
+  test/db/row_batch_test.rb:32
+  test/db/typed_decode_test.rb:212
+
+18) IDENTICAL code found in :while (mass*2 = 104)
+  test/db/stream_import_test.rb:205
+  test/db/stream_import_test.rb:224
+
+19) Similar code found in :call (mass = 100)
+  bench/db/gate_b.rb:421
+  bench/db/gate_b.rb:423
+  bench/db/gate_b.rb:425
+  bench/db/gate_b.rb:427
+
+20) IDENTICAL code found in :defn (mass*2 = 100)
+  test/db/pipeline_group_fault_test.rb:23
+  test/db/pipeline_tx_fault_test.rb:23
+
+21) Similar code found in :call (mass = 96)
+  test/controller_test.rb:167
+  test/units_test.rb:260
+  test/units_test.rb:284
+  test/units_test.rb:285
+  test/units_test.rb:301
+  test/units_test.rb:307
+
+22) Similar code found in :call (mass = 96)
+  test/db/docs_examples_test.rb:43
+  test/db/gate_c_test.rb:99
+  test/db/gate_orm_test.rb:111
+  test/db/q_gates_test.rb:155
+
+23) Similar code found in :defn (mass = 92)
+  test/db/stmt_cache_test.rb:62
+  test/db/stmt_cache_test.rb:193
+
+24) IDENTICAL code found in :while (mass*2 = 92)
+  test/db/stream_import_test.rb:213
+  test/db/stream_import_test.rb:232
+
+25) IDENTICAL code found in :iter (mass*2 = 88)
+  kiln/db/batch.rb:451
+  kiln/db/batch.rb:461
+
+26) Similar code found in :when (mass = 87)
+  bench/router_constants.rb:19
+  bench/router_constants.rb:22
+  bench/router_constants.rb:25
+
+27) Similar code found in :call (mass = 85)
+  bench/db/import_pluck.rb:74
+  bench/db/import_pluck.rb:84
+  bench/db/import_pluck.rb:86
+  bench/db/row_transfer.rb:29
+  bench/db/statement_reuse.rb:19
+
+28) Similar code found in :defn (mass = 84)
+  test/db/copy_import_test.rb:41
+  test/db/review_fixes_test.rb:41
+
+29) Similar code found in :while (mass = 84)
+  test/db/gate_c_test.rb:124
+  test/db/q_gates_test.rb:191
+  test/db/q_gates_test.rb:200
+
+30) Similar code found in :defn (mass = 82)
+  kiln/db/number.rb:69
+  kiln/db/number.rb:183
+
+31) IDENTICAL code found in :dstr (mass*2 = 76)
+  bench/gzip_call.rb:9
+  test/compress_test.rb:313
+
+32) Similar code found in :defn (mass = 74)
+  bench/db/row_transfer.rb:18
+  test/db/review_fixes_test.rb:48
+
+33) IDENTICAL code found in :lasgn (mass*2 = 72)
+  test/backpressure_order_test.rb:66
+  test/backpressure_order_test.rb:90
+
+34) IDENTICAL code found in :defn (mass*2 = 72)
+  test/listen_test.rb:13
+  test/tls_test.rb:13
+
+35) Similar code found in :defn (mass = 68)
+  kiln/db/number.rb:52
+  kiln/db/number.rb:170
+
+36) Similar code found in :defn (mass = 68)
+  test/db/gate_c_test.rb:33
+  test/db/gate_orm_test.rb:61
+
+37) Similar code found in :call (mass = 66)
+  test/db/query_sql_test.rb:59
+  test/db/query_sql_test.rb:63
+  test/db/query_sql_test.rb:88
+
+38) IDENTICAL code found in :block (mass*2 = 64)
+  kiln/runtime/tasks.rb:24
+  kiln/transport/conn.rb:115
+
+39) Similar code found in :lasgn (mass = 64)
+  test/db/pipeline_group_fault_test.rb:161
+  test/db/pipeline_test.rb:33
+  test/db/pipeline_test.rb:82
+  test/db/pipeline_tx_fault_test.rb:46
+
+40) Similar code found in :call (mass = 64)
+  test/db/q_gates_test.rb:195
+  test/db/query_sql_test.rb:94
+
+41) Similar code found in :block (mass = 63)
+  test/db/gate_a_test.rb:72
+  test/db/gate_a_test.rb:75
+  test/db/gate_a_test.rb:92
+
+42) Similar code found in :call (mass = 57)
+  test/db/gate_a_test.rb:130
+  test/db/gate_a_test.rb:135
+  test/db/gate_a_test.rb:153
+
+43) Similar code found in :lasgn (mass = 54)
+  test/db/docs_examples_test.rb:139
+  test/db/docs_examples_test.rb:144
+
+44) Similar code found in :call (mass = 54)
+  test/db/gate_c_test.rb:98
+  test/db/gate_orm_test.rb:110
+  test/db/q_gates_test.rb:154
+
+45) Similar code found in :defn (mass = 54)
+  test/db/review_fixes_test.rb:221
+  test/db/typed_decode_test.rb:113
+  test/db/typed_decode_test.rb:155
+
+46) Similar code found in :defn (mass = 54)
+  test/db/stream_import_test.rb:128
+  test/db/stream_import_test.rb:170
+
+47) Similar code found in :call (mass = 51)
+  test/db/docs_examples_test.rb:86
+  test/db/docs_examples_test.rb:87
+  test/db/docs_examples_test.rb:91
+
+48) Similar code found in :defs (mass = 50)
+  kiln/db/number.rb:19
+  kiln/db/number.rb:24
+
+49) Similar code found in :call (mass = 50)
+  test/db/docs_examples_test.rb:96
+  test/db/docs_examples_test.rb:98
+
+50) Similar code found in :defn (mass = 50)
+  test/db/gate_a_test.rb:29
+  test/db/gate_a_test.rb:34
+
+51) Similar code found in :if (mass = 48)
+  kiln/db/number.rb:45
+  kiln/db/number.rb:162
+  kiln/db/number.rb:163
+
+52) Similar code found in :defn (mass = 48)
+  kiln/db/relation.rb:117
+  kiln/db/relation.rb:127
+
+53) Similar code found in :rescue (mass = 48)
+  test/db/audit_regression_test.rb:81
+  test/db/schema_guard_test.rb:127
+
+54) Similar code found in :iter (mass = 48)
+  test/db/audit_regression_test.rb:115
+  test/db/audit_regression_test.rb:123
+
+55) Similar code found in :rescue (mass = 48)
+  test/db/import_exact_status_test.rb:48
+  test/db/import_exact_status_test.rb:61
+
+56) Similar code found in :defn (mass = 44)
+  kiln/db/number.rb:148
+  kiln/db/number.rb:260
+
+57) Similar code found in :while (mass = 44)
+  kiln/http/path_syntax.rb:25
+  kiln/routing/router/dispatch.rb:52
+
+58) Similar code found in :block (mass = 44)
+  test/db/fix_regression_test.rb:58
+  test/db/fix_regression_test.rb:67
+
+59) Similar code found in :lasgn (mass = 44)
+  test/db/fix_regression_test.rb:393
+  test/db/stream_import_test.rb:271
+
+60) Similar code found in :lasgn (mass = 44)
+  test/db/gate_c_test.rb:120
+  test/db/q_gates_test.rb:187
+
+61) Similar code found in :lasgn (mass = 42)
+  kiln/db/sql/sources.rb:91
+  kiln/db/sql/sources.rb:97
+
+62) Similar code found in :defn (mass = 42)
+  test/controller_test.rb:11
+  test/server_interface_test.rb:19
+
+63) Similar code found in :lasgn (mass = 42)
+  test/static_test.rb:204
+  test/static_test.rb:206
+
+64) Similar code found in :lasgn (mass = 40)
+  test/pool_close_test.rb:180
+  test/units_test.rb:646
+
+65) Similar code found in :lasgn (mass = 40)
+  test/pool_shutdown_test.rb:7
+  test/pool_shutdown_test.rb:26
+
+66) Similar code found in :rescue (mass = 38)
+  test/db/pipeline_test.rb:47
+  test/db/q_gates_test.rb:240
+
+67) Similar code found in :call (mass = 38)
+  test/db/q_gates_test.rb:184
+  test/db/query_sql_test.rb:78
+
+68) Similar code found in :call (mass = 36)
+  bench/compare.rb:109
+  bench/cpu_compare.rb:51
+
+69) Similar code found in :if (mass = 36)
+  kiln/db/sql/expressions.rb:67
+  kiln/db/sql/expressions.rb:70
+
+70) Similar code found in :resbody (mass = 36)
+  kiln/server/base/response.rb:177
+  kiln/server/base/response.rb:221
+
+71) Similar code found in :and (mass = 36)
+  test/compress_test.rb:176
+  test/compress_test.rb:230
+
+72) Similar code found in :array (mass = 36)
+  test/db/api_surface_test.rb:3
+  test/units_test.rb:589
+
+73) Similar code found in :call (mass = 36)
+  test/db/docs_examples_test.rb:88
+  test/db/q_gates_test.rb:183
+
+74) Similar code found in :call (mass = 36)
+  test/db/query_sql_test.rb:91
+  test/db/query_sql_test.rb:92
+
+75) Similar code found in :iter (mass = 36)
+  test/db/tls_policy_test.rb:52
+  test/db/tls_policy_test.rb:55
+
+76) Similar code found in :rescue (mass = 36)
+  test/features_test.rb:277
+  test/features_test.rb:309
+
+77) Similar code found in :call (mass = 36)
+  test/json_test.rb:191
+  test/static_test.rb:163
+
+78) Similar code found in :call (mass = 36)
+  test/units_test.rb:127
+  test/units_test.rb:822
+
+79) Similar code found in :lasgn (mass = 34)
+  bench/db/row_transfer.rb:166
+  bench/db/row_transfer.rb:176
+
+80) Similar code found in :block (mass = 34)
+  bench/regression_summary.rb:33
+  bench/regression_summary.rb:39
+
+81) Similar code found in :cdecl (mass = 34)
+  kiln/http/response.rb:195
+  kiln/http/response.rb:196
+
+82) Similar code found in :resbody (mass = 34)
+  kiln/server/event/streams.rb:44
+  kiln/server/event/streams.rb:89
+
+83) Similar code found in :call (mass = 34)
+  test/compress_test.rb:61
+  test/compress_test.rb:65
+
+84) Similar code found in :call (mass = 34)
+  test/controller_test.rb:129
+  test/controller_test.rb:131
+
+85) Similar code found in :block (mass = 34)
+  test/db/gate_a_test.rb:106
+  test/db/gate_a_test.rb:110
+
+86) Similar code found in :lasgn (mass = 34)
+  test/db/gen_emit_test.rb:5
+  test/db/query_sql_test.rb:142
+
+87) Similar code found in :and (mass = 34)
+  test/event_server_test.rb:319
+  test/units_test.rb:179
+
+88) Similar code found in :call (mass = 34)
+  test/event_server_test.rb:342
+  test/event_server_test.rb:432
+
+89) Similar code found in :call (mass = 32)
+  bench/db/gate_b.rb:209
+  bench/db/gate_b.rb:210
+
+90) Similar code found in :call (mass = 32)
+  bench/regression_summary.rb:99
+  bench/regression_summary.rb:183
+
+91) Similar code found in :iter (mass = 32)
+  bench/stress.rb:137
+  bench/stress.rb:142
+
+92) Similar code found in :defn (mass = 32)
+  kiln/db/relation/building.rb:20
+  kiln/db/relation/building.rb:26
+
+93) Similar code found in :defn (mass = 32)
+  kiln/server/base/io.rb:27
+  kiln/server/base/io.rb:56
+
+94) Similar code found in :defn (mass = 32)
+  kiln/server/base/server.rb:472
+  kiln/server/base/server.rb:478
+
+95) Similar code found in :and (mass = 32)
+  test/compress_test.rb:164
+  test/compress_test.rb:199
+
+96) Similar code found in :rescue (mass = 32)
+  test/db/audit_regression_test.rb:104
+  test/db/schema_guard_test.rb:54
+
+97) Similar code found in :call (mass = 32)
+  test/db/audit_regression_test.rb:135
+  test/db/review_fixes_test.rb:169
+
+98) Similar code found in :lasgn (mass = 32)
+  test/features_test.rb:162
+  test/features_test.rb:173
+
+99) Similar code found in :lasgn (mass = 32)
+  test/server_lifecycle_test.rb:31
+  test/server_lifecycle_test.rb:58
+
+100) Similar code found in :call (mass = 32)
+  test/timeouts_test.rb:33
+  test/timeouts_test.rb:70

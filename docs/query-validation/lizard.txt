@@ -1,0 +1,166 @@
+================================================
+  NLOC    CCN   token  PARAM  length  location  
+------------------------------------------------
+       5      2     26      2       5 kiln_free_components@24-28@ext/kiln_http.c
+      48     15    273      4      48 kiln_open_components@30-77@ext/kiln_http.c
+       6      4     46      3       6 kiln_skip_ows@79-84@ext/kiln_http.c
+       6      4     50      3       6 kiln_trim_ows@86-91@ext/kiln_http.c
+      28     15    189      3      28 kiln_quality@93-120@ext/kiln_http.c
+       8      7     90      3       8 kiln_gzip_kind@122-129@ext/kiln_http.c
+      37     14    253      5      37 kiln_accept_parameters@131-167@ext/kiln_http.c
+      31     10    191      2      31 kiln_http_accepts_gzip@169-199@ext/kiln_http.c
+      19     10    145      3      19 kiln_http_open_beneath@201-219@ext/kiln_http.c
+      16      6    148      2      16 kiln_common_index@274-289@ext/kiln_http.c
+       3      2     28      2       3 kiln_clean_value@291-293@ext/kiln_http.c
+      14      4    102      2      14 kiln_ascii@295-308@ext/kiln_http.c
+       9      4     79      2       9 kiln_crlf_only@310-318@ext/kiln_http.c
+       9      3     60      0       9 kiln_pick_parser@330-338@ext/kiln_http.c
+      56     23    516      5      57 kiln_scan_terminated@343-399@ext/kiln_http.c
+       9      3     80      4       9 kiln_http_scan@401-409@ext/kiln_http.c
+      10      7    101      6      10 kiln_http_scan_at@411-420@ext/kiln_http.c
+      25     22    104      1      25 kiln_tchar@422-446@ext/kiln_http.c
+       3      6     39      1       3 kiln_hex@448-450@ext/kiln_http.c
+       3      6     39      1       3 kiln_alnum@452-454@ext/kiln_http.c
+       4     11     53      1       4 kiln_subdelim@456-459@ext/kiln_http.c
+      11      4     62      2      11 kiln_token@461-471@ext/kiln_http.c
+       9      4     59      2       9 kiln_ctl@473-481@ext/kiln_http.c
+      14      6     79      2      14 kiln_digits@483-496@ext/kiln_http.c
+       6      4     45      3       6 kiln_ows@498-503@ext/kiln_http.c
+      81     32    483      3      81 kiln_chunk_size@505-585@ext/kiln_http.c
+      81     48    539      2      81 kiln_host@587-667@ext/kiln_http.c
+      23      9    132      2      23 kiln_recv@669-691@ext/kiln_http.c
+       3      1      9      0       3 kiln_recv_status@693-695@ext/kiln_http.c
+      10      4     63      1      10 kiln_socket_nonblock@699-708@ext/kiln_http.c
+      35     13    259      6      35 kiln_sendv@710-744@ext/kiln_http.c
+      25     12    167      1      28 kiln_peer_closed@746-773@ext/kiln_http.c
+       4      2     12      0       7 kiln_peer_closed_uses_rdhup@775-781@ext/kiln_http.c
+       3      1     33      4       3 kiln_scan_request_head@783-785@ext/kiln_http.c
+      10      2     52      0      10 kiln_uv_sigpipe_enter@49-58@ext/kiln_uv.c
+      16      3     83      0      16 kiln_uv_sigpipe_leave@60-75@ext/kiln_uv.c
+       5      2     24      1       5 kuv_stop_parsing@224-228@ext/kiln_uv.c
+       5      2     24      1       5 kuv_release_upgrade@230-234@ext/kiln_uv.c
+       5      2     23      1       5 kuv_body_complete@236-240@ext/kiln_uv.c
+       5      2     24      1       5 kuv_body_pause@242-246@ext/kiln_uv.c
+       5      2     24      1       5 kuv_body_resume@248-252@ext/kiln_uv.c
+       3      1     18      1       3 kuv_stream@254-256@ext/kiln_uv.c
+       3      1     26      1       3 kuv_out_bytes@258-260@ext/kiln_uv.c
+      15     10     97      1      15 kuv_wants_read@262-276@ext/kiln_uv.c
+      11      6     77      1      11 kuv_sync_read@278-288@ext/kiln_uv.c
+      13      6     73      0      13 kuv_resume_listeners@290-302@ext/kiln_uv.c
+      20      5    130      1      20 kuv_on_close@304-323@ext/kiln_uv.c
+       8      2     53      1       8 kuv_close@325-332@ext/kiln_uv.c
+       6      2     38      2       6 kuv_on_shutdown@334-339@ext/kiln_uv.c
+      19      5    107      1      19 kuv_tls_push@343-361@ext/kiln_uv.c
+      24     10    146      1      24 kuv_end@363-386@ext/kiln_uv.c
+      16      5    110      2      16 kuv_discard_setup_handles@388-403@ext/kiln_uv.c
+      18      5    107      1      18 kuv_queue_flush@405-422@ext/kiln_uv.c
+      14      6     69      2      14 kuv_spare_put@433-446@ext/kiln_uv.c
+      13      9    106      1      13 kuv_release_idle@448-460@ext/kiln_uv.c
+      29     11    165      4      29 kuv_reserve@462-490@ext/kiln_uv.c
+       8      2     67      5       8 kuv_append@492-499@ext/kiln_uv.c
+      17      5    131      5      17 kuv_append_pair@501-517@ext/kiln_uv.c
+      14      3     94      2      14 kuv_reply_and_close@519-532@ext/kiln_uv.c
+       9      3     54      2       9 kuv_error@534-542@ext/kiln_uv.c
+      12      6     89      1      12 kuv_maybe_continue@544-555@ext/kiln_uv.c
+       3      1     19      1       3 kuv_align8@557-559@ext/kiln_uv.c
+      32      8    303      4      32 kuv_req_make@561-592@ext/kiln_uv.c
+       7      2     46      2       7 kuv_consume@594-600@ext/kiln_uv.c
+      13      2     73      1      13 kuv_body_release@602-614@ext/kiln_uv.c
+      35     10    214      2      35 kuv_body_chunked@616-650@ext/kiln_uv.c
+      15      6    115      1      15 kuv_body_copy@652-666@ext/kiln_uv.c
+      12      5     70      1      12 kuv_body_feed@668-679@ext/kiln_uv.c
+      23     13    149      1      23 kuv_body_pump@681-703@ext/kiln_uv.c
+      14      5     42      1      14 kuv_error_reply@705-718@ext/kiln_uv.c
+      19      3     99      4      20 kuv_enqueue@720-739@ext/kiln_uv.c
+      14      5    102      3      14 kuv_start_body@741-754@ext/kiln_uv.c
+      10      4     58      1      10 kuv_track_head@756-765@ext/kiln_uv.c
+      77     24    475      1      77 kuv_parse@767-843@ext/kiln_uv.c
+      12      7     75      1      12 kuv_out_resume@845-856@ext/kiln_uv.c
+      14      8     80      1      14 kuv_ingest@858-871@ext/kiln_uv.c
+      26      8    192      3      26 kuv_alloc@873-898@ext/kiln_uv.c
+       5      1     21      1       5 kuv_handshake_done@900-904@ext/kiln_uv.c
+      40     16    252      3      40 kuv_tls_in@906-945@ext/kiln_uv.c
+      12      7     85      1      12 kuv_body_eof@947-958@ext/kiln_uv.c
+      14      4     84      1      14 kuv_finish_eof@960-973@ext/kiln_uv.c
+      26     12    146      1      26 kuv_on_read_end@975-1000@ext/kiln_uv.c
+      38     11    193      3      38 kuv_on_read@1002-1039@ext/kiln_uv.c
+       7      2     52      2       7 kuv_conn_init@1041-1047@ext/kiln_uv.c
+      40     12    302      1      42 kuv_accept_one@1049-1090@ext/kiln_uv.c
+      11      5     64      2      11 kuv_on_connection@1092-1102@ext/kiln_uv.c
+      10      5     89      0      10 kuv_tick_ms@1104-1113@ext/kiln_uv.c
+      25     10    140      2      25 kuv_expire_waiting@1115-1139@ext/kiln_uv.c
+      22     17    172      2      22 kuv_expire@1141-1162@ext/kiln_uv.c
+      10      4     65      1      10 kuv_on_timer@1164-1173@ext/kiln_uv.c
+      26     12    255      2      26 kiln_uv_configure@1175-1200@ext/kiln_uv.c
+      31      9    213      2      31 kiln_uv_adopt@1202-1232@ext/kiln_uv.c
+      30      9    186      0      30 kiln_uv_start@1234-1263@ext/kiln_uv.c
+       7      3     28      0       7 kiln_uv_abandon@1265-1271@ext/kiln_uv.c
+       3      1      9      0       3 kiln_uv_running@1273-1275@ext/kiln_uv.c
+       5      1     33      1       5 kiln_uv_error_text@1277-1281@ext/kiln_uv.c
+      14      6    119      1      14 kiln_uv_port@1283-1296@ext/kiln_uv.c
+       3      1     12      0       3 kiln_uv_fd@1298-1300@ext/kiln_uv.c
+       4      1     16      0       4 kiln_uv_poll@1302-1305@ext/kiln_uv.c
+       7      3     33      0       7 kiln_uv_settle@1307-1313@ext/kiln_uv.c
+       3      2     17      0       3 kiln_uv_timeout@1315-1317@ext/kiln_uv.c
+       3      2     21      1       3 kuv_out_blocked@1319-1321@ext/kiln_uv.c
+      28     11    159      0      28 kuv_take_ready@1323-1350@ext/kiln_uv.c
+      39     13    265      3      39 kiln_uv_next@1352-1390@ext/kiln_uv.c
+      37     16    243      2      37 kuv_after_write@1392-1428@ext/kiln_uv.c
+      29      6    187      4      29 kuv_queue_write@1430-1458@ext/kiln_uv.c
+      21      7    143      3      21 kuv_raw_owned@1460-1480@ext/kiln_uv.c
+      27      5    153      6      27 kuv_unsent@1482-1508@ext/kiln_uv.c
+      33     12    231      5      33 kuv_writev_now@1510-1542@ext/kiln_uv.c
+      12      7     93      5      12 kuv_try_direct@1544-1555@ext/kiln_uv.c
+       7      5     50      1       7 kuv_settle@1557-1563@ext/kiln_uv.c
+      39     21    263      2      39 kuv_send_finish@1565-1603@ext/kiln_uv.c
+      23     12    183      7      23 kiln_uv_send@1605-1627@ext/kiln_uv.c
+      10      6     62      2      10 kuv_live@1629-1638@ext/kiln_uv.c
+      15      5    128      4      15 kiln_uv_part@1640-1654@ext/kiln_uv.c
+       4      2     36      2       4 kiln_uv_backlog@1656-1659@ext/kiln_uv.c
+      10      2     51      2      10 kiln_uv_refuse@1661-1670@ext/kiln_uv.c
+      17      7    107      2      17 kiln_uv_abort@1672-1688@ext/kiln_uv.c
+      17      6    110      2      17 kiln_uv_end@1690-1706@ext/kiln_uv.c
+      16     10    102      3      16 kiln_uv_closes_after@1708-1723@ext/kiln_uv.c
+      12      4     83      1      12 kuv_body_continue@1725-1736@ext/kiln_uv.c
+      22      6    153      3      22 kuv_body_hand@1738-1759@ext/kiln_uv.c
+      19     10    149      4      19 kiln_uv_body_take@1761-1779@ext/kiln_uv.c
+      30     11    168      3      30 kiln_uv_body_finish@1781-1810@ext/kiln_uv.c
+      25      8    183      4      25 kiln_uv_tunnel@1812-1836@ext/kiln_uv.c
+      14      4     80      2      14 kiln_uv_tls_alpn@1838-1851@ext/kiln_uv.c
+      10      5     73      2      10 kiln_uv_tls_version@1853-1862@ext/kiln_uv.c
+      49     14    286      1      49 kuv_flush_tls@1864-1912@ext/kiln_uv.c
+      27      8    178      1      27 kuv_flush_plain@1914-1940@ext/kiln_uv.c
+      26     10    139      0      26 kiln_uv_flush@1942-1967@ext/kiln_uv.c
+       3      1     15      0       3 kiln_uv_open@1969-1971@ext/kiln_uv.c
+       3      1      9      0       3 kiln_uv_aborted@1973-1975@ext/kiln_uv.c
+       3      1      9      0       3 kiln_uv_handshakes@1977-1979@ext/kiln_uv.c
+      38      8    212      0      38 kiln_uv_stop@1981-2018@ext/kiln_uv.c
+       3      1     13      0       3 kiln_uv_wake@2020-2022@ext/kiln_uv.c
+      31     12    201      0      31 kiln_uv_drain@2024-2054@ext/kiln_uv.c
+       4      5     40      1       4 kuv_idle@2056-2059@ext/kiln_uv.c
+      15      6     79      0      15 kiln_uv_busy@2061-2075@ext/kiln_uv.c
+2 file analyzed.
+==============================================================
+NLOC    Avg.NLOC  AvgCCN  Avg.token  function_cnt    file
+--------------------------------------------------------------
+    722      19.2     9.4      133.9        34     ext/kiln_http.c
+   1931      17.0     6.3      109.3       104     ext/kiln_uv.c
+
+=======================================================================================================
+!!!! Warnings (cyclomatic_complexity > 15 or length > 80 or nloc > 1000000 or parameter_count > 8) !!!!
+================================================
+  NLOC    CCN   token  PARAM  length  location  
+------------------------------------------------
+      56     23    516      5      57 kiln_scan_terminated@343-399@ext/kiln_http.c
+      25     22    104      1      25 kiln_tchar@422-446@ext/kiln_http.c
+      81     32    483      3      81 kiln_chunk_size@505-585@ext/kiln_http.c
+      81     48    539      2      81 kiln_host@587-667@ext/kiln_http.c
+      77     24    475      1      77 kuv_parse@767-843@ext/kiln_uv.c
+      40     16    252      3      40 kuv_tls_in@906-945@ext/kiln_uv.c
+      22     17    172      2      22 kuv_expire@1141-1162@ext/kiln_uv.c
+      37     16    243      2      37 kuv_after_write@1392-1428@ext/kiln_uv.c
+      39     21    263      2      39 kuv_send_finish@1565-1603@ext/kiln_uv.c
+==========================================================================================
+Total nloc   Avg.NLOC  AvgCCN  Avg.token   Fun Cnt  Warning cnt   Fun Rt   nloc Rt
+------------------------------------------------------------------------------------------
+      2653      17.5     7.0      115.4      138            9      0.07    0.19

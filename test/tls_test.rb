@@ -111,7 +111,7 @@ router.seal!
 check 'OpenSSL is found at run time', Kiln::Transport::Tls.available?
 tls = Kiln::Transport::Tls.new(cert: CERT, key: KEY)
 listen = [Kiln::Transport::Listen.tcp('127.0.0.1', 0, tls: tls), Kiln::Transport::Listen.tcp('127.0.0.1', 0)]
-server = Kiln::Server.new(router, nil, log: log, buffer_body: 4096, listen: listen)
+server = Kiln::Server.new(router, log: log, buffer_body: 4096, listen: listen)
 server.start
 secure = server.ports[0]
 plain = server.ports[1]
@@ -151,7 +151,7 @@ server.shutdown(grace: 1.0)
 gated_options = { log: log, host: '127.0.0.1', port: 0,
                   tls: Kiln::Transport::Tls.new(cert: CERT, key: KEY),
                   max_connection_rate: 1, header_timeout: 0.6 }
-gated = Kiln::Server.new(router, nil, **gated_options)
+gated = Kiln::Server.new(router, **gated_options)
 gated.start
 idle = TCPSocket.new('127.0.0.1', gated.port)
 wait_for { gated.handshakes == 1 }
@@ -164,14 +164,14 @@ check 'max_connection_rate holds new handshakes until a slot frees',
 gated.shutdown(grace: 0.5)
 
 modern = Kiln::Transport::Tls.new(cert: CERT, key: KEY, min_version: '1.3', alpn: ['http/1.1'])
-strict = Kiln::Server.new(router, nil, log: log, host: '127.0.0.1', port: 0, tls: modern)
+strict = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0, tls: modern)
 strict.start
 old = `openssl s_client -connect 127.0.0.1:#{strict.port} -tls1_2 < /dev/null 2>&1`
 check 'min_version 1.3 refuses TLS 1.2', old.include?('alert protocol version') || old.include?('alert number 70')
 strict.shutdown(grace: 0.5)
 
 mutual = Kiln::Transport::Tls.new(cert: CERT, key: KEY, ca: CERT, verify: :require)
-guarded = Kiln::Server.new(router, nil, log: log, host: '127.0.0.1', port: 0, tls: mutual)
+guarded = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0, tls: mutual)
 guarded.start
 anonymous = `printf 'GET / HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' |
 openssl s_client -ign_eof -connect 127.0.0.1:#{guarded.port} 2>&1`
@@ -182,10 +182,10 @@ check 'verify: :require accepts a client certificate signed by the CA', known.in
 guarded.shutdown(grace: 0.5)
 
 rejects('a missing certificate fails at start') do
-  Kiln::Server.new(router, nil, log: log, port: 0, tls: Kiln::Transport::Tls.new(cert: 'missing.pem', key: KEY)).start
+  Kiln::Server.new(router, log: log, port: 0, tls: Kiln::Transport::Tls.new(cert: 'missing.pem', key: KEY)).start
 end
 rejects('a key that does not match fails at start') do
-  Kiln::Server.new(router, nil, log: log, port: 0, tls: Kiln::Transport::Tls.new(cert: CERT, key: CERT)).start
+  Kiln::Server.new(router, log: log, port: 0, tls: Kiln::Transport::Tls.new(cert: CERT, key: CERT)).start
 end
 rejects('verify needs a CA') { Kiln::Transport::Tls.new(cert: CERT, key: KEY, verify: :require) }
 rejects('min_version must be known') { Kiln::Transport::Tls.new(cert: CERT, key: KEY, min_version: '1.0') }

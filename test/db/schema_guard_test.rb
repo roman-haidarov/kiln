@@ -150,7 +150,7 @@ begin
   GuardItem.define_table(:mysql, 'kiln_guard_conflict', %w[id name v], ['id'], 'g')
   rejected = false
   begin
-    GuardItem.import([{'id' => 1, 'name' => 'seed', 'v' => 99}], {on_duplicate_key_update: true})
+    GuardItem.import([{'id' => 1, 'name' => 'seed', 'v' => 99}], {on_duplicate_key_update: true, returning: true})
   rescue Kiln::DB::AmbiguousConflict
     rejected = true
   end

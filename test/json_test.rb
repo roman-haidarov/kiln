@@ -21,7 +21,7 @@ end
 
 def run_app(app, req)
   res = Kiln::HTTP::Response.new
-  app.call(Kiln::Routing::Context.new(req, res, nil, 'json', Kiln::Runtime.now + 5.0))
+  app.call(Kiln::Routing::Context.new(req, res, 'json', Kiln::Runtime.now + 5.0))
   res
 end
 
@@ -201,7 +201,7 @@ check 'generate error is a 500', gen_res.status == 500
 
 puts '-- server'
 %i[event base].each do |backend|
-  server = Kiln::Server.new(app, nil, log: log, port: 0, host: '127.0.0.1', backend: backend)
+  server = Kiln::Server.new(app, log: log, port: 0, host: '127.0.0.1', backend: backend)
   server.start
   body = '{"name":"Ann"}'
   sock = TCPSocket.new('127.0.0.1', server.port)

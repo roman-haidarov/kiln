@@ -25,7 +25,7 @@ def serve(mode, file)
     end
   })
   router.seal!
-  server = Kiln::Server.new(router, nil, log: Kiln::Observability::Log.new(StringIO.new), backend: backend,
+  server = Kiln::Server.new(router, log: Kiln::Observability::Log.new(StringIO.new), backend: backend,
                                          host: '127.0.0.1', port: 0, **extra)
   server.start
   File.write("#{file}.part", server.port.to_s)

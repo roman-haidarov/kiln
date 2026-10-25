@@ -1,0 +1,46 @@
+ok update only requested columns
+ok result counters
+ok input preserved
+ok legacy status extension
+ok custom conflict target
+ok named constraint
+ok ignore without update
+ok AR ignore alias
+ok all non-key columns
+ok legacy true option
+ok column mapping
+ok columns values input and batch_size
+ok columns model input
+ok columns hash input
+ok AR partial validation default
+ok partial input statuses
+ok all_or_none
+ok bang validation
+ok raise_error
+ok bang always validates like AR
+ok tracked validation failures
+ok empty import
+ok default values input
+ok unknown update column
+ok empty update columns
+ok conflicting options
+ok unknown options
+ok no invented update option
+ok invalid row width
+ok invalid batch size
+ok invalid column identifier
+ok missing update source
+ok duplicate column keys
+ok unknown input column
+ok validation failures write nothing
+ok AR timestamp defaults
+ok AR automatic update timestamp
+ok all preserves creation timestamp
+ok timestamps false preserves exact update list
+ok AR result accessors
+ok mysql ignores duplicates without raising
+ok mysql INSERT IGNORE
+ok mysql update chosen columns
+ok mysql non-conflict errors roll back
+ok scope transaction balanced
+ok ar-import

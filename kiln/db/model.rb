@@ -200,14 +200,25 @@ module Kiln
 
         def column?(name) = columns.include?(name)
 
+        def model = self
+        def table = Table.new(self)
+        def arel_table = self.table
         def all = Relation.blank(self)
-        def import(rows, options = nil) = Import.run(self, rows, options, false)
+        def where(expr) = self.all.where(expr)
+        def select(*expressions) = self.all.select(*expressions)
+        def order(*expressions) = self.all.order(*expressions)
+        def group(*expressions) = self.all.group(*expressions)
+        def joins(other, on: nil) = self.all.joins(other, on: on)
+        def limit(count) = self.all.limit(count)
+        def offset(count) = self.all.offset(count)
+        def distinct = self.all.distinct
+        def from(other) = self.all.from(other)
+        def import(rows, values = nil, options = nil) = Import.call(self, rows, values, options, false)
 
-        def import!(rows, options = nil)
-          raise ArgumentError, 'import!' if !options.nil? && options[:validate] == false
+        def import!(rows, values = nil, options = nil) = Import.call(self, rows, values, options, true)
 
-          Import.run(self, rows, options, true)
-        end
+        alias bulk_import import
+        alias bulk_import! import!
 
         def copy_names(names)
           raise ArgumentError, 'names' unless names.is_a?(Array)

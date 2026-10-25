@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.11
+
+### Changed
+
+- Breaking: `Kiln::Server.new`, `Kiln::Server::Event.new` and `Kiln::Server::Base.new` take only the handler; the unused second positional application argument was removed. `Kiln::Server.new(router, log: log, ...)` replaces `Kiln::Server.new(router, nil, log: log, ...)`.
+- `Kiln::Routing::Context.new(req, res, id, deadline)` no longer takes the application slot, and `Kiln::Routing::Context#app` was removed. `Kiln::Testing.call`/`.json` no longer accept the `state:` option, which only populated that slot. No other accept/return contract changed.
+- Import accepts the activerecord-import input forms, selected update columns, conflict targets, column mappings, batch sizes, validation failure tracking, and result accessors. MySQL/MariaDB duplicate ignore and ordinary unique-key upserts are supported.
+- Import defaults now follow AR Import for partial validation and timestamps. `import!` forces validation; `timestamps: false` and `all_or_none: true` select the explicit alternatives. The existing boolean upsert and result status APIs remain available.
+- Query construction uses `Model.table`, Arel predicates and JOINs, aliases, expression projections, subqueries, aggregates, CASE, windows, set operations, and nonrecursive CTEs. Simple WHERE hashes and the existing query API remain supported.
+- SQL values remain bind parameters throughout the expression tree. Native FFI declarations and C sources are unchanged.
+
 ## 0.0.10
 
 ### Changed

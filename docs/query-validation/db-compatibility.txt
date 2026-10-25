@@ -1,0 +1,9 @@
+compiled gate_c: live service execution not performed
+compiled gate_orm: live service execution not performed
+compiled q_gates: live service execution not performed
+compiled import_exact_status: live service execution not performed
+compiled schema_guard: live service execution not performed
+compiled copy_import: live service execution not performed
+compiled docs_examples: live service execution not performed
+compiled stream_import: live service execution not performed
+8/8 compatibility files compiled

@@ -18,7 +18,7 @@ router.seal!
 big = 'z' * (2 << 20)
 
 %i[event base].each do |backend|
-  server = Kiln::Server.new(router, nil, log: log, backend: backend, host: '127.0.0.1', port: 0,
+  server = Kiln::Server.new(router, log: log, backend: backend, host: '127.0.0.1', port: 0,
                                          header_timeout: 0.3, keep_alive_timeout: 0.4, read_timeout: 1.0,
                                          request_timeout: 5.0,
                                          client_disconnect_timeout: 1.0, buffer_body: 1024)
@@ -98,7 +98,7 @@ big = 'z' * (2 << 20)
         both.scan('HTTP/1.1 200 ').size == 2 && both.include?('ignored')
   server.shutdown(grace: 0.5)
 
-  single = Kiln::Server.new(router, nil, log: log, backend: backend, host: '127.0.0.1', port: 0,
+  single = Kiln::Server.new(router, log: log, backend: backend, host: '127.0.0.1', port: 0,
                                          keep_alive_timeout: 0)
   single.start
   closing = exchange(single.port, "GET / HTTP/1.1\r\nHost: x\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\n\r\n")
@@ -107,7 +107,7 @@ big = 'z' * (2 << 20)
   single.shutdown(grace: 0.5)
 end
 
-short = Kiln::Server.new(router, nil, log: log, backend: :event, host: '127.0.0.1', port: 0,
+short = Kiln::Server.new(router, log: log, backend: :event, host: '127.0.0.1', port: 0,
                                       header_timeout: 0.04, read_timeout: 1.0, request_timeout: 1.0)
 short.start
 partial = TCPSocket.new('127.0.0.1', short.port)
