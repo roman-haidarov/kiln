@@ -19,12 +19,12 @@ run_test_process() {
     case "$process_state" in
       Z*) break ;;
     esac
-    if [ "$ticks" -ge "$((test_limit * 10))" ]; then
+    if [ "$ticks" -ge "$((test_limit * 50))" ]; then
       kill -9 "$pid" 2>/dev/null || true
       timed_out=1
       break
     fi
-    sleep 0.1
+    sleep 0.02
     ticks=$((ticks + 1))
   done
   wait "$pid" || status=$?

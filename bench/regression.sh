@@ -314,7 +314,10 @@ for mode in $selected_modes; do
     expected=$3
     case " $selected_features " in *" $feature "*) ;; *) continue ;; esac
     for client in $selected_clients; do
-      run_client "$client" "$mode" "$route" "$expected" warm "$warmup"
+      case "$warmup" in
+        0|0.0|0.00) ;;
+        *) run_client "$client" "$mode" "$route" "$expected" warm "$warmup" ;;
+      esac
       round=1
       while [ "$round" -le "$rounds" ]; do
         run_measured_client "$client" "$mode" "$route" "$expected" "$round"

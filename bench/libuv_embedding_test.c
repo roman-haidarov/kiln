@@ -14,11 +14,7 @@
 
 __thread int sp_ffi_bin_len;
 
-enum {
-    TEST_HEADER_TIMEOUT_MS = 30,
-    TEST_TIMER_POLL_MS = 10,
-    TEST_TIMER_BUDGET_MS = 1000
-};
+enum { TEST_HEADER_TIMEOUT_MS = 30, TEST_TIMER_POLL_MS = 10, TEST_TIMER_BUDGET_MS = 1000 };
 
 extern long kiln_uv_configure(const int64_t *, long);
 extern long kiln_uv_adopt(long, long);

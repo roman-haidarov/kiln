@@ -10,7 +10,7 @@ end
 
 def start_test_server(server_object)
   server_object.start
-  Kernel.sleep 0.05
+  Kernel.sleep 0.02
 end
 
 def local_base(klass, max_conns:, &handler)
@@ -86,7 +86,7 @@ gclient = TCPSocket.new('127.0.0.1', graceful.port)
 gclient.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 graceful.before_serve.pop(timeout: 1)
 stopper = Thread.new { graceful.shutdown(grace: 2) }
-Kernel.sleep 0.1
+wait_for { graceful.instance_variable_get(:@draining) }
 graceful.continue_serve << true
 IO.select([gclient], nil, nil, 2)
 served = begin
@@ -158,7 +158,7 @@ wclient = TCPSocket.new('127.0.0.1', wsrv.port)
 wclient.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 check 'server enters response writing', write_entered.pop(timeout: 3) == true
 wstop = Thread.new do
-  wsrv.shutdown(grace: 5)
+  wsrv.shutdown(grace: 1.5)
   wsrv.connections
 end
 wait_for { wsrv.instance_variable_get(:@draining) }

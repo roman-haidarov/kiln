@@ -2,7 +2,7 @@ require 'kiln'
 require 'socket'
 require 'stringio'
 
-def raw(port, data, wait: 1.5)
+def raw(port, data, wait: 0.5)
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write(data)
   out = (+'').b
@@ -33,7 +33,8 @@ end
 
 def body(out) = out.split("\r\n\r\n".b, 2)[1].to_s
 def hdr(out, name) = out.split("\r\n".b).select { |line| line.downcase.start_with?("#{name}:".b) }
-def get(port, path) = raw(port, "GET #{path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b)
+def get(port, path, wait: 0.5) = raw(port, "GET #{path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n".b,
+                                       wait: wait)
 
 def check(label, passed)
   raise "FAIL #{label}" unless passed
@@ -385,7 +386,7 @@ t = Kiln::Runtime.now
 o = get(pt, '/sleep')
 check 'ctx.sleep hits deadline -> fast 504', codes(o) == ['504'] && Kiln::Runtime.now - t < 0.45
 t = Kiln::Runtime.now
-o = get(pt, '/swallow')
+o = get(pt, '/swallow', wait: 0.8)
 check 'handler that ignores deadline is killed by reaper -> 504', codes(o) == ['504'] && Kiln::Runtime.now - t < 1.0
 holder = Thread.new { POOL.with(timeout: 5) { |_x| Kernel.sleep 0.8 } }
 Kernel.sleep 0.05
@@ -394,7 +395,7 @@ o = get(pt, '/pool')
 check 'pool wait is bounded by deadline -> 504', codes(o) == ['504'] && Kiln::Runtime.now - t < 0.45
 holder.join
 made_before = MADE.size
-o = get(pt, '/stuck')
+o = get(pt, '/stuck', wait: 1.0)
 Kernel.sleep 0.1
 check 'resource held during with is closed after kill; slot restored', codes(o) == ['504'] && POOL.available == 1
 check 'next checkout lazily creates a new resource', codes(get(pt, '/pool')) == ['200'] && MADE.size == made_before + 1
@@ -411,7 +412,7 @@ Kernel.sleep 0.05
 check 'Runtime::CpuPool: 504; task after deadline was not started', codes(o) == ['504'] && CPU.skipped == 1
 check 'Runtime::CpuPool remains alive', codes(get(pt, '/cpu')) == ['200']
 
-swallowers = 5.times.map { Thread.new { codes(get(pt, '/swallow')) } }
+swallowers = 5.times.map { Thread.new { codes(get(pt, '/swallow', wait: 1.0)) } }
 results = swallowers.map(&:value)
 check 'five stuck requests at once -> all receive 504', results == [['504']] * 5
 puts '-- write timeout'

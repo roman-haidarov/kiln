@@ -55,7 +55,7 @@ class WsClient
 
   def send_raw(data) = @io.write(data)
 
-  def receive(seconds = 2.0)
+  def receive(seconds = 0.5)
     limit = Kiln::Runtime.now + seconds
     loop do
       parsed = parse
@@ -76,7 +76,7 @@ class WsClient
     end
   end
 
-  def close_code(seconds = 2.0)
+  def close_code(seconds = 0.5)
     loop do
       got = receive(seconds)
       return -1 if got.nil?
@@ -212,7 +212,7 @@ long = 'w' * 70_000
   close_reason = close_payload&.byteslice(2, close_payload.bytesize - 2)&.force_encoding(Encoding::UTF_8)
   close_client.send(8, close_payload) if close_payload
   close_client.close
-  close_check = CLOSE_CHECKS.pop(timeout: 2)
+  close_check = CLOSE_CHECKS.pop(timeout: 0.7)
   check "#{backend}: close validates code and UTF-8 and truncates on a character boundary",
         close_frame && close_frame[0] == 8 && close_reason&.valid_encoding? && close_reason == '🙂' * 30 &&
         close_reason.bytesize <= 123 && close_check == [true, true]
@@ -278,44 +278,44 @@ long = 'w' * 70_000
   check "#{backend}: fragments are joined into one message", ws.receive == [1, 'echo:fragmented'.b]
   ws.send(8, "\x03\xE8bye".b)
   check "#{backend}: a close frame is answered with the same code", ws.close_code == 1000
-  check "#{backend}: the handler sees the client's close code", GOT.pop(timeout: 2) == 1000
+  check "#{backend}: the handler sees the client's close code", GOT.pop(timeout: 0.7) == 1000
   ws.close
 
   peer_client_only = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   peer_client_only.send(8, "\x03\xF2".b)
   check "#{backend}: client-only close code 1010 is acknowledged as 1000", peer_client_only.close_code == 1000
-  check "#{backend}: the handler retains the peer's original close code 1010", GOT.pop(timeout: 2) == 1010
+  check "#{backend}: the handler retains the peer's original close code 1010", GOT.pop(timeout: 0.7) == 1010
   peer_client_only.close
 
   bad = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   bad.send(1, 'unmasked', masked: false)
   check "#{backend}: an unmasked client frame closes with 1002", bad.close_code == 1002
-  GOT.pop(timeout: 2)
+  GOT.pop(timeout: 0.7)
   bad.close
 
   utf = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   utf.send(1, "\xC3\x28".b)
   check "#{backend}: invalid UTF-8 text closes with 1007", utf.close_code == 1007
-  GOT.pop(timeout: 2)
+  GOT.pop(timeout: 0.7)
   utf.close
 
   reason = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   reason.send(8, "\x03\xE8\xC3\x28".b)
   check "#{backend}: a close reason that is not UTF-8 is answered with 1007", reason.close_code == 1007
-  GOT.pop(timeout: 2)
+  GOT.pop(timeout: 0.7)
   reason.close
 
   huge = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws')
   huge.send(2, long)
   check "#{backend}: a message over max_message closes with 1009", huge.close_code == 1009
-  GOT.pop(timeout: 2)
+  GOT.pop(timeout: 0.7)
   huge.close
 
   early = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ws', first: ws_frame(1, 'early'))
   check "#{backend}: a frame sent with the handshake is not lost", early.receive == [1, 'echo:early'.b]
   early.send(8, "\x03\xE8".b)
   early.close_code
-  GOT.pop(timeout: 2)
+  GOT.pop(timeout: 0.7)
   early.close
 
   pinger = WsClient.new(TCPSocket.new('127.0.0.1', port), '/ping')

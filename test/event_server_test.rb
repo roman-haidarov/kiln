@@ -63,7 +63,7 @@ router = Kiln::Routing::Router.new
                                             })
                               .get('/hang', lambda { |ctx|
                                               HANG_STARTED << 1
-                                              Kernel.sleep 1.5
+                                              Kernel.sleep 0.5
                                               ctx.res.text("late\n")
                                             })
                               .get('/absolute', ->(ctx) { ctx.res.text("#{ctx.req.path}|#{ctx.req.headers['host']}") })
@@ -116,7 +116,7 @@ check 'inline: HEAD keeps Content-Length and sends no body', o.include?('Content
 big_client = TCPSocket.new('127.0.0.1', ip)
 big_client.write("GET /big HTTP/1.1\r\nHost: x\r\n\r\nGET /big HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 Kernel.sleep 0.3
-o = read_until_closed(big_client, 5)
+o = read_until_closed(big_client, 2)
 big_client.close
 check 'inline: two large pipelined responses arrive whole and in order',
       o.scan('HTTP/1.1 200 ').size == 2 && o.scan(BIG_BODY.b).size == 2 && o.end_with?(BIG_BODY.b)
@@ -168,7 +168,7 @@ pipe_client = Thread.new do
   data = (1..3).map do |i|
     "GET /shutdown-pipe HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n"
   end.join
-  exchange(ip, data, 3.0)
+  exchange(ip, data, 1.0)
 end
 SHUTDOWN_CALLS.pop
 pipe_shutdown_left = inline.shutdown(grace: 1)
@@ -179,7 +179,7 @@ check 'inline: shutdown releases connections', inline.connections.zero?
 hung = Kiln::Server::Event.new(router, log: log, port: 0)
 hung.start
 hung_data = (1..3).map { |i| "GET /hang HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n" }.join
-hung_client = Thread.new { exchange(hung.port, hung_data, 3.0) }
+hung_client = Thread.new { exchange(hung.port, hung_data, 1.0) }
 HANG_STARTED.pop
 hung_left = hung.shutdown(grace: 0.2)
 hung_client.join
@@ -188,9 +188,9 @@ check 'inline: unfinished count includes queued requests when the handler is sto
 last = Kiln::Server::Event.new(router, log: log, port: 0)
 last.start
 last_out = Queue.new
-last_client = Thread.new { last_out << exchange(last.port, "GET /pause HTTP/1.1\r\nHost: x\r\n\r\n", 3.0) }
+last_client = Thread.new { last_out << exchange(last.port, "GET /pause HTTP/1.1\r\nHost: x\r\n\r\n", 1.0) }
 PAUSED.pop
-last.shutdown(grace: 2)
+last.shutdown(grace: 0.7)
 last_client.join
 paused = last_out.pop
 check 'inline: the response finished during shutdown says Connection: close',
@@ -208,7 +208,7 @@ if ipv6
   v6.start
   v6_client = TCPSocket.new('::1', v6.port)
   v6_client.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-  v6_served = read_until_closed(v6_client, 2).end_with?("Hello, World!\n")
+  v6_served = read_until_closed(v6_client, 0.7).end_with?("Hello, World!\n")
   v6_client.close
   v6.shutdown(grace: 0)
 end
@@ -220,7 +220,7 @@ mp = more.port
 half = TCPSocket.new('127.0.0.1', mp)
 half.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 half.shutdown(Socket::SHUT_WR)
-half_body = read_until_closed(half, 2)
+half_body = read_until_closed(half, 0.7)
 half.close
 check 'inline: half-close after a complete request still gets a response',
       half_body.start_with?('HTTP/1.1 200 ') && half_body.end_with?("Hello, World!\n")
@@ -242,7 +242,7 @@ slow_sock = TCPSocket.new('127.0.0.1', slow.port)
 slow_sock.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
 wait_for { slow.connections.positive? }
 slow_closed = false
-slow_limit = Kiln::Runtime.now + 2
+slow_limit = Kiln::Runtime.now + 0.7
 while Kiln::Runtime.now < slow_limit
   if slow.connections.zero?
     slow_closed = true
@@ -259,7 +259,7 @@ def serve_once(log)
   again.start
   again_sock = TCPSocket.new('127.0.0.1', again.port)
   again_sock.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-  answered = read_until_closed(again_sock, 2).end_with?('again')
+  answered = read_until_closed(again_sock, 0.7).end_with?('again')
   again_sock.close
   again.shutdown(grace: 0.5)
   answered
@@ -277,7 +277,7 @@ blocked_gate = Queue.new
 deadline_router = Kiln::Routing::Router.new
 deadline_router.get('/blocked', lambda do |ctx|
   blocked_started << true
-  blocked_gate.pop(timeout: 5)
+  blocked_gate.pop(timeout: 1.5)
   ctx.res.text('late')
 end)
 deadline_router.get('/fast', ->(ctx) { ctx.res.text('fast') })
@@ -321,7 +321,7 @@ bounded_stream = overflow_stream.start_with?('HTTP/1.1 503 ') && overflow_stream
                  !overflow_stream.include?('Vary: Accept-Encoding')
 check 'event stream overflow discards headers from the gzip representation', bounded_stream
 stream_release << true
-stream_reply = read_until_closed(stream_client, 2)
+stream_reply = read_until_closed(stream_client, 0.7)
 stream_client.close
 limited_streams.shutdown(grace: 1)
 check 'a stream below max_streams completes', stream_reply.include?('streamed')
@@ -337,7 +337,7 @@ while drip_at < drip_req.bytesize
   Kernel.sleep 0.001
   drip_at += 1
 end
-dripped = read_until_closed(drip_sock, 2)
+dripped = read_until_closed(drip_sock, 0.7)
 drip_sock.close
 check 'a request sent one byte at a time matches the whole request',
       whole.start_with?('HTTP/1.1 200 ') && dripped.start_with?('HTTP/1.1 200 ') &&
@@ -350,7 +350,7 @@ while split_at < 4
   split_sock.write(drip_req.byteslice(0, cut))
   Kernel.sleep 0.05
   split_sock.write(drip_req.byteslice(cut, drip_req.bytesize - cut))
-  split_out = read_until_closed(split_sock, 2)
+  split_out = read_until_closed(split_sock, 0.7)
   split_sock.close
   split_ok &&= split_out.start_with?('HTTP/1.1 200 ') && split_out.end_with?("Hello, World!\n")
   split_at += 1

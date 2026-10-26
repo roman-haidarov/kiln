@@ -19,56 +19,56 @@ big = 'z' * (2 << 20)
 
 %i[event base].each do |backend|
   server = Kiln::Server.new(router, log: log, backend: backend, host: '127.0.0.1', port: 0,
-                                         header_timeout: 0.3, keep_alive_timeout: 0.4, read_timeout: 1.0,
-                                         request_timeout: 5.0,
-                                         client_disconnect_timeout: 1.0, buffer_body: 1024)
+                                         header_timeout: 0.1, keep_alive_timeout: 0.4, read_timeout: 0.3,
+                                         request_timeout: 1.0,
+                                         client_disconnect_timeout: 0.3, buffer_body: 1024)
   server.start
   port = server.port
 
   slow = TCPSocket.new('127.0.0.1', port)
   started = Kiln::Runtime.now
   slow.write("GET / HTTP/1.1\r\nHost: x\r\n")
-  reply = read_until_closed(slow, 3)
+  reply = read_until_closed(slow, 1)
   elapsed = Kiln::Runtime.now - started
   check "#{backend}: a head that never ends gets 408 after header_timeout",
-        reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.25 && elapsed < 2.0
+        reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.08 && elapsed < 1.0
 
   silent = TCPSocket.new('127.0.0.1', port)
   started = Kiln::Runtime.now
-  quiet = closed_within?(silent, 3)
+  quiet = closed_within?(silent, 1)
   elapsed = Kiln::Runtime.now - started
   silent.close
   check "#{backend}: a connection that sends nothing is closed after header_timeout",
-        quiet && elapsed >= 0.25 && elapsed < 2.0
+        quiet && elapsed >= 0.08 && elapsed < 1.0
 
   idle = TCPSocket.new('127.0.0.1', port)
   idle.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
   head, = read_head(idle)
   started = Kiln::Runtime.now
-  gone = closed_within?(idle, 3)
+  gone = closed_within?(idle, 1)
   elapsed = Kiln::Runtime.now - started
   idle.close
   check "#{backend}: an idle keep-alive connection is closed after keep_alive_timeout",
         head.start_with?('HTTP/1.1 200 ') && !head.include?('Connection: close') && gone && elapsed >= 0.3 &&
-        elapsed < 2.0
+        elapsed < 1.0
 
   pause = TCPSocket.new('127.0.0.1', port)
   pause.write("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
   read_head(pause)
-  Kernel.sleep 0.2
+  Kernel.sleep 0.1
   pause.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-  second = read_until_closed(pause, 2)
+  second = read_until_closed(pause, 0.7)
   pause.close
   check "#{backend}: a request within keep_alive_timeout reuses the connection", second.start_with?('HTTP/1.1 200 ')
 
   stalled = TCPSocket.new('127.0.0.1', port)
   stalled.write("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: 4096\r\n\r\nabc")
   started = Kiln::Runtime.now
-  stalled_reply = read_until_closed(stalled, 4)
+  stalled_reply = read_until_closed(stalled, 1.5)
   elapsed = Kiln::Runtime.now - started
   stalled.close
   check "#{backend}: a streamed body that stalls gets 408 after read_timeout",
-        stalled_reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.8 && elapsed < 2.5
+        stalled_reply.start_with?('HTTP/1.1 408 ') && elapsed >= 0.25 && elapsed < 1.5
 
   pushing = TCPSocket.new('127.0.0.1', port)
   pushing.write("POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: #{big.bytesize}\r\n\r\n")
@@ -83,8 +83,8 @@ big = 'z' * (2 << 20)
     end
     sent
   end
-  refused = collect_until(pushing, 3) { |buf| buf.include?('payload too large') }
-  writer.join(3)
+  refused = collect_until(pushing, 1) { |buf| buf.include?('payload too large') }
+  writer.join(1)
   pushing.close
   check "#{backend}: a 413 reaches a client that is still sending its body",
         refused.start_with?('HTTP/1.1 413 ') && refused.include?('Connection: close')
@@ -92,7 +92,7 @@ big = 'z' * (2 << 20)
   ignore = TCPSocket.new('127.0.0.1', port)
   ignore.write("POST /ignore HTTP/1.1\r\nHost: x\r\nContent-Length: 2000\r\n\r\n#{'q' * 2000}" \
                "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-  both = read_until_closed(ignore, 2)
+  both = read_until_closed(ignore, 0.7)
   ignore.close
   check "#{backend}: an unread small body is discarded and the connection kept",
         both.scan('HTTP/1.1 200 ').size == 2 && both.include?('ignored')

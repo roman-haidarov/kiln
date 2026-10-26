@@ -81,7 +81,8 @@ jobs:
           LLVM_PROFDATA="$(brew --prefix llvm)/bin/llvm-profdata" \
           LLVM_COV="$(brew --prefix llvm)/bin/llvm-cov" \
           KILN_ARTIFACTS="$RUNNER_TEMP/kiln-ci" \
-          TEST_TIMEOUT=180 \
+          TEST_TIMEOUT=60 \
+          KILN_FUZZ_SECONDS=2 \
             ci/run.sh
 
       - name: Upload artifacts

@@ -3,13 +3,16 @@ set -eu
 
 cd "$(dirname "$0")/.."
 spinel_bin=${SPINEL:-spinel}
+spinel_cc=$(pwd)/ci/spinel-cc.sh
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 rounds=${ROUNDS:-3}
 conns=${CONNS:-50}
 seconds=${SECONDS_PER_RUN:-10}
 port=${PORT:-18100}
 command -v wrk > /dev/null 2>&1 || { printf 'wrk is required: install it and rerun\n' >&2; exit 1; }
 mkdir -p build/bench
-"$spinel_bin" $(./ext/build.sh) -I . bench/hello_modes.rb -o build/bench/hello_modes > /dev/null
+ext_links=$(./ext/build.sh)
+"$spinel_bin" "--cc=$spinel_cc" $ext_links -I . bench/hello_modes.rb -o build/bench/hello_modes > /dev/null
 
 cpu_ticks() {
   if [ -r "/proc/$1/stat" ]; then

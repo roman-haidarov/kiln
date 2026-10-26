@@ -1324,7 +1324,7 @@ static kuv_req *kuv_take_ready(void) {
     kuv_req *prev = NULL;
     kuv_req *r = kuv_head;
     while (r) {
-        kuv_conn *c = kuv_slots[r->slot];
+        const kuv_conn *c = kuv_slots[r->slot];
         int live = c && c->gen == r->gen && c->state != KUV_CONN_CLOSING;
         if (!live || !kuv_out_blocked(c)) {
             if (prev) {

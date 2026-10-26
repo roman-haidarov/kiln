@@ -80,7 +80,7 @@ int main(void) {
     assert(consumed == 10 && writes == 2);
 
     reset();
-    scripted[0] = 0;  // First 16KiB chunk consumed.
+    scripted[0] = 0;
     scripted[1] = KTLS_ERROR_WANT_WRITE;
     scripted[2] = 0;
     scripted_len = 3;

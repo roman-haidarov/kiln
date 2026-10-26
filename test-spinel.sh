@@ -3,7 +3,7 @@ set -eu
 
 spinel_bin=${SPINEL:-spinel}
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
-limit=${TEST_TIMEOUT:-120}
+limit=${TEST_TIMEOUT:-40}
 results_dir=${KILN_VALIDATION_DIR:-/tmp/kiln-validation}/tests
 cd "$(dirname "$0")"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
@@ -14,7 +14,11 @@ ext_links=$(./ext/build.sh)
 total=0
 failed=0
 
-for source in test/*_test.rb; do
+if [ "$#" -eq 0 ]; then
+  set -- test/*_test.rb
+fi
+
+for source in "$@"; do
   total=$((total + 1))
   name=${source##*/}
   binary=build/test/${name%.rb}

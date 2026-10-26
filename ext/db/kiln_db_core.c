@@ -842,11 +842,11 @@ const char *kiln_db_result_rows(uint64_t handle, uint64_t scope, uint64_t thread
         max_rows = (int64_t)UINT32_MAX;
     }
     if (conn->kind == KILN_DB_KIND_PG) {
-        out = kiln_db_pg_result_rows(conn, (uint32_t)first_row, (uint32_t)max_rows,
-            (size_t)max_bytes, lens, lens_cap, meta);
+        out = kiln_db_pg_result_rows(
+            conn, (uint32_t)first_row, (uint32_t)max_rows, (size_t)max_bytes, lens, lens_cap, meta);
     } else if (conn->kind == KILN_DB_KIND_MY) {
-        out = kiln_db_my_result_rows(conn, (uint32_t)first_row, (uint32_t)max_rows,
-            (size_t)max_bytes, lens, lens_cap, meta);
+        out = kiln_db_my_result_rows(
+            conn, (uint32_t)first_row, (uint32_t)max_rows, (size_t)max_bytes, lens, lens_cap, meta);
     }
     kiln_db_unpin_conn(handle, scope, thread_id);
     return out;

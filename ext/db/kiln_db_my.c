@@ -20,12 +20,12 @@
 #define MY_STORE_F64     2
 static void my_arm_socket(MYSQL *mysql);
 
-#define MY_IDLE     0
-#define MY_CONNECT  1
-#define MY_QUERY    2
-#define MY_PREPARE  3
-#define MY_EXEC     4
-#define MY_FETCH    5
+#define MY_IDLE       0
+#define MY_CONNECT    1
+#define MY_QUERY      2
+#define MY_PREPARE    3
+#define MY_EXEC       4
+#define MY_FETCH      5
 #define MY_COMMIT     6
 #define MY_ROLLBACK   7
 #define MY_CLOSE_STMT 8
@@ -1280,7 +1280,8 @@ static int my_grave_room(my_sess *sess, int want) {
 
 static void my_grave(my_sess *sess, MYSQL_STMT *stmt) {
     int i;
-    if (!stmt) {
+    if (!sess || !stmt || sess->ngrave < 0 || sess->grave_cap < 0 ||
+        sess->ngrave > sess->grave_cap || (sess->grave_cap > 0 && !sess->grave)) {
         return;
     }
     for (i = 0; i < sess->ngrave; i++) {
@@ -1797,7 +1798,8 @@ static void my_release(kiln_db_conn *conn) {
         my.mysql_stmt_close(sess->stmt);
     }
     sess->stmt = NULL;
-    if (sess->closing && !my_cache_contains(sess, sess->closing) && !my_graved(sess, sess->closing)) {
+    if (sess->closing && !my_cache_contains(sess, sess->closing) &&
+        !my_graved(sess, sess->closing)) {
         my.mysql_stmt_close(sess->closing);
     }
     sess->closing = NULL;
@@ -2201,15 +2203,25 @@ const char *kiln_db_my_result_bytes(
 const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
     static __thread char empty[1];
-    my_sess *sess = conn->native;
+    my_sess *sess;
     uint32_t last;
     uint32_t row;
     size_t bytes;
     char *buf;
+    empty[0] = 0;
+    if (!conn || !meta) {
+        sp_ffi_bin_len = 0;
+        if (meta) {
+            meta[0] = -2;
+            meta[1] = 0;
+            meta[2] = 0;
+        }
+        return empty;
+    }
+    sess = conn->native;
     if (sess && sess->has_store) {
         return my_rows_emit(conn, first, max_rows, max_bytes, lens, lens_cap, NULL, NULL, meta, 0);
     }
-    empty[0] = 0;
     if (!sess || first >= sess->rows || sess->ncols <= 0 || !sess->batch) {
         meta[0] = 0;
         return empty;
@@ -2238,7 +2250,8 @@ const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
         size_t base = (size_t)(row - first) * (size_t)(sess->ncols + 1);
         memcpy(lens + base, sess->cell_len + ((size_t)row * (size_t)sess->ncols),
             (size_t)sess->ncols * sizeof *lens);
-        lens[base + (size_t)sess->ncols] = (int64_t)(sess->row_start[row + 1] - sess->row_start[row]);
+        lens[base + (size_t)sess->ncols] =
+            (int64_t)(sess->row_start[row + 1] - sess->row_start[row]);
     }
     meta[0] = last - first;
     meta[1] = (int64_t)bytes;
@@ -2249,7 +2262,17 @@ const char *kiln_db_my_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
 
 const char *kiln_db_my_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta) {
-    my_sess *sess = conn ? conn->native : NULL;
+    my_sess *sess;
+    if (!conn || !meta) {
+        sp_ffi_bin_len = 0;
+        if (meta) {
+            meta[0] = -2;
+            meta[1] = 0;
+            meta[2] = 0;
+        }
+        return "";
+    }
+    sess = conn->native;
     if (!sess || !sess->has_store) {
         return kiln_db_my_result_rows(conn, first, max_rows, max_bytes, lens, lens_cap, meta);
     }

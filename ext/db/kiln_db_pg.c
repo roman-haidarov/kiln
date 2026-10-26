@@ -2392,7 +2392,7 @@ static size_t pg_cell(pg_sess *sess, const kiln_db_conn *conn, int row, int col,
 const char *kiln_db_pg_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *meta) {
     static __thread char empty[1];
-    pg_sess *sess = conn->native;
+    pg_sess *sess;
     unsigned char bytea[KILN_DB_MAX_COLS];
     size_t used = 0;
     uint32_t taken = 0;
@@ -2400,6 +2400,16 @@ const char *kiln_db_pg_result_rows(kiln_db_conn *conn, uint32_t first, uint32_t 
     int cols;
     int c;
     empty[0] = 0;
+    if (!conn || !meta) {
+        sp_ffi_bin_len = 0;
+        if (meta) {
+            meta[0] = -2;
+            meta[1] = 0;
+            meta[2] = 0;
+        }
+        return empty;
+    }
+    sess = conn->native;
     if (!sess || !sess->held) {
         meta[0] = 0;
         return empty;
@@ -2459,7 +2469,7 @@ static int pg_typed_cell(int width, int is_float, const char *raw, int nraw, siz
 const char *kiln_db_pg_result_rows_typed(kiln_db_conn *conn, uint32_t first, uint32_t max_rows,
     size_t max_bytes, int64_t *lens, int lens_cap, int64_t *nums, double *floats, int64_t *meta) {
     static __thread char empty[1];
-    pg_sess *sess = conn->native;
+    pg_sess *sess;
     unsigned char bytea[KILN_DB_MAX_COLS];
     unsigned char width[KILN_DB_MAX_COLS];
     unsigned char real[KILN_DB_MAX_COLS];
@@ -2470,9 +2480,16 @@ const char *kiln_db_pg_result_rows_typed(kiln_db_conn *conn, uint32_t first, uin
     int binary;
     int c;
     empty[0] = 0;
-    if (!meta) {
+    if (!conn || !meta) {
+        sp_ffi_bin_len = 0;
+        if (meta) {
+            meta[0] = -2;
+            meta[1] = 0;
+            meta[2] = 0;
+        }
         return empty;
     }
+    sess = conn->native;
     if (!sess || !sess->held || !lens || !nums || !floats) {
         meta[0] = 0;
         return empty;

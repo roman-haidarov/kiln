@@ -28,6 +28,9 @@ protocol work.
   generation through a fast C library.
 - [zlib-ng](https://github.com/zlib-ng/zlib-ng) provides gzip compression with
   architecture-specific optimizations where available.
+- [Verstable](https://github.com/JacksonAllan/Verstable) is the hash table
+  and [rapidhash](https://github.com/Nicoshev/rapidhash) the hash function of
+  `Kiln::Cache`, the off-heap key-value cache.
 - [OpenSSL](https://github.com/openssl/openssl) provides TLS. Kiln loads the
   system OpenSSL library at runtime rather than bundling it.
 - [libpq](https://www.postgresql.org/docs/current/libpq.html) connects Kiln::DB

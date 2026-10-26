@@ -32,13 +32,15 @@ fi
 
 printf '== test suite, SPINEL_WORKERS=1\n'
 SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/workers-1" ./test-spinel.sh
+printf '== cache mutex and concurrent garbage collection\n'
+CC="$c_compiler" KILN_CACHE_TEST_DIR="$artifacts/cache-gc" ci/cache-gc.sh
 printf '== spin package install and build smoke\n'
 SPINEL="$spinel" ci/spin-build-smoke.sh
 
 if [ "$bench" = 1 ]; then
   printf '== benchmark smoke\n'
   SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/bench-validation" RESULTS_DIR="$artifacts/bench" \
-    DURATION=2 WARMUP=1 ROUNDS=1 CONNECTIONS=16 MODES="inline lanes server" FEATURES=text CLIENTS=wrk \
+    DURATION=1 WARMUP=0 ROUNDS=1 CONNECTIONS=16 MODES="inline lanes server" FEATURES=text CLIENTS=wrk \
     SAMPLE=0 MEMORY=1 bench/regression.sh
   meta=$(find "$artifacts/bench" -name meta.txt -type f | sed -n '1p')
   [ -n "$meta" ] || { printf 'benchmark produced no meta.txt\n' >&2; exit 1; }

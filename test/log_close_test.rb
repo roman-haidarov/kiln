@@ -26,18 +26,18 @@ paused = Queue.new
 resume = Queue.new
 log = ClosingLog.new(out, paused, resume)
 log.info('first')
-raise 'logger did not reach its timed wait' unless paused.pop(timeout: 2)
+raise 'logger did not reach its timed wait' unless paused.pop(timeout: 0.7)
 
 log.info('accepted before close')
 closer = Thread.new { log.close }
-deadline = Kiln::Runtime.now + 2
+deadline = Kiln::Runtime.now + 0.7
 until log.instance_variable_get(:@queue).closed?
   raise 'logger close did not start' if Kiln::Runtime.now >= deadline
 
   Thread.pass
 end
 resume << true
-raise 'logger close did not finish' unless closer.join(2)
+raise 'logger close did not finish' unless closer.join(0.7)
 raise 'logger lost an accepted line' unless out.string == "INFO  first\nINFO  accepted before close\n"
 raise 'logger retained queued lines' unless log.instance_variable_get(:@queue).empty?
 

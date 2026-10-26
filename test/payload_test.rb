@@ -28,7 +28,7 @@ rescue IOError, SystemCallError
   sent
 end
 
-def upload(port, head, body, seconds = 6.0)
+def upload(port, head, body, seconds = 2.0)
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write(head)
   writer = Thread.new { send_all(sock, body) }
@@ -178,7 +178,7 @@ stalled.seal!
     sock = TCPSocket.new('127.0.0.1', port)
     sock.write("POST #{path} HTTP/1.1\r\nHost: x\r\nContent-Length: 100000\r\nConnection: close\r\n\r\nstart")
     started = Kiln::Runtime.now
-    reply = read_until_closed(sock, 4)
+    reply = read_until_closed(sock, 1.5)
     took = Kiln::Runtime.now - started
     sock.close
     check "#{label}: a handler waiting on a stalled body #{path} gets 504 at its deadline",

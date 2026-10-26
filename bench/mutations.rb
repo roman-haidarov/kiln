@@ -7,6 +7,8 @@ require 'timeout'
 
 project = File.expand_path('..', __dir__)
 compiler = ENV.fetch('SPINEL') { 'spinel' }
+spinel_cc = File.join(project, 'ci', 'spinel-cc.sh')
+ENV['KILN_SPINEL_REAL_CC'] = ENV.fetch('SPINEL_CC') { 'cc' }
 timeout_seconds = Integer(ENV.fetch('MUTATION_TIMEOUT') { '30' })
 result_path = File.join(ENV.fetch('KILN_VALIDATION_DIR') { '/tmp/kiln-validation' }, 'mutations.json')
 FileUtils.mkdir_p(File.dirname(result_path))
@@ -76,7 +78,7 @@ mutations.each do |name, relative, test, old, replacement, expected|
 
     links = links_output.split
     _build_out, build_error, build_status = Open3.capture3(
-      compiler, *links, '-I', '.', test, '-o', 'build/mutant', chdir: destination
+      compiler, "--cc=#{spinel_cc}", *links, '-I', '.', test, '-o', 'build/mutant', chdir: destination
     )
     raise build_error unless build_status.success?
 
