@@ -50,10 +50,11 @@ module Kiln
       end
 
       def watch(signals, writer, previous)
-        raise ArgumentError, 'signals must be a non-empty list of up to 10 names' unless signals.size.between?(1, 10)
+        size = signals.size
+        raise ArgumentError, 'signals must be a non-empty list of up to 10 names' unless size >= 1 && size <= 10
 
         index = 0
-        while index < signals.size
+        while index < size
           previous << trap_signal(signals[index], writer, (48 + index).chr)
           index += 1
         end

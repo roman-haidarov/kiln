@@ -39,7 +39,8 @@ fi
 content_key=$(find ext -path ext/croaring -prune -o -type f \( -name '*.c' -o -name '*.h' -o -name 'build.sh' \) -print | LC_ALL=C sort | xargs $hash_tool | $hash_tool)
 db_sources=""
 db_flags=""
-if [ "${KILN_DB:-0}" = "1" ]; then
+db_enabled=${KILN_DB:-1}
+if [ "$db_enabled" = "1" ]; then
   if [ -n "${KILN_DB_LIBPQ_PREFIX:-}" ]; then
     pq_flags="-I$KILN_DB_LIBPQ_PREFIX/include"
   elif pkg-config --exists libpq 2> /dev/null; then
@@ -64,7 +65,7 @@ if [ "${KILN_DB:-0}" = "1" ]; then
   db_sources=$(printf '%s ' ext/db/*.c)
 fi
 runtime_key=$(cd "$hdr_dir" && $hash_tool spinel/runtime.h spinel_rt.h sp_alloc.h sp_gc.h sp_types.h 2> /dev/null | $hash_tool)
-build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$("$cc_bin" -dumpmachine 2> /dev/null || true)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "${KILN_DB:-0}" "$db_flags" "$content_key" "$runtime_key")
+build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$("$cc_bin" -dumpmachine 2> /dev/null || true)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "$db_enabled" "$db_flags" "$content_key" "$runtime_key")
 target=$("$cc_bin" -dumpmachine 2> /dev/null || uname -m)
 simd_flags() {
   case "$target" in

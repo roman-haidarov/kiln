@@ -2,6 +2,7 @@
 #define _GNU_SOURCE
 #endif
 #include <stdint.h>
+#include <limits.h>
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -20,6 +21,43 @@
 #endif
 
 #define KILN_RECV_MAX 16384
+
+long kiln_http_byteindex(
+    const char *data, long len, const char *needle, long needle_len, long offset, long from) {
+    if (!data || !needle || len < 0 || needle_len < 0 || offset < 0 || offset > len ||
+        (from > 0 && offset > LONG_MAX - from) || (from < 0 && offset < LONG_MIN - from)) {
+        return -1;
+    }
+    long start = offset + from;
+    if (start < 0) {
+        if (start < -len) {
+            return -1;
+        }
+        start += len;
+    }
+    if (start > len) {
+        return -1;
+    }
+    if (needle_len == 0) {
+        return start;
+    }
+    if (needle_len > len - start) {
+        return -1;
+    }
+    const char *cursor = data + start;
+    const char *end = data + len - needle_len + 1;
+    while (cursor < end) {
+        cursor = memchr(cursor, needle[0], (size_t)(end - cursor));
+        if (!cursor) {
+            return -1;
+        }
+        if (memcmp(cursor, needle, (size_t)needle_len) == 0) {
+            return (long)(cursor - data);
+        }
+        cursor++;
+    }
+    return -1;
+}
 
 static void kiln_free_components(char *copy, const char *local) {
     if (copy != local) {

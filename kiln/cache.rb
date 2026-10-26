@@ -38,13 +38,13 @@ module Kiln
           unless positive?(max_bytes) && max_bytes <= MAX_INTEGER
             raise ArgumentError, 'max_bytes must be a positive C long Integer'
           end
-          return if max_value.is_a?(Integer) && max_value.between?(0, MAX_VALUE)
+          return if max_value.is_a?(Integer) && max_value >= 0 && max_value <= MAX_VALUE
 
           raise ArgumentError, "max_value must be an Integer from 0 to #{MAX_VALUE}"
         end
 
         def shards(requested, max_entries, max_bytes)
-          unless requested.is_a?(Integer) && requested.between?(1, MAX_SHARDS) && requested.nobits?(requested - 1)
+          unless requested.is_a?(Integer) && requested >= 1 && requested <= MAX_SHARDS && requested.nobits?(requested - 1)
             raise ArgumentError, "shards must be a power of two from 1 to #{MAX_SHARDS}"
           end
 
@@ -135,7 +135,7 @@ module Kiln
     end
 
     def sweep(budget = SWEEP_BUDGET)
-      unless budget.is_a?(Integer) && budget.between?(0, MAX_INTEGER)
+      unless budget.is_a?(Integer) && budget >= 0 && budget <= MAX_INTEGER
         raise ArgumentError, 'sweep budget must be a non-negative C long Integer'
       end
 

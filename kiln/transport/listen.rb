@@ -19,7 +19,7 @@ module Kiln
       end
 
       def use_tcp(host, port)
-        raise ArgumentError, 'port must be 0..65535' unless port.is_a?(Integer) && port.between?(0, 65_535)
+        raise ArgumentError, 'port must be 0..65535' unless port.is_a?(Integer) && port >= 0 && port <= 65_535
 
         @host = host
         @port = port

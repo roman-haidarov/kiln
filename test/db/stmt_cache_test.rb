@@ -161,7 +161,7 @@ end
 
 def check_bound(target, observer)
   held, left = bound_held(target, observer)
-  ok = held.between?(0, 32) && left.zero?
+  ok = held >= 0 && held <= 32 && left.zero?
   line(target.db, 'bound', ok ? 'yes' : 'no')
   need("#{target.db} bound #{held} #{left}", ok)
 end

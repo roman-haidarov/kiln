@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SPINEL_REF: 519280dc9edd136186c0b0767fb73766b6e45aba
+  SPINEL_REF: 9d10403754b91db4df7555b482c7c1436b0ddb52
 
 jobs:
   linux:

@@ -57,7 +57,7 @@ module Kiln
           index + 2 < size && hex?(raw.getbyte(index + 1)) && hex?(raw.getbyte(index + 2))
         end
 
-        def hex?(byte) = byte.between?(48, 57) || byte.between?(65, 70) || byte.between?(97, 102)
+        def hex?(byte) = (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)
 
         def nibble(byte)
           return byte - 48 if byte <= 57

@@ -178,7 +178,7 @@ module Kiln
         @level = Integer(level)
         @stream_level = Integer(stream_level)
         @min_size = Integer(min_size)
-        raise ArgumentError, 'levels must be 1..9' unless @level.between?(1, 9) && @stream_level.between?(1, 9)
+        raise ArgumentError, 'levels must be 1..9' unless @level >= 1 && @level <= 9 && @stream_level >= 1 && @stream_level <= 9
       end
 
       def call(ctx)

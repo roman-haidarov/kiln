@@ -94,7 +94,7 @@ module Kiln
           conn
         end
 
-        def cache_capacity?(value) = value.is_a?(Integer) && value.between?(0, 256)
+        def cache_capacity?(value) = value.is_a?(Integer) && value >= 0 && value <= 256
 
         def prepare_native(kind)
           raise ConnectionError, 'configure' if Native.configure != Native::OK

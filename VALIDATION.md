@@ -6,7 +6,7 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
-Current tree: 21 test files, 898 expected checks. The transport-related files are
+Current tree: 30 test files, 898 expected checks. The transport-related files are
 `test/listen_test.rb`, `test/timeouts_test.rb`, `test/payload_test.rb`,
 `test/websocket_test.rb`, `test/tls_test.rb` and `test/sigpipe_test.rb`.
 `test/listen_test.rb` also checks invalid `reuse_port`, invalid `buffer_body`
@@ -18,6 +18,21 @@ matching and the 1007 answer to a close reason that is not UTF-8;
 checks. `test/sigpipe_test.rb` starts each backend in a child process with the
 default `SIGPIPE` disposition and resets connections mid-response; on Linux it
 passes with or without the SIGPIPE fix, so it guards the macOS behavior only.
+
+### Spinel 9d104 DB build follow-up (2026-10-27)
+
+- Pinned Docker and both CI workflows to Spinel
+  `9d10403754b91db4df7555b482c7c1436b0ddb52`.
+- `spin new` / `spin add kiln --path` / `spin build` passed on macOS ARM64 with
+  the pinned compiler and `PKG_CONFIG_PATH` set to Homebrew's libpq 18.4 and
+  MariaDB Connector/C 3.4.8 metadata. The generated program requires both
+  `kiln` and `kiln/db`; package C compilation includes all DB adapter sources.
+- `ci/db-test.sh api_surface` passed under the same Spinel build.
+- `test/event_server_test.rb` passed under the same Spinel build after replacing
+  `String#byteindex` with the C byte search helper.
+- `./test-spinel.sh` passed all 30/30 tests with `SPINEL_WORKERS=1`.
+- The Linux Docker image and live PostgreSQL/MySQL/MariaDB integration tests
+  were not run in this follow-up.
 
 ### Spin package installation and gzip follow-up (2026-10-20)
 
@@ -3307,10 +3322,12 @@ Changed:
 - Not run: the MySQL 8 `TRIGGER`-visibility path (the hidden-trigger test
   uses MariaDB), PostgreSQL 17/18, MySQL 8.4, MariaDB 11.4, macOS.
 
-## Spinel 2e5295be4
+## Historical validation on Spinel 2e5295be4
 
-Compiler pin: `2e5295be4f1010dda79e88e6d4417081ab29f2cc` (Dockerfile, both
-workflows, `ci/spin-build-smoke.sh` checks the revision).
+These results were collected with `2e5295be4f1010dda79e88e6d4417081ab29f2cc`.
+The current Dockerfile and both CI workflows pin Spinel
+`9d10403754b91db4df7555b482c7c1436b0ddb52`; historical results below retain
+the compiler version actually used for each run.
 
 Failures on the 0.0.10 tree: `kiln/static.rb` was refused at
 `ctx.req.params[@param]`; `Server.new(router, ...)` answered every request with

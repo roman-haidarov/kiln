@@ -148,7 +148,7 @@ module Kiln
           value = @ignore || @update ? 'applied_unknown' : 'inserted'
           j = page.from
           while j < page.upto
-            @status[page.originals[j]] = value
+            set_status(page.originals[j], value)
             j += 1
           end
         end
@@ -333,7 +333,7 @@ module Kiln
             if paired
               @picks[original] = page.base + orphans[i]
             else
-              @status[original] = left_status(original, orphans, chain)
+              set_status(original, left_status(original, orphans, chain))
             end
             i += 1
           end
@@ -362,7 +362,7 @@ module Kiln
           while j < page.upto
             original = page.originals[j]
             unknown = @update || (@ignore && @model.dialect != :postgres)
-            @status[original] = unknown ? 'applied_unknown' : 'inserted' if @picks[original] >= 0
+            set_status(original, unknown ? 'applied_unknown' : 'inserted') if @picks[original] >= 0
             j += 1
           end
         end
@@ -389,6 +389,10 @@ module Kiln
       end
 
       private
+
+      def set_status(index, value)
+        @status[index] = value
+      end
 
       def init_results(count)
         @picks = Array.new(count, -1)
