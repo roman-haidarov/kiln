@@ -21,7 +21,7 @@ raise ArgumentError, 'STORE must be native or hash' unless %w[native hash].inclu
 unless [keys, capacity, ops, thread_count].all?(&:positive?)
   raise ArgumentError, 'KEYS, CAPACITY, OPS and THREADS must be positive'
 end
-unless value_bytes >= 0 && reads.between?(0, 100)
+unless value_bytes >= 0 && reads >= 0 && reads <= 100
   raise ArgumentError, 'VALUE must be non-negative and READS must be from 0 to 100'
 end
 

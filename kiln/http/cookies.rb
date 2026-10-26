@@ -98,8 +98,8 @@ module Kiln
         end
 
         def octet?(byte)
-          byte == 0x21 || byte.between?(0x23, 0x2B) || byte.between?(0x2D, 0x3A) ||
-            byte.between?(0x3C, 0x5B) || byte.between?(0x5D, 0x7E)
+          byte == 0x21 || (byte >= 0x23 && byte <= 0x2B) || (byte >= 0x2D && byte <= 0x3A) ||
+            (byte >= 0x3C && byte <= 0x5B) || (byte >= 0x5D && byte <= 0x7E)
         end
 
         def attribute?(value)

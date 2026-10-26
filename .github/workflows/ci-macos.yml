@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SPINEL_REF: 519280dc9edd136186c0b0767fb73766b6e45aba
+  SPINEL_REF: 9d10403754b91db4df7555b482c7c1436b0ddb52
   SPINEL_WORKERS: 1
 
 jobs:
@@ -42,7 +42,7 @@ jobs:
       - name: Install native dependencies
         env:
           HOMEBREW_CACHE: ${{ runner.temp }}/homebrew-cache
-        run: brew install llvm lld pkg-config libffi openssl@3 wrk
+        run: brew install llvm lld pkg-config libffi libpq mariadb-connector-c openssl@3 wrk
 
       - name: Restore fuzz corpus
         uses: actions/cache@v4
@@ -81,6 +81,7 @@ jobs:
           LLVM_PROFDATA="$(brew --prefix llvm)/bin/llvm-profdata" \
           LLVM_COV="$(brew --prefix llvm)/bin/llvm-cov" \
           KILN_ARTIFACTS="$RUNNER_TEMP/kiln-ci" \
+          PKG_CONFIG_PATH="$(brew --prefix libpq)/lib/pkgconfig:$(brew --prefix mariadb-connector-c)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
           TEST_TIMEOUT=60 \
           KILN_FUZZ_SECONDS=2 \
             ci/run.sh

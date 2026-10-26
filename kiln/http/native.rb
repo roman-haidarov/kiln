@@ -23,11 +23,16 @@ module Kiln
       ffi_func :kiln_chunk_step, %i[str long long long int_array], :binstr
       ffi_func :kiln_host, %i[str long], :long
       ffi_func :kiln_http_scan_at, %i[str long long long int_array long], :long
+      ffi_func :kiln_http_byteindex, %i[str long str long long long], :long
       ffi_func :kiln_http_open_beneath, %i[long str long], :long
       ffi_func :kiln_http_accepts_gzip, %i[str long], :long
 
       class << self
         def scratch = Array.new(CAP, 0)
+
+        def byteindex(data, needle, offset, from)
+          Native.kiln_http_byteindex(data, data.bytesize, needle, needle.bytesize, offset, from)
+        end
 
         def parse_head(head, out)
           scanned = Native.kiln_http_scan(head, head.bytesize, out, CAP)

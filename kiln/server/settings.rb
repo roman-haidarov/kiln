@@ -94,7 +94,7 @@ module Kiln
         rows
       end
 
-      def valid_port? = @raw[:port].is_a?(Integer) && @raw[:port].between?(0, 65_535)
+      def valid_port? = @raw[:port].is_a?(Integer) && @raw[:port] >= 0 && @raw[:port] <= 65_535
 
       def shared_port_zero?
         reuse_port? && listen.any? { |spec| spec.kind == :tcp && spec.port.zero? }

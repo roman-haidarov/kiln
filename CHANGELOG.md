@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.15
+
+### Changed
+
+- Pin Docker and both CI workflows to Spinel `9d10403754b91db4df7555b482c7c1436b0ddb52`.
+- Include the PostgreSQL and MySQL/MariaDB adapters in the default `spin build` and `ext/build.sh`. Building requires libpq 17+ and MariaDB Connector/C 3.4+ development headers; set `KILN_DB=0` for an HTTP-only native build.
+- Use Ubuntu 26.04 for the Docker build image to provide the required database development packages.
+
+### Fixed
+
+- Make the DB Ruby sources compile with the pinned Spinel version, including batch status writes and numeric bounds checks.
+- Replace unsupported `String#byteindex` calls with the native byte-search helper.
+- Extend the package installation smoke test to compile and run an application that requires `kiln/db`.
+
 ## 0.0.14
 
 ### Added
@@ -104,8 +118,6 @@
   MariaDB through MariaDB Connector/C 3.4+: connections, a per-thread connection
   pool, models, relations, transactions with savepoints, and bulk import. See
   [DB.md](DB.md).
-- Kiln::DB is opt-in: `spin build` and `ext/build.sh` build Kiln without it and
-  need no database headers. `KILN_DB=1 ./ext/build.sh` builds it.
 
 ### Changed
 

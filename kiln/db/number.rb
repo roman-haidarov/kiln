@@ -41,7 +41,7 @@ module Kiln
       attr_reader :hi, :lo
 
       def initialize(high, low)
-        raise RangeError, 'int64 hi' unless high.is_a?(Integer) && high.between?(Words::I32_MIN, Words::I32_MAX)
+        raise RangeError, 'int64 hi' unless high.is_a?(Integer) && high >= Words::I32_MIN && high <= Words::I32_MAX
         raise RangeError, 'int64 lo' unless low.is_a?(Integer) && low >= 0 && low <= Words::U32_MAX
 
         @hi = high

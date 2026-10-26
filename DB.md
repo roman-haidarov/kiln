@@ -4,7 +4,7 @@ Kiln::DB provides database connections, models, relations, transactions, and
 bulk imports for Spinel applications. The application entry point creates the
 connection; model and query examples are grouped below by task.
 
-**Status: experimental in 0.0.8.** The MySQL 8.4 / MariaDB 11.4 /
+**Status: experimental.** The MySQL 8.4 / MariaDB 11.4 /
 PostgreSQL 17–18 server matrix, macOS and a CI job are still open release gates.
 
 ## Adapters
@@ -21,19 +21,25 @@ needed only to compile the database extension.
 
 ### Building
 
-Kiln::DB is not part of the default build. `spin build` and `ext/build.sh`
-compile Kiln without it and need no database headers. Build the database
-extension explicitly:
+Kiln::DB adapters are included in the default `spin build` and
+`ext/build.sh`. The build needs libpq 17+ and MariaDB Connector/C 3.4+
+development headers, plus `pkg-config`. On Homebrew, install both libraries
+and expose their `.pc` files through `PKG_CONFIG_PATH` when Homebrew keeps them
+outside the default search path. The package manifest reads compiler include
+flags from the `libpq` and `libmariadb` pkg-config modules.
+
+To override nonstandard installation paths when building native objects
+directly:
 
 ```sh
-KILN_DB=1 KILN_DB_LIBPQ_PREFIX=/opt/libpq17 KILN_DB_LIBMARIADB_PREFIX=/opt/mariadb-connector-c ./ext/build.sh
+KILN_DB_LIBPQ_PREFIX=/opt/libpq17 KILN_DB_LIBMARIADB_PREFIX=/opt/mariadb-connector-c ./ext/build.sh
 ```
 
 Without the prefixes the script asks `pkg-config` (`libpq`, `libmariadb`), then
 `mariadb_config`, then the Homebrew paths. Compilation stops with an explicit
-error when the headers are older than libpq 17 or Connector/C 3.4. A program
-that requires `kiln/db` must be linked with these objects; `spin build` does not
-provide them in this release.
+error when the headers are older than libpq 17 or Connector/C 3.4. Set
+`KILN_DB=0` only to build an HTTP-only native extension without database
+headers.
 
 ### Connecting
 

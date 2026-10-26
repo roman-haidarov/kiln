@@ -15,8 +15,8 @@ module Kiln
       def empty? = @pos >= @data.bytesize
 
       def index(marker, from = 0)
-        at = @data.byteindex(marker, @pos + from)
-        at ? at - @pos : nil
+        at = Native.byteindex(@data, marker, @pos, from)
+        at >= 0 ? at - @pos : nil
       end
 
       def byte_at(offset) = @data.getbyte(@pos + offset)

@@ -53,7 +53,7 @@ sweeper = Kiln::Cache.new(max_entries: 1024, max_bytes: 1 << 20, shards: 4)
 Kernel.sleep 0.04
 before = sweeper.stats
 verify 'sweep zero leaves all counters unchanged', sweeper.sweep(0).zero? && sweeper.stats == before
-bounded = 512.times.all? { sweeper.sweep(1).between?(0, 1) }
+bounded = 512.times.all? { (count = sweeper.sweep(1)) >= 0 && count <= 1 }
 verify 'small sweep budgets rotate through every shard', bounded && sweeper.stats[:entries].zero? &&
                                                          sweeper.stats[:expirations] == 128
 sweeper.close

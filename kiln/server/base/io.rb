@@ -38,7 +38,7 @@ module Kiln
       def write_all(sock, data, deadline, body = EMPTY_BODY)
         off = 0
         total = data.bytesize + body.bytesize
-        off = write_step(sock, data, body, off, deadline) while off.between?(0, total - 1)
+        off = write_step(sock, data, body, off, deadline) while off >= 0 && off < total
         off == total
       rescue IOError, SystemCallError
         false

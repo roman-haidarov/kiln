@@ -81,7 +81,7 @@ module Kiln
 
       def json(max_nesting: Json::MAX_NESTING)
         parsed = @json_nesting
-        return @json if parsed.between?(0, max_nesting)
+        return @json if parsed >= 0 && parsed <= max_nesting
 
         raise UnsupportedMediaType, 'expected application/json' unless Media.json?(header('content-type'))
 
@@ -101,9 +101,9 @@ module Kiln
       private
 
       def split_target(text)
-        cut = text.byteindex('?')
-        @path = cut ? text.byteslice(0, cut) : text
-        @query = cut ? text.byteslice(cut + 1, text.bytesize - cut - 1) : ''
+        cut = Native.byteindex(text, '?', 0, 0)
+        @path = cut >= 0 ? text.byteslice(0, cut) : text
+        @query = cut >= 0 ? text.byteslice(cut + 1, text.bytesize - cut - 1) : ''
       end
 
       def apply_wire(wire)

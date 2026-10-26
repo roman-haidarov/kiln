@@ -464,8 +464,8 @@ module Kiln
         end
 
         def valid_code?(code)
-          code.is_a?(Integer) && (code.between?(1000, 1003) || code.between?(1007, 1014) ||
-            code.between?(3000, 4999))
+          code.is_a?(Integer) && ((code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1014) ||
+            (code >= 3000 && code <= 4999))
         end
 
         def valid_reason?(reason)

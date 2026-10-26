@@ -35,6 +35,7 @@ cd "$scratch/kiln_smoke"
 "$spin" add kiln --path "$root"
 cat >bin/kiln_smoke.rb <<'RUBY'
 require 'kiln'
+require 'kiln/db'
 json = Kiln::HTTP::Json.generate({ 'x' => 'ё' })
 raise 'JSON mismatch' unless json == '{"x":"ё"}'
 raise 'version mismatch' unless Kiln::VERSION == ENV.fetch('KILN_EXPECTED_VERSION')
