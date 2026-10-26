@@ -525,9 +525,78 @@ value = cpu.run(timeout: 0.5) { expensive_calculation }
 cpu.shutdown(grace: 1.0)
 ```
 
+## Cache
+
+`Kiln::Cache` is an in-process key-value cache whose entries live in C memory,
+outside the Spinel heap, so a large cache does not make garbage collection
+slower. Create it once, before the server starts, and share it between
+handlers and threads:
+
+```ruby
+pages = Kiln::Cache.new(max_entries: 100_000, max_bytes: 256 << 20)
+
+router.get("/articles/:id", lambda { |ctx|
+  id = ctx.req.params["id"]
+  ctx.res.text(pages.fetch("article:#{id}", ttl: 30) { render_article(id) })
+})
+```
+
+- `get(key)` / `cache[key]` returns a copy of the stored bytes as a binary
+  String, or `nil`. Call `force_encoding` if you need the text encoding back.
+- `set(key, value, ttl: nil)` / `cache[key] = value` stores a copy of a
+  String and returns `true`, or `false` when the value is larger than
+  `max_value` (1 MiB by default), allocation fails, or the shard cannot make
+  room within its 64-entry eviction budget. A failed `set` can evict up to 64
+  entries, and removes the previous value of the same key. `ttl:` is in seconds; a ttl of
+  `Kiln::Cache::MAX_TTL` (2^40 seconds) or more is stored as that maximum.
+- `fetch(key, ttl: nil) { ... }` returns the cached value or stores the
+  block's result. Two threads that miss at the same time both run the block.
+- `sweep(budget = 1024)` looks at up to `budget` entries, split over the
+  shards, and removes the expired ones; `sweep(0)` does nothing. Expired
+  entries are also removed when they are read or evicted.
+- `delete(key)`, `clear`, `stats` (`entries`, `bytes`, `hits`, `misses`,
+  `evictions`, `expirations`, `refusals`).
+- `close` may be called while other threads use the cache. It waits for calls
+  already inside the cache, then frees it; any later call, including one
+  another thread had already started in Ruby, raises `IOError`. A cache opened
+  later never answers for a closed one.
+
+Keys are converted with `to_s` and are at most 64 KiB. `max_entries` is at
+most `Kiln::Cache::MAX_ENTRIES` (2^28). `max_bytes` counts keys, values and
+56 bytes of overhead per entry. The hash index is allocated up front, 10 to
+20 bytes per allowed entry, and is not counted. The cache is split into
+`shards:` (16 by default, a power of two up to 256) with one lock each; each
+shard gets an equal share of `max_entries` and `max_bytes`, so a shard can
+evict before the cache as a whole is full. When a shard is full, the entry to
+evict is chosen with SIEVE: entries read since the last pass are kept. A
+process can have up to 64 open caches.
+
+In a threaded build, each OS thread that reads a cache value retains a result
+buffer sized for its largest read until that thread exits. Set `max_value:` to
+the largest value the application needs to read.
+
+`get`, `set` and `delete` first try the shard lock in a plain native call.
+Only when another thread holds that shard does the call repeat as a
+`blocking: true` call, which waits for the mutex outside the Spinel GC world,
+so a garbage collection never waits for a thread queued on a cache lock and an
+uncontended call does not pay for the scheduler lock that `blocking: true`
+takes. Creating a cache, `sweep`, `clear`, `stats` and `close` are always
+blocking. Statistics are copied into C thread-local storage and read back
+without a loop, so another green thread cannot overwrite them in between.
+`closed?` asks the native registry, so a copy of the wrapper sees a close too.
+`max_bytes` and sweep budgets must fit a signed 64-bit C long.
+
+`bench/cache_bench.rb` and `bench/cache_server.rb` default to 16 shards for
+both stores. Native values are always copied on reads and writes. The Hash
+baseline returns shared values by default (`COPY=0`); use `STORE=hash COPY=1`
+for the same value-copy behavior. The benchmark output and server startup
+record `copy`, alongside the store and shard count. Keep these settings,
+capacity, key distribution, value size, workers and threads equal when
+comparing runs. Hash uses FIFO eviction; the native cache uses SIEVE.
+
 ## Database
 
-Kiln::DB is experimental in 0.0.8 and is not compiled by `spin build`. Build it
+Kiln::DB remains experimental and is not compiled by `spin build`. Build it
 with `KILN_DB=1 ./ext/build.sh` (see [DB.md](../DB.md#building)); it needs
 libpq 17+ and MariaDB Connector/C 3.4+ headers at build time and loads the
 libraries at run time.

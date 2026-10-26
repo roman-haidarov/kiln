@@ -19,12 +19,12 @@ router = Kiln::Routing::Router.new
                               .get('/', ->(ctx) { ctx.res.text("Hello, World!\n") })
                               .get('/sleep', lambda { |ctx|
                                                LANE_STARTED << 1
-                                               LANE_GATE.pop(timeout: 30)
+                                               LANE_GATE.pop(timeout: 10)
                                                ctx.res.text("slept\n")
                                              })
                               .get('/long', lambda { |ctx|
                                               LONG_STARTED << 1
-                                              Kernel.sleep 3
+                                              Kernel.sleep 0.75
                                               ctx.res.text("never\n")
                                             })
                               .get('/count', lambda { |ctx|
@@ -43,7 +43,7 @@ lanes.start
 lp = lanes.port
 slow_result = Queue.new
 slow = Thread.new { slow_result << exchange(lp, "GET /sleep HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n") }
-LANE_STARTED.pop(timeout: 10)
+LANE_STARTED.pop(timeout: 3)
 fast = exchange(lp, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
 slow_pending = slow_result.empty?
 LANE_GATE << 1
@@ -55,13 +55,13 @@ batch = (+'').b
 batch << "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
 check 'lanes: 16 pipelined requests keep their order', exchange(lp, batch).scan('HTTP/1.1 200 ').size == 16
 o = exchange(lp, "GET /count HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\nGET /count HTTP/1.1\r\nHost: x\r\n\r\n")
-Kernel.sleep 0.2
+Kernel.sleep 0.05
 check 'lanes: request after Connection: close is not executed', o.scan('HTTP/1.1 200 ').size == 1 && CALLS.size == 1
 CALLS.clear
 o = exchange(lp,
              "GET /count HTTP/1.0\r\nConnection: keep-alive, close\r\n\r\n" \
              "GET /count HTTP/1.0\r\nConnection: keep-alive\r\n\r\n")
-Kernel.sleep 0.2
+Kernel.sleep 0.05
 check 'lanes: HTTP/1.0 with both keep-alive and close stops after one request',
       o.scan(' 200 ').size == 1 && CALLS.size == 1
 waiting = Queue.new
@@ -69,10 +69,10 @@ graceful_client = Thread.new do
   data = (1..3).map do |i|
     "GET /shutdown-pipe HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n"
   end.join
-  waiting << exchange(lp, data, 3.0)
+  waiting << exchange(lp, data, 1.0)
 end
 SHUTDOWN_CALLS.pop
-left = lanes.shutdown(grace: 2)
+left = lanes.shutdown(grace: 0.7)
 graceful_client.join
 pipe_response = waiting.pop
 check 'lanes: shutdown finishes every request already parsed from a pipeline',
@@ -80,7 +80,7 @@ check 'lanes: shutdown finishes every request already parsed from a pipeline',
 stuck = Kiln::Server::Event.new(router, log: log, port: 0, handlers: 2)
 stuck.start
 stuck_data = (1..3).map { |i| "GET /long HTTP/1.1\r\nHost: x\r\n#{"Connection: close\r\n" if i == 3}\r\n" }.join
-stuck_client = Thread.new { exchange(stuck.port, stuck_data, 3.0) }
+stuck_client = Thread.new { exchange(stuck.port, stuck_data, 1.0) }
 LONG_STARTED.pop
 t0 = Kiln::Runtime.now
 stuck_left = stuck.shutdown(grace: 0.2)
@@ -118,8 +118,8 @@ pipe_client = Thread.new do
   pipe_out << exchange(closing.port, "GET /count HTTP/1.1\r\nHost: x\r\n\r\nGET /count HTTP/1.1\r\nHost: x\r\n\r\n",
                        3.0)
 end
-CALLS.pop(timeout: 2)
-closing.shutdown(grace: 2)
+CALLS.pop(timeout: 1)
+closing.shutdown(grace: 0.7)
 pipe_client.join
 replies = pipe_out.pop
 first_end = replies.index("counted\n")
@@ -161,7 +161,7 @@ def response_count(buf)
   count
 end
 
-def read_responses(sock, count, seconds = 10.0)
+def read_responses(sock, count, seconds = 5.0)
   out = (+'').b
   limit = Kiln::Runtime.now + seconds
   while response_count(out) < count && Kiln::Runtime.now < limit
@@ -187,12 +187,12 @@ SLOW_DONE = Queue.new
 order_router = Kiln::Routing::Router.new
                                     .get('/slow', lambda { |ctx|
                                                     SLOW_STARTED << 1
-                                                    SLOW_GATE.pop(timeout: 30)
+                                                    SLOW_GATE.pop(timeout: 10)
                                                     SLOW_DONE << 1
                                                     ctx.res.text('slow')
                                                   })
                                     .get('/nap', lambda { |ctx|
-                                                   Kernel.sleep 0.2
+  Kernel.sleep 0.05
                                                    ctx.res.text('nap')
                                                  })
                                     .get('/fast', ->(ctx) { ctx.res.text('fast') })
@@ -201,7 +201,7 @@ order_server = Kiln::Server::Event.new(order_router, log: log, port: 0, handlers
 order_server.start
 slow_sock = TCPSocket.new('127.0.0.1', order_server.port)
 slow_sock.write("GET /slow HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
-slow_started = !SLOW_STARTED.pop(timeout: 10).nil?
+slow_started = !SLOW_STARTED.pop(timeout: 3).nil?
 fast_results = Queue.new
 fast_threads = Array.new(4) do
   Thread.new do
@@ -223,7 +223,7 @@ fast_served = 0
 4.times { fast_served += fast_results.pop }
 slow_waiting = SLOW_DONE.empty?
 SLOW_GATE << 1
-slow_body = read_until_closed(slow_sock, 10)
+slow_body = read_until_closed(slow_sock, 1)
 slow_sock.close
 check 'hol_slow_handler',
       slow_started && slow_waiting && fast_served == 80 && slow_body.start_with?('HTTP/1.1 200 ') &&

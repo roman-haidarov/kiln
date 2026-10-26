@@ -23,7 +23,7 @@ router = Kiln::Routing::Router.new
                                            })
                               .get('/slow', lambda { |ctx|
                                               SLOW_STARTED << 1
-                                              Kernel.sleep 0.15
+                                              Kernel.sleep 0.05
                                               ctx.res.text('slow')
                                             })
                               .get('/after', lambda { |ctx|
@@ -49,7 +49,7 @@ def wait_calls(limit)
     break if now == last
 
     last = now
-    Kernel.sleep 0.3
+    Kernel.sleep 0.1
   end
   BIG_CALLS.size
 end
@@ -78,8 +78,8 @@ def unread_backlog(server)
   BIG_CALLS.clear
   sock = TCPSocket.new('127.0.0.1', server.port)
   sock.write(big_pipeline)
-  started = wait_calls(Kiln::Runtime.now + 5)
-  total = drain_bytes(sock, 60)
+  started = wait_calls(Kiln::Runtime.now + 3)
+  total = drain_bytes(sock, 15)
   sock.close
   [started, total]
 end
@@ -89,7 +89,7 @@ def ordered_error(port, bad)
   SLOW_STARTED.clear
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write("GET /slow HTTP/1.1\r\nHost: x\r\n\r\n#{bad}GET /after HTTP/1.1\r\nHost: x\r\n\r\n")
-  reply = read_until_closed(sock, 10)
+  reply = read_until_closed(sock, 1.5)
   sock.close
   first = reply.index('HTTP/1.1 200 ')
   error = reply.index(bad.start_with?('CONNECT') ? 'HTTP/1.1 501 ' : 'HTTP/1.1 400 ')

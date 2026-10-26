@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.0.14
+
+### Added
+
+- Added bounded, sharded `Kiln::Cache` with SIEVE eviction, backed by Verstable and rapidhash (MIT).
+- Added cache fuzz, lifecycle, close/reopen stress, GC, sanitizer and benchmark checks.
+- Cache operations try the shard lock first and use blocking FFI only when it is busy, so mutex waits do not hold up garbage collection.
+
+### Changed
+
+- Reduced CI fuzz and benchmark smoke durations.
+- Removed unused `ext/croaring` sources.
+
+### Fixed
+
+- Keep cache benchmark seeds within the generator range, including runs with more than four threads.
+- Native checks reject failed worker startup and use Bash for the DB script's `pipefail`.
+- Cache close now waits for active calls, and exhausted handle generations are retired.
+- Reject out-of-range integer arguments, report cache read allocation failures and preserve entries when a shard is busy.
+- Correct `closed?` for copied wrappers, sweep budgets, TTL overflow and maximum entry limits.
+
 ## 0.0.12
 
 ### Changed

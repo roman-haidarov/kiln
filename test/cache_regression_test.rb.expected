@@ -1,0 +1,14 @@
+ok   set owns its bytes and get returns an independent copy
+ok   empty keys and values round-trip
+ok   a key of exactly 64 KiB is accepted
+ok   huge finite TTLs are capped before multiplication
+ok   zero and NaN TTLs are rejected
+ok   max_bytes cannot overflow the FFI C long
+ok   sweep budgets cannot overflow the FFI C long
+ok   excessive index capacities are rejected
+ok   sweep zero leaves all counters unchanged
+ok   small sweep budgets rotate through every shard
+ok   copies observe the same native closed state
+ok   every operation reports a closed cache
+ok   concurrent operations and repeated close preserve the replacement
+ok   statistics snapshots remain separate during concurrent GC

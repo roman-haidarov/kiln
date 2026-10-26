@@ -25,14 +25,14 @@ def read_until_closed(sock, seconds)
       nil
     end
     reader.kill
-    cleanup_deadline = Kiln::Runtime.now + 0.5
+    cleanup_deadline = Kiln::Runtime.now + 0.1
     Kernel.sleep 0.001 while reader.alive? && Kiln::Runtime.now < cleanup_deadline
   end
   data
 end
 
 def wait_for
-  limit = Kiln::Runtime.now + 3
+  limit = Kiln::Runtime.now + 1
   until yield
     raise 'wait timeout' if Kiln::Runtime.now >= limit
 
@@ -59,7 +59,7 @@ def pool_holds?(pool, available: :skip, quarantined: :skip, failures: :skip, clo
   true
 end
 
-def exchange(port, data, seconds = 2.0)
+def exchange(port, data, seconds = 0.5)
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write(data)
   out = (+'').b
@@ -86,14 +86,14 @@ def collect_until(sock, seconds)
   out = (+'').b
   limit = Kiln::Runtime.now + seconds
   until yield(out) || Kiln::Runtime.now > limit
-    IO.select([sock], nil, nil, 0.2)
+    IO.select([sock], nil, nil, 0.05)
     chunk = sock.read_nonblock(4096, exception: false)
     out << chunk if chunk.is_a?(String)
   end
   out
 end
 
-def exchange_on(sock, data, seconds = 2.0)
+def exchange_on(sock, data, seconds = 0.5)
   sock.write(data)
   out = (+'').b
   limit = Kiln::Runtime.now + seconds
@@ -115,7 +115,7 @@ def exchange_on(sock, data, seconds = 2.0)
   out
 end
 
-def read_head(sock, seconds = 2.0)
+def read_head(sock, seconds = 0.5)
   out = collect_until(sock, seconds) { |buf| buf.include?("\r\n\r\n") }
   cut = out.index("\r\n\r\n")
   cut ? [out.byteslice(0, cut + 4), out.byteslice(cut + 4, out.bytesize - cut - 4)] : [out, ''.b]

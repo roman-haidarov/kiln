@@ -95,7 +95,7 @@ def build_app
     ctx.res.sse do |out|
       out.event('first', event: 'tick')
       EVENTS << :sent
-      RELEASE.pop(timeout: 5)
+      RELEASE.pop(timeout: 1.5)
       out.event('second', event: 'tick')
     end
   end)
@@ -281,13 +281,13 @@ log = Kiln::Observability::Log.new(StringIO.new)
   port = server.port
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write("GET /text HTTP/1.1\r\nHost: t\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n")
-  head_text, body = split_reply(read_until_closed(sock, 3).b)
+  head_text, body = split_reply(read_until_closed(sock, 1).b)
   sock.close
   check "#{name}: gzip over the wire", head_text.include?('Content-Encoding: gzip') && Zlib.gunzip(body) == TEXT
 
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write("GET /ticks HTTP/1.1\r\nHost: t\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n")
-  EVENTS.pop(timeout: 3)
+  EVENTS.pop(timeout: 1)
   early = (+'').b
   limit = Kiln::Runtime.now + 2.0
   until (early.include?("\r\n\r\n") && early.bytesize > early.index("\r\n\r\n") + 20) || Kiln::Runtime.now > limit
@@ -297,7 +297,7 @@ log = Kiln::Observability::Log.new(StringIO.new)
   check "#{name}: the first gzipped event arrives before the stream ends",
         early.bytesize > early.index("\r\n\r\n").to_i + 20
   RELEASE << :go
-  rest = read_until_closed(sock, 3).b
+  rest = read_until_closed(sock, 1).b
   sock.close
   _, wire = split_reply(early + rest)
   check "#{name}: the whole SSE stream inflates", Zlib.gunzip(dechunk(wire)).end_with?("data: second\n\n")

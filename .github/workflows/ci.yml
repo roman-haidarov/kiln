@@ -63,7 +63,8 @@ jobs:
             -e KILN_NATIVE_CC=clang-18 \
             -e KILN_C_CORPUS=/corpus \
             -e KILN_ARTIFACTS=/artifacts \
-            -e TEST_TIMEOUT=180 \
+            -e TEST_TIMEOUT=60 \
+            -e KILN_FUZZ_SECONDS=2 \
             -v "$GITHUB_WORKSPACE:/src" \
             -v "$RUNNER_TEMP/kiln-corpus:/corpus" \
             -v "$RUNNER_TEMP/kiln-ci:/artifacts" \

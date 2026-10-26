@@ -1,0 +1,29 @@
+ok   a missing key returns nil
+ok   set then get returns the value
+ok   an empty value is a hit, not a miss
+ok   binary keys and values with NUL bytes round-trip
+ok   a stored value comes back as binary bytes
+ok   set replaces the value of an existing key
+ok   delete removes a key once
+ok   []= and [] are set and get
+ok   fetch computes a missing value once
+ok   a value expires after its ttl
+ok   sweep removes expired values
+ok   a value over max_value is refused
+ok   a refused set removes the previous value of the key
+ok   refusals are counted
+ok   SIEVE keeps entries that were read and evicts the ones that were not
+ok   the byte limit evicts older values
+ok   stats report every counter
+ok   clear empties the cache
+ok   shards must be a power of two
+ok   limits must be positive
+ok   ttl must be positive and finite
+ok   values must be Strings
+ok   keys are limited to 64 KiB
+ok   shards shrink to fit max_entries
+ok   a closed cache raises IOError
+ok   concurrent threads never read another key's value and limits hold
+ok   event: handlers share one cache across requests
+ok   event lanes: handlers share one cache across requests
+ok   base: handlers share one cache across requests

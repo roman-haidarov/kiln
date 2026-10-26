@@ -3331,3 +3331,77 @@ reads the parameter key into a local.
 `SPINEL_WORKERS=1` and `2 ./test-spinel.sh` on Spinel 2e5295be4: 26/26.
 RuboCop 1.88.2 over `kiln kiln.rb`: no offenses. The DB suite does not touch
 these files and was not rerun.
+
+## 0.0.14 cache review (2026-10-26)
+
+- Homebrew Clang 22.1.5 on macOS ARM64: `ci/c-native.sh all` passed. Clang
+  Static Analyzer, 11 libFuzzer targets, HTTP/TLS/cache TSan, cache lifecycle
+  ASan/UBSan, TLS context lifecycle, and `ci/libuv-embedding.sh` (5 cycles)
+  passed.
+- Spinel `2e5295be4f1010dda79e88e6d4417081ab29f2cc`: `./test-spinel.sh`
+  passed 29/29 (the tree has 30 tests; see the second pass below) with
+  `SPINEL_WORKERS=1` and `2`; the final one-worker run and
+  `ci/spin-build-smoke.sh` passed after the C and test changes.
+- Strict C11 syntax checks with `-Wall -Wextra -Wsign-compare -Werror` and
+  clang-format checks passed for the changed C sources and harnesses.
+- Cppcheck 2.22.0 normal and exhaustive checks reported the known async
+  `uv_write` ownership false positive in `kuv_queue_write`, FFI exports as
+  unused, and template warnings in vendored Verstable. Lizard reports nine
+  complexity/length warnings in the HTTP and event transport parsers; these
+  are review priorities, not demonstrated correctness defects.
+- No hardware cache-miss profile or new performance benchmark was captured.
+
+## 0.0.14 cache review, second pass (2026-10-26)
+
+Run on Linux x86-64, two cores, on the tree before the try-lock change:
+
+- Spinel 2e5295be4: `./test-spinel.sh` 30/30 with `SPINEL_WORKERS=1` and `2`.
+  Spinel 519280dc: 30/30 with `SPINEL_WORKERS=1`.
+- `ci/cache-native.sh asan` and `tsan` (clang 18, and gcc for asan),
+  `ci/c-native.sh analyze`, `tsan` and `fuzz` with 12 targets at 30 seconds
+  each, all with UBSan errors fatal: passed.
+- `ci/db-native.sh unit`, `asan`, `affinity` and `safety` with libpq 17 and
+  MariaDB Connector/C 3.4.5 headers: passed. The DB suite against live
+  servers was not run.
+- `bench/cache_bench.rb`, 1000 keys, 64-byte values, 90% reads, ops/s:
+  one thread and worker, blocking every call 1.80M, plain calls 3.29M,
+  try-lock 3.38M; two threads and workers 1.97M, 3.37M, 2.99M; four threads,
+  two workers, one shard 1.90M, 3.56M, 3.55M. p999 6-11 us blocking against
+  1.2-1.7 us. With 64 KiB values on one shard 71k against 76k, and
+  `SPINEL_GC_STATS` the same for both (0.04 ms average pause). Over HTTP with
+  wrk, 44k against 50k requests/s.
+- The try-lock prototype passed `ci/cache-gc.sh`, `cache_test` and
+  `cache_regression_test` with one and two workers. The final tree with the
+  try-lock change, the restored close/reopen stress test and the benchmark
+  changes was not run.
+
+## 0.0.14 final archive validation (2026-10-26)
+
+The final uploaded tree and the fixes in `FINAL_REVIEW.patch` were checked on
+Linux x86-64 with Clang 18 and a clean build of Spinel 2e5295be4. See
+`FINAL_REVIEW.md` and `docs/final-review-validation/` for scope and logs.
+
+- Cache production C, its header, the Ruby cache API and the Clang transport
+  changes are unchanged from the uploaded final archive.
+- Fixed benchmark seed overflow with five or more threads, unchecked native
+  stress worker startup/join, and the DB native script's shell declaration.
+- The GC check now exercises public get/set/delete while a shard is held.
+  An intentionally unsafe FFI binding fails the check. Benchmark and server
+  output now record the Hash value-copy mode.
+- Cache lifecycle/stress passed ASan/UBSan and TSan. The native C pipeline
+  passed, including 12 fuzz targets at five seconds each. An additional
+  cache fuzz run completed 223434 executions in 61 seconds.
+- The 29 cache checks and 14 regressions passed at O2 with one, two and four
+  workers, including a four-worker GC stress run. Post-lint regression checks
+  passed through `test-spinel.sh` again.
+- The full suite at one worker and execution of the suite at two workers
+  each produced 29 PASS and one blocked test: the environment refuses AF_UNIX
+  creation in `listen_test.rb` with EPERM. Generated C used O0 in this full
+  functional pass; native objects used O2.
+- TLS compiled and passed snapshots on the clean Spinel build with one and
+  two workers. The previous TLS compilation failure is not reproduced here.
+- Package install/build, five libuv embedding cycles, DB native safety and
+  192 HTTP cache responses passed. The benchmark smoke cases check behavior,
+  not comparative performance. Live DB server tests and macOS/ARM were not run.
+- LeakSanitizer was disabled. Available Ruby and C checkers were run; Rubyfast
+  and the Docker lint image were unavailable. Existing style diagnostics remain.

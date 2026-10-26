@@ -13,6 +13,7 @@ end
 require 'kiln/runtime'
 require 'kiln/http'
 require 'kiln/static'
+require 'kiln/cache'
 require 'kiln/transport'
 require 'kiln/observability/log'
 require 'kiln/routing'

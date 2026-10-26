@@ -228,7 +228,8 @@ int kiln_db_slot_pin(uint64_t handle, int kind, uint64_t scope, uint64_t thread_
     return rc;
 }
 
-void *kiln_db_slot_acquire(uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, int *err) {
+void *kiln_db_slot_acquire(
+    uint64_t handle, int kind, uint64_t scope, uint64_t thread_id, int *err) {
     uint32_t id = (uint32_t)handle;
     uint32_t gen = (uint32_t)(handle >> 32);
     db_slot *slot;

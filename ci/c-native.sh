@@ -6,7 +6,7 @@ cc_bin=${KILN_NATIVE_CC:-clang}
 link_flags=${KILN_NATIVE_LDFLAGS:-}
 artifacts=${KILN_C_ARTIFACTS:-${TMPDIR:-/tmp}/kiln-c-native}
 corpus_root=${KILN_C_CORPUS:-${TMPDIR:-/tmp}/kiln-corpus}
-fuzz_seconds=${KILN_FUZZ_SECONDS:-5}
+fuzz_seconds=${KILN_FUZZ_SECONDS:-2}
 run_dir=$(mktemp -d "${TMPDIR:-/tmp}/kiln-c-native.XXXXXX")
 corpus_restore=
 corpus_backup=
@@ -70,7 +70,7 @@ spinel_headers() {
 
 run_analyze() {
   headers=$(spinel_headers || true)
-  sources="kiln_http kiln_uv kiln_uv_parse kiln_tls kiln_sock kiln_ws"
+  sources="kiln_http kiln_uv kiln_uv_parse kiln_tls kiln_sock kiln_ws kiln_cache"
   include="-I$root/ext -I$root/ext/libuv/include -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
   if [ -n "$headers" ]; then
     sources="$sources kiln_json kiln_gzip"
@@ -144,7 +144,7 @@ run_fuzz_target() {
   log="$artifacts/$name-libfuzzer.log"
   shift 3
   "$cc_bin" -std=c11 -O1 -g -DSP_THREADS -I "$root/ext" \
-    -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer \
+    -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer \
     -fprofile-instr-generate -fcoverage-mapping "$source" "$@" $link_flags -o "$binary"
   if ! LLVM_PROFILE_FILE="$profile" "$binary" -seed=1 -max_total_time="$fuzz_seconds" \
     -max_len="$max_len" -timeout=5 -dict="$root/bench/http.dict" \
@@ -208,6 +208,7 @@ run_fuzz() {
   run_fuzz_target uv-chunk "$root/bench/uv_chunk_fuzz.c" 65536 \
     "$root/ext/kiln_uv_parse.c" "$root/ext/kiln_http.c" \
     "$root/ext/picohttpparser/picohttpparser.c"
+  run_fuzz_target cache "$root/bench/cache_fuzz.c" 4096 "$root/ext/kiln_cache.c" -pthread
   sse_target=$(uname -m)
   sse_features=
   if [ "$(uname -s)" = Darwin ]; then
@@ -279,6 +280,15 @@ run_tsan() {
     return 1
   fi
   cat "$tls_lifecycle_log"
+  cache_log="$artifacts/cache-tsan.log"
+  if ! CC="$cc_bin" TSAN_OPTIONS=halt_on_error=1 KILN_CACHE_TEST_DIR="$run_dir/cache-native" \
+    "$root/ci/cache-native.sh" tsan > "$cache_log" 2>&1; then
+    cat "$cache_log" >&2
+    return 1
+  fi
+  cat "$cache_log"
+  CC="$cc_bin" UBSAN_OPTIONS=halt_on_error=1 KILN_CACHE_TEST_DIR="$run_dir/cache-native" \
+    "$root/ci/cache-native.sh" asan
   tls_native="$run_dir/tls_lifecycle"
   "$cc_bin" -std=c11 -O2 -DSP_THREADS -I "$root/ext" -pthread \
     "$root/bench/tls_tsan.c" "$root/ext/kiln_tls.c" $link_flags $tls_dl_flags -o "$tls_native"

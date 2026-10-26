@@ -66,8 +66,8 @@ static int kuv_digits(const char *s, long len, long *value) {
     return 0;
 }
 
-static int kuv_head_length(const char *data, size_t len, size_t scan_from, size_t *head_len,
-    int *error_status) {
+static int kuv_head_length(
+    const char *data, size_t len, size_t scan_from, size_t *head_len, int *error_status) {
     size_t from = scan_from > 3 ? scan_from - 3 : 0;
     if (from > len) {
         from = len;

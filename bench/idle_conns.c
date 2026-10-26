@@ -6,6 +6,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static void close_fds(int *fds, int count) {
+    for (int i = 0; i < count; i++) {
+        if (fds[i] >= 0) {
+            close(fds[i]);
+        }
+    }
+    free(fds);
+}
+
 int main(int argc, char **argv) {
     if (argc < 4) {
         fprintf(stderr, "usage: idle_conns PORT COUNT SECONDS\n");
@@ -16,6 +25,12 @@ int main(int argc, char **argv) {
     int seconds = atoi(argv[3]);
     const char req[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
     int *fds = calloc((size_t)count, sizeof(int));
+    if (!fds) {
+        return 1;
+    }
+    for (int i = 0; i < count; i++) {
+        fds[i] = -1;
+    }
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof addr);
     addr.sin_family = AF_INET;
@@ -25,10 +40,12 @@ int main(int argc, char **argv) {
         fds[i] = socket(AF_INET, SOCK_STREAM, 0);
         if (fds[i] < 0 || connect(fds[i], (struct sockaddr *)&addr, sizeof addr) != 0) {
             perror("connect");
+            close_fds(fds, count);
             return 1;
         }
         if (write(fds[i], req, sizeof req - 1) != (ssize_t)(sizeof req - 1)) {
             perror("write");
+            close_fds(fds, count);
             return 1;
         }
     }
@@ -39,6 +56,7 @@ int main(int argc, char **argv) {
             ssize_t n = read(fds[i], buf + got, sizeof buf - got);
             if (n <= 0) {
                 perror("read");
+                close_fds(fds, count);
                 return 1;
             }
             got += (size_t)n;
@@ -50,5 +68,6 @@ int main(int argc, char **argv) {
     printf("ready %d\n", count);
     fflush(stdout);
     sleep((unsigned)seconds);
+    close_fds(fds, count);
     return 0;
 }

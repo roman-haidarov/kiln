@@ -3,7 +3,7 @@ set -eu
 
 spinel_bin=${SPINEL:-spinel}
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
-limit=${TEST_TIMEOUT:-120}
+limit=${TEST_TIMEOUT:-40}
 results_dir=${KILN_VALIDATION_DIR:-/tmp/kiln-validation}/db-tests
 cd "$(dirname "$0")/.."
 spinel_cc=$(pwd)/ci/spinel-cc.sh

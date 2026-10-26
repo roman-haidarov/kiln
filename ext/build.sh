@@ -95,7 +95,7 @@ settings=build/ext/settings
 if [ ! -f "$settings" ] || [ "$(cat "$settings")" != "$build_key" ]; then
   rebuild=1
 fi
-for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_uv_parse.c ext/kiln_tls.c ext/kiln_sock.c ext/kiln_ws.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/uvsrc/*.c ext/zngsrc/*.c $db_sources; do
+for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_uv_parse.c ext/kiln_tls.c ext/kiln_sock.c ext/kiln_ws.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/kiln_cache.c ext/uvsrc/*.c ext/zngsrc/*.c $db_sources; do
   object=build/ext/$(basename "$source" .c).o
   extra=""
   case "$source" in

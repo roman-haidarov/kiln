@@ -72,7 +72,7 @@ def build_router
     ctx.res.stream do |out|
       out.write('one')
       out.flush
-      Kernel.sleep 0.5
+      Kernel.sleep 0.2
       Kiln::Runtime.check!
       out.write('two')
     end
@@ -167,7 +167,7 @@ log_io = StringIO.new
 log = Kiln::Observability::Log.new(log_io)
 [[:event, 0], [:event, 2], [:base, 0]].each do |backend, handlers|
   name = backend == :event ? "event/#{handlers}" : 'base'
-  options = { log:, port: 0, host: '127.0.0.1', backend:, request_timeout: 0.3, write_timeout: 0.5 }
+  options = { log:, port: 0, host: '127.0.0.1', backend:, request_timeout: 0.1, write_timeout: 0.5 }
   options[:handlers] = handlers if backend == :event
   server = Kiln::Server.new(Kiln::Middleware::Rescue.new(build_router, log), **options)
   server.start
@@ -202,7 +202,7 @@ log = Kiln::Observability::Log.new(log_io)
   sock.write("GET /forever HTTP/1.1\r\nHost: t\r\n\r\n")
   sock.readpartial(4096)
   sock.close
-  check "#{name}: a closed client ends the stream", GONE.pop(timeout: 4) == :gone
+  check "#{name}: a closed client ends the stream", GONE.pop(timeout: 1.5) == :gone
 
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write("GET /flood HTTP/1.1\r\nHost: t\r\n\r\n")
@@ -224,9 +224,9 @@ log = Kiln::Observability::Log.new(log_io)
   watcher.write("GET /watch HTTP/1.1\r\nHost: t\r\n\r\n")
   watcher.readpartial(4096)
   started = Kiln::Runtime.now
-  server.shutdown(grace: 3.0)
+  server.shutdown(grace: 1.0)
   check "#{name}: shutdown ends an SSE loop through closed?",
-        TRACE.pop(timeout: 3) == :closed && Kiln::Runtime.now - started < 2.0
+        TRACE.pop(timeout: 1) == :closed && Kiln::Runtime.now - started < 0.7
   watcher.close
 end
 log.close

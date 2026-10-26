@@ -86,8 +86,34 @@ static int check_stale(void) {
     return 0;
 }
 
+static int check_null_result_rows(void) {
+    int64_t lens[1];
+    int64_t nums[1];
+    int64_t meta[3];
+    double floats[1];
+    const char *out;
+    out = kiln_db_my_result_rows(NULL, 0, 1, 1, lens, 1, meta);
+    if (!out || out[0] || sp_ffi_bin_len || meta[0] != -2 || meta[1] || meta[2]) {
+        return fail("my-null-rows");
+    }
+    out = kiln_db_my_result_rows_typed(NULL, 0, 1, 1, lens, 1, nums, floats, meta);
+    if (!out || out[0] || sp_ffi_bin_len || meta[0] != -2 || meta[1] || meta[2]) {
+        return fail("my-null-typed-rows");
+    }
+    out = kiln_db_pg_result_rows(NULL, 0, 1, 1, lens, 1, meta);
+    if (!out || out[0] || sp_ffi_bin_len || meta[0] != -2 || meta[1] || meta[2]) {
+        return fail("pg-null-rows");
+    }
+    out = kiln_db_pg_result_rows_typed(NULL, 0, 1, 1, lens, 1, nums, floats, meta);
+    if (!out || out[0] || sp_ffi_bin_len || meta[0] != -2 || meta[1] || meta[2]) {
+        return fail("pg-null-typed-rows");
+    }
+    printf("asan-null-result-rows\n");
+    return 0;
+}
+
 int main(void) {
-    if (check_number() || check_resolve() || check_stale()) {
+    if (check_number() || check_resolve() || check_stale() || check_null_result_rows()) {
         return 1;
     }
     printf("asan-no-session\n");

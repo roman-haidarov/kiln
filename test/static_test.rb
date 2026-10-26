@@ -49,7 +49,7 @@ end
 def ask(port, text)
   sock = TCPSocket.new('127.0.0.1', port)
   sock.write(text)
-  reply = read_until_closed(sock, 5)
+  reply = read_until_closed(sock, 1.5)
   sock.close
   reply.b
 end
