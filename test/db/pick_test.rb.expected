@@ -1,0 +1,4 @@
+ok pick executes the derived query and preserves receiver
+ok pick on groups and derived tables
+ok empty unordered and invalid pick behavior
+ok preload list ownership across derivation

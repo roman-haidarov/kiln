@@ -71,11 +71,11 @@ module Kiln
         end
 
         def pick(col)
-          rel = self
-          rel = rel.order(*pk_orders) if rel.orders.empty?
+          rel = derive
+          rel.put_orders(pk_orders) if @orders.empty?
           raise NonDeterministicQuery, 'pick' if rel.orders.empty?
 
-          rows = rel.limit(1).select(col).run(:rows)
+          rows = rel.put_limit(1).put_picks(projected([col])).run(:rows)
           return nil if rows.empty?
 
           rows[0][0]

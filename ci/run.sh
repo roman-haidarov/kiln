@@ -32,6 +32,8 @@ fi
 
 printf '== test suite, SPINEL_WORKERS=1\n'
 SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/workers-1" ./test-spinel.sh
+printf '== database compiler and ORM tests without database services\n'
+SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/db-offline" ci/db-offline.sh
 printf '== cache mutex and concurrent garbage collection\n'
 CC="$c_compiler" KILN_CACHE_TEST_DIR="$artifacts/cache-gc" ci/cache-gc.sh
 printf '== spin package install and build smoke\n'

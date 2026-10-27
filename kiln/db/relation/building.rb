@@ -92,6 +92,8 @@ module Kiln
         def skip(count) = offset(count)
 
         def projected(cols)
+          return cols if plain_exprs?(cols)
+
           list = cols.flatten.map { |col| col.is_a?(Symbol) ? predicate_source.table[col] : col }
           raise ArgumentError, 'select' if list.empty? || !list.all?(Expr)
 
@@ -106,6 +108,18 @@ module Kiln
           model = other.is_a?(Table) ? other.model : other
           source = other.is_a?(Table) ? other : nil
           derive.put_joins(@joins + [Join.new(kind, model, on_expr, alias_name, source)])
+        end
+
+        def plain_exprs?(cols)
+          return false if cols.empty?
+
+          i = 0
+          while i < cols.length
+            return false unless cols[i].is_a?(Expr)
+
+            i += 1
+          end
+          true
         end
 
         def pk_orders

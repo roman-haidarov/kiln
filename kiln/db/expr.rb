@@ -4,13 +4,28 @@ module Kiln
       NAME = /\A[A-Za-z_][A-Za-z0-9_]*\z/
 
       class << self
-        def ok?(name) = name.is_a?(String) && NAME.match?(name)
+        def ok?(name)
+          return false unless name.is_a?(String)
+
+          size = name.bytesize
+          return false if size.zero?
+
+          i = 0
+          while i < size
+            byte = name.getbyte(i)
+            word = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+            return false unless word || (i.positive? && byte >= 48 && byte <= 57)
+
+            i += 1
+          end
+          true
+        end
       end
     end
 
     class Expr
-      def eq(value) = compare(:eq, value)
-      def not_eq(value) = compare(:ne, value)
+      def eq(value = nil) = compare(:eq, value)
+      def not_eq(value = nil) = compare(:ne, value)
       def gt(value) = compare(:gt, value)
       def gteq(value) = compare(:gte, value)
       def lt(value) = compare(:lt, value)
@@ -73,7 +88,7 @@ module Kiln
       end
 
       def compare(operator, value)
-        return NullPred.new(self, operator == :eq) if value.nil? && %i[eq ne].include?(operator)
+        return NullPred.new(self, operator == :eq) if value.nil? && (operator == :eq || operator == :ne)
 
         Cmp.new(operator, self, Expressions.wrap(value))
       end

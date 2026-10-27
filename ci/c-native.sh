@@ -267,18 +267,31 @@ run_tsan() {
   "$cc_bin" -std=c11 -O1 -g -DSP_THREADS -I "$root/ext" \
     -fsanitize=thread -fno-omit-frame-pointer -pthread \
     "$root/bench/tls_tsan.c" "$root/ext/kiln_tls.c" $link_flags $tls_dl_flags -o "$tls_binary"
+  tls_libdir=$(KILN_NATIVE_CC="$cc_bin" "$root/ci/openssl-tsan.sh")
+  case $(uname -s) in
+    Darwin) tls_ssl="$tls_libdir/libssl.3.dylib"; tls_crypto="$tls_libdir/libcrypto.3.dylib" ;;
+    *) tls_ssl="$tls_libdir/libssl.so.3"; tls_crypto="$tls_libdir/libcrypto.so.3" ;;
+  esac
+  {
+    printf 'TLS TSan libraries: %s %s\n' "$tls_ssl" "$tls_crypto"
+    if [ -f "$tls_libdir/../build-info.txt" ]; then
+      cat "$tls_libdir/../build-info.txt"
+    fi
+  } | tee "$artifacts/tls-tsan-libraries.txt"
   tls_log="$artifacts/tls-tsan.log"
-  if ! TSAN_OPTIONS=halt_on_error=1 "$tls_binary" > "$tls_log" 2>&1; then
-    cat "$tls_log" >&2
+  tls_lifecycle_log="$artifacts/tls-lifecycle-tsan.log"
+  : > "$tls_lifecycle_log"
+
+  if ! (
+    export KILN_LIBSSL="$tls_ssl" KILN_LIBCRYPTO="$tls_crypto"
+    TSAN_OPTIONS=halt_on_error=1 "$tls_binary" > "$tls_log" 2>&1 || exit 1
+    TSAN_OPTIONS=halt_on_error=1 "$tls_binary" \
+      "$root/test/fixtures/tls_cert.pem" "$root/test/fixtures/tls_key.pem" > "$tls_lifecycle_log" 2>&1
+  ); then
+    cat "$tls_log" "$tls_lifecycle_log" >&2
     return 1
   fi
   cat "$tls_log"
-  tls_lifecycle_log="$artifacts/tls-lifecycle-tsan.log"
-  if ! TSAN_OPTIONS=halt_on_error=1 "$tls_binary" \
-    "$root/test/fixtures/tls_cert.pem" "$root/test/fixtures/tls_key.pem" > "$tls_lifecycle_log" 2>&1; then
-    cat "$tls_lifecycle_log" >&2
-    return 1
-  fi
   cat "$tls_lifecycle_log"
   cache_log="$artifacts/cache-tsan.log"
   if ! CC="$cc_bin" TSAN_OPTIONS=halt_on_error=1 KILN_CACHE_TEST_DIR="$run_dir/cache-native" \

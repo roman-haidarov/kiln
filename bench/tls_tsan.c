@@ -1,3 +1,4 @@
+#include <dlfcn.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,6 +10,15 @@ __thread int sp_ffi_bin_len;
 
 #define TLS_TSAN_THREADS 16
 #define TLS_TSAN_ROUNDS  128
+
+#ifndef __has_feature
+#define __has_feature(feature) 0
+#endif
+#if __has_feature(thread_sanitizer) || defined(__SANITIZE_THREAD__)
+#define TLS_TEST_KIND "TLS TSan"
+#else
+#define TLS_TEST_KIND "TLS native"
+#endif
 
 static pthread_mutex_t tls_tsan_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t tls_tsan_cond = PTHREAD_COND_INITIALIZER;
@@ -77,11 +87,21 @@ int main(int argc, char **argv) {
         tls_tsan_cert = argv[1];
         tls_tsan_key = argv[2];
     }
+
+    void *crypto = NULL;
+    const char *crypto_path = getenv("KILN_LIBCRYPTO");
+    if (crypto_path && *crypto_path) {
+        crypto = dlopen(crypto_path, RTLD_NOW | RTLD_LOCAL);
+        if (!crypto) {
+            fprintf(stderr, "TLS test cannot load libcrypto: %s\n", dlerror());
+            return 1;
+        }
+    }
     memset(tls_tsan_alpn, 'a', sizeof tls_tsan_alpn - 1);
     tls_tsan_alpn[sizeof tls_tsan_alpn - 1] = '\0';
     if (!kiln_tls_available()) {
-        puts("TLS TSan skipped: OpenSSL unavailable");
-        return 0;
+        fprintf(stderr, "TLS native test requires OpenSSL: %s\n", kiln_tls_error_text());
+        return 1;
     }
     pthread_t threads[TLS_TSAN_THREADS];
     for (intptr_t i = 0; i < TLS_TSAN_THREADS; i++) {
@@ -110,10 +130,13 @@ int main(int argc, char **argv) {
             failed = 1;
         }
     }
+    if (crypto)
+        dlclose(crypto);
     if (failed) {
         return 1;
     }
-    puts(tls_tsan_cert ? "TLS native: concurrent TLS context lifecycles passed"
-                       : "TLS TSan: concurrent failed context initialization passed");
+    printf("%s: %s\n", TLS_TEST_KIND,
+        tls_tsan_cert ? "concurrent TLS context lifecycles passed"
+                      : "concurrent failed context initialization passed");
     return 0;
 }

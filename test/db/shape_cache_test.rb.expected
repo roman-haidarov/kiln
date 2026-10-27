@@ -1,0 +1,64 @@
+ok eq 1 binds 1
+ok pick shape 1 binds 1
+ok eq 2 binds 1
+ok pick shape 2 binds 1
+ok eq 3 binds 1
+ok pick shape 3 binds 1
+ok eq string binds 1
+ok eq other string binds 1
+ok null binds 0
+ok not null binds 0
+ok in 2 binds 2
+ok in 3 binds 3
+ok in empty binds 0
+ok not in binds 2
+ok in with nil binds 1
+ok range binds 2
+ok range exclusive binds 2
+ok and or binds 4
+ok not binds 1
+ok col to col binds 0
+ok bound left binds 1
+ok two wheres binds 2
+ok order desc binds 1
+ok limit 5 binds 0
+ok limit 6 binds 0
+ok offset binds 0
+ok offset other binds 0
+ok distinct binds 0
+ok alias binds 0
+ok all cols binds 0
+ok count binds 1
+ok count limited binds 1
+ok exists binds 1
+ok root binds 1
+ok mysql eq binds 1
+ok mysql pick binds 1
+ok mysql offset only binds 0
+ok like binds 1
+ok function binds 0
+ok join binds 1
+ok group binds 0
+ok subquery binds 1
+ok table source binds 1
+ok cache size stable true
+ok in 40 binds 40
+ok in 32 binds 32
+ok pagination and long lists bypass the cache
+ok returned sql is a private copy
+ok subquery unaliased count binds 0
+ok subquery arithmetic binds 1
+ok unaliased subquery projections
+ok model.all and model.table stay independent
+ok columns before binds 0
+ok columns before again binds 0
+ok columns after binds 0
+ok new column where binds 1
+ok live column metadata
+ok branch left binds 2
+ok branch right binds 1
+ok branch group binds 1
+ok branch join binds 1
+ok branching after to_sql
+ok identifier check matches the pattern
+ok 8000 concurrent compiles

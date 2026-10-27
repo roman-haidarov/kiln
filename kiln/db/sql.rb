@@ -4,6 +4,7 @@ require 'kiln/db/sql/sources'
 require 'kiln/db/sql/predicates'
 require 'kiln/db/sql/clauses'
 require 'kiln/db/sql/expressions'
+require 'kiln/db/sql/shape'
 
 module Kiln
   module DB
