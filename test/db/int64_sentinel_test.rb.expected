@@ -1,4 +1,5 @@
-computed-equals-nil
+computed-distinct
 literal-distinct
-nilable-equals-nil
+nilable-distinct
+missing-is-nil
 ok int64_sentinel

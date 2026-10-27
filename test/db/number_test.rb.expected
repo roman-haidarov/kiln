@@ -16,7 +16,7 @@ RangeError
 3 -1
 div-ok
 TypeError
-TypeError
+computed-min
 lit-min
 parse-min
 parse-max

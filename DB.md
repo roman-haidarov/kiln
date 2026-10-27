@@ -350,6 +350,51 @@ Typed decoding is unchanged: PostgreSQL int2/int4/int8/bool/float8 and MySQL
 integer/DOUBLE fast paths keep their existing Ruby representations. Decimal,
 unsigned big integer, dates, and binary values retain the codec contracts.
 
+### Compiled SQL cache
+
+A relation compiles its SQL from a shape: the dialect, the compile mode, the
+model's table name, alias and (for `SELECT *`) its current column list, the
+selected and ordered columns, the predicate tree with its operators, the length
+of each `IN` list, `DISTINCT`, and the `LIMIT` value. Bound values are not part
+of the shape, so `User.where(id: 3)` and `User.where(id: 7)` share one compiled
+text and differ only in their binds. Every current identifier, including names
+read from mutable metadata, is validated before key construction. Fields use
+separators outside the accepted identifier alphabet, so mutation cannot inject
+key structure. The first compile of a shape renders the
+SQL as before and stores it; later compiles walk the relation once to collect
+binds and copy the stored text. The stored SQL is byte-identical to what the
+renderer produces. Admission checks the bind count without invoking comparison
+or identity methods on bound values; SQL and bind order are covered by the
+differential regression tests.
+
+The key is computed from the relation and the model every time, so relations
+stay independent and can be extended or branched after `to_sql`, and changes to
+model metadata are picked up on the next compile. `to_sql` and `compile` return
+a private copy of the text that the caller may change.
+
+Shapes with JOINs, GROUP BY, HAVING, CTEs, `FROM` another relation or table
+source, subqueries, functions, arithmetic, CASE, windows, `LIKE`/`matches`,
+`OFFSET`, or an `IN` list longer than 32 values compile on every call. The
+cache holds at most 4096 entries per process in two generations of up to 2048
+entries, shared by all threads under a mutex. Filling the current generation
+rotates it into the previous generation and discards the oldest one. A hit in
+the previous generation is promoted. This admits new hot queries throughout
+the lifetime of the process; it is not an exact LRU policy. The same shape can
+occupy a slot in both generations.
+
+Keys over 8 KiB and entries whose key plus SQL exceeds 16 KiB are not retained;
+those queries still compile normally. Retained key/SQL payload is bounded to
+64 MiB, excluding Hash and object overhead. The internal store owns frozen
+copies of its keys and text.
+
+Builder methods preserve the receiver and support branching before and after
+compilation. As in earlier versions, related relations may share expression
+nodes and some arrays: directly mutating that shared state is not a substitute
+for `where`, `order`, `select`, or the other builder methods. Concurrently
+mutating one relation or its model metadata while compiling it is unsupported.
+Independent builder chains may compile concurrently. No query results are
+stored by this cache.
+
 ### Direct SQL
 
 Use `Conn#exec` when a relation is not the right fit. Put values in the bind

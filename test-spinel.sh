@@ -22,6 +22,14 @@ for source in "$@"; do
   total=$((total + 1))
   name=${source##*/}
   binary=build/test/${name%.rb}
+  result="$results_dir/$name.out"
+  case "$source" in
+    test/db/*)
+      binary=build/test/db_${name%.rb}
+      mkdir -p "$results_dir/db"
+      result="$results_dir/db/$name.out"
+      ;;
+  esac
   if [ ! -f "$source.expected" ]; then
     printf 'FAIL %s: missing Spinel snapshot %s.expected\n' "$name" "$source" >&2
     failed=$((failed + 1))
@@ -32,7 +40,6 @@ for source in "$@"; do
     failed=$((failed + 1))
     continue
   fi
-  result="$results_dir/$name.out"
   run_test_process "$binary" "$result" "$limit"
   if [ "$status" -ne 0 ]; then
     cat "$result" >&2

@@ -27,9 +27,12 @@ end
 def show_err
   yield
   print "no-error\n"
-rescue StandardError => e
-  print e.class.name
-  print "\n"
+rescue RangeError
+  print "RangeError\n"
+rescue TypeError
+  print "TypeError\n"
+rescue ArgumentError
+  print "ArgumentError\n"
 end
 
 min = Kiln::DB::Int64Value.min_value
@@ -73,7 +76,10 @@ pairs.each { |pair| check_div(pair[0], pair[1]) }
 print "div-ok\n"
 
 show_err { Kiln::DB::Int64Value.from_i(nil) }
-show_err { Kiln::DB::Int64Value.from_i(-9_223_372_036_854_775_807 - 1) }
+computed = Kiln::DB::Int64Value.from_i(-9_223_372_036_854_775_807 - 1)
+raise 'computed minimum' unless computed == min
+
+print "computed-min\n"
 lit = Kiln::DB::Int64Value.from_i(-9_223_372_036_854_775_808)
 print lit == min ? "lit-min\n" : "lit-miss\n"
 print Kiln::DB::Int64Value.parse('-9223372036854775808') == min ? "parse-min\n" : "parse-miss\n"
@@ -104,15 +110,9 @@ box[one] = 1
 other = Kiln::DB::Int64Value.from_i(1)
 print box[other].nil? ? "hash-key-miss\n" : "hash-key-hit\n"
 print box[Kiln::DB::Int64Value.from_i(2)].nil? ? "hash-other-miss\n" : "hash-other-hit\n"
-begin
-  require 'set'
-  found = Set.new([one])
-  print found.include?(other) ? "set-hit\n" : "set-miss\n"
-rescue StandardError => e
-  print 'set '
-  print e.class.name
-  print "\n"
-end
+require 'set'
+found = Set.new([one])
+print found.include?(other) ? "set-hit\n" : "set-miss\n"
 print min.to_decimal
 print "\n"
 print Kiln::DB::ExactDecimal.parse('1.10') == Kiln::DB::ExactDecimal.parse('1.1') ? "dec-eq\n" : "dec-ne\n"

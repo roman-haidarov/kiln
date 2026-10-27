@@ -1,0 +1,15 @@
+ok projection delimiter collision rejected
+ok metadata delimiter collision rejected
+ok mutated identifiers follow renderer validation
+ok mutable table aliases are revalidated
+ok dialect validation on a warm cache
+ok table alias columns and root identity follow metadata
+ok changing bound types and compile modes
+ok returned sql and bind arrays stay independent
+ok cache never calls equality on bound values
+ok partial key walks do not duplicate fallback binds
+ok cache owns its keys and values and bounds entry bytes
+ok oversized queries compile without retention
+ok cache admits new shapes and evicts old generations
+ok older cache hits are promoted
+ok 20000 concurrent compiles with eviction and clear

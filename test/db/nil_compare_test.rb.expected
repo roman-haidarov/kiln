@@ -1,0 +1,4 @@
+ok not_eq nil through table
+ok eq nil through table
+ok not_eq integer
+ok eq integer

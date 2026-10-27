@@ -6,6 +6,38 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+### 0.0.16 final ORM and Linux TLS CI follow-up (2026-10-27)
+
+- The corrected shape cache, mutation/ownership regressions, actual `pick`
+  execution-boundary checks and numeric compiler workaround pass the 14-file
+  offline DB suite on pinned Spinel `9d10403754b91db4df7555b482c7c1436b0ddb52`,
+  GCC 13.3.0, Linux x86-64, generated/native C at `-O2` (13-file batch and the
+  subsequently added signed-minimum probe). That probe's stale snapshot now
+  requires exact minimum values distinct from nil, plus an actual nil branch.
+  The selected nil,
+  number, pick and cache binaries also pass with four workers. Clang 18 `-O2`
+  generated programs for cache regressions, pick and number pass with four
+  workers (native objects built by GCC).
+- Additional checks compare SQL and binds 40 000 times at four workers and
+  exercise cache turnover/admission. A reduced forced-GC run passes 800
+  comparisons plus 65 capacity shapes. The tests run with Spinel, not MRI.
+- The top-level suite has 29 passes and one environment-blocked `listen_test`:
+  AF_UNIX bind returns EPERM, independently reproduced outside Kiln. Generated
+  C used `-O0` in this full server pass; native objects used `-O2`.
+- The uploaded Linux TLS TSan report is reproduced with an OpenSSL-only C
+  program. With the same 3.5.5 source and compiler, two of five processes using
+  uninstrumented OpenSSL report the matching 104-byte hashtable-key race;
+  five of five using instrumented OpenSSL pass. OpenSSL's acquire/release
+  synchronization is invisible without instrumentation. The corrected CI
+  gate builds a pinned TSan OpenSSL and retains the normal native TLS check.
+- Parser/TLS/cache TSan, cache ASan/UBSan lifecycle checks, and ordinary TLS
+  context lifecycle checks pass with that gate. LeakSanitizer is disabled
+  locally because `/proc` thread inspection is refused; default CI behavior
+  is unchanged. An intentionally racy negative control is still detected.
+- No production C/driver sources changed. Live PostgreSQL/MySQL/MariaDB,
+  macOS/ARM reruns and the full native Clang build were not performed here.
+  See `docs/orm-review/REVIEW.md`, `TLS_TSAN.md`, `RUN.md`, and their raw logs.
+
 Current tree: 30 test files, 898 expected checks. The transport-related files are
 `test/listen_test.rb`, `test/timeouts_test.rb`, `test/payload_test.rb`,
 `test/websocket_test.rb`, `test/tls_test.rb` and `test/sigpipe_test.rb`.

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.0.16
+
+### Changed
+
+- Cache compiled SQL by relation shape. Repeated queries that differ only in bound values copy the stored SQL text instead of rendering it again; the walk that builds the cache key also collects the binds. Every current identifier is validated before it enters the key; field separators are outside that alphabet, keeping keys unambiguous even when exposed strings or metadata are mutated. The key is read from the relation and model on every compile, so queries can be extended after `to_sql` and follow current metadata. Relations with JOINs, GROUP BY, HAVING, CTEs, subqueries, functions, `LIKE`, `OFFSET`, or an `IN` list longer than 32 values keep compiling on every call.
+- Bound the SQL cache to two generations of 2048 entries under one mutex. New forms are admitted after capacity is reached, and hits in the older generation are promoted. Keys over 8 KiB and entries whose key plus SQL exceeds 16 KiB are not retained. The store owns frozen copies of its keys and SQL; callers receive mutable private SQL strings and fresh bind arrays.
+- Check identifiers with a byte loop instead of a regular expression; the accepted set is unchanged (`[A-Za-z_][A-Za-z0-9_]*`).
+- `pick` derives one relation instead of three, `select` with plain expressions skips flattening, and `compare` no longer allocates an operator list. Table aliases are still validated when a column is constructed, and derived relations keep independent preload lists.
+
+### Performance
+
+- The final source tree has a reproducible SQL/bind preparation benchmark in `bench/db/orm_compile.rb`. Results and the exact validation scope are recorded in `docs/orm-review/REVIEW.md`; measurements of earlier 0.0.16 candidates do not establish performance of this tree.
+
+### Fixed
+
+- `eq(nil)` and `not_eq(nil)` no longer raise `TypeError: no implicit conversion from nil to integer` when the same program also compares with an Integer. Spinel `9d10403` types the parameter as Integer when `nil` only reaches it through a receiver of more than one class (such as `table[:name]`, which can return a column or `*`); `eq` and `not_eq` now default their value to `nil`, which keeps the parameter nilable. Calling them without an argument builds `IS NULL` / `IS NOT NULL`. This made `test/db/arel_builder_test.rb` fail on 0.0.15 as well.
+- Invalid dialects cannot reuse cached MySQL SQL. Cache admission checks bind counts without invoking comparison or identity methods on bound values; unsupported shapes clear any partially collected binds before using the ordinary renderer.
+- The numeric test avoids Spinel's code-generation failure for `e.class.name` on a union of exception classes by rescuing the expected classes explicitly. It asserts the exact computed signed minimum instead of expecting a compiler-dependent `TypeError` for that valid value.
+- TLS TSan now runs with a separately built, pinned and instrumented OpenSSL. The old Linux gate could report a false race in OpenSSL's lockless hashtable because only the harness was instrumented. The test preloads the exact crypto dependency without changing the symbolizer's library search path, reports its compiler/source provenance, and fails if OpenSSL is unavailable. Normal TLS runtime selection and the native lifecycle check are retained; see `docs/orm-review/TLS_TSAN.md`.
+
+### Added
+
+- `test/db/nil_compare_test.rb`: `eq`/`not_eq` with `nil` through a table column alongside Integer comparisons; it fails on 0.0.15 with the pinned Spinel.
+- `test/db/shape_cache_test.rb`: differential test that compiles each shape directly, on a cache miss, and on a cache hit and requires identical SQL and binds; it also covers unaliased subquery projections, independent `Model.all`/`Model.table`, live column metadata, branching after `to_sql`, private copies of the returned text, pagination and long `IN` lists bypassing the cache, the identifier check, and 8000 compiles from four threads.
+- `test/db/shape_cache_regression_test.rb`: malformed/mutated identifiers, dialect isolation, live metadata and root identity, opaque bound values, ownership of cached strings, byte limits, generation turnover/promotion, and 20 000 compiles during concurrent eviction and clearing.
+- `test/db/pick_test.rb`: executes `pick` at a captured execution boundary and checks its SQL and unchanged receiver, including grouped/derived queries, existing order/window/projection, empty results, invalid inputs, and preload ownership.
+- `ci/db-offline.sh`: runs the 14 database-independent DB tests, including the numeric and cache regressions. The signed-minimum probe now asserts correct minimum values and an actual nil branch instead of recording an older compiler's incorrect nil comparisons. The main `ci/run.sh` invokes the offline suite without requiring running DB services.
+
 ## 0.0.15
 
 ### Changed

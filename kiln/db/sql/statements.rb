@@ -4,7 +4,18 @@ module Kiln
       module Statements
         def emit(dialect, rel, mode)
           binds = []
-          [piece(dialect, rel, mode, binds), binds]
+          key = Shape.key(dialect, rel, mode, binds)
+          if key.nil?
+            binds.clear
+            return [piece(dialect, rel, mode, binds), binds]
+          end
+          sql = Shape.fetch(key)
+          return [sql.dup, binds] unless sql.nil?
+
+          fresh = []
+          sql = piece(dialect, rel, mode, fresh)
+          Shape.store(key, sql) if binds.length == fresh.length
+          [sql, fresh]
         end
 
         def quote(dialect, name)
