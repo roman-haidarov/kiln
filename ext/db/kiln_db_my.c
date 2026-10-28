@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #if !defined(MARIADB_PACKAGE_VERSION_ID) || MARIADB_PACKAGE_VERSION_ID < 30400
 #error "Kiln::DB needs MariaDB Connector/C >= 3.4 headers: set KILN_DB_LIBMARIADB_PREFIX"
@@ -29,6 +30,7 @@ static void my_arm_socket(MYSQL *mysql);
 #define MY_COMMIT     6
 #define MY_ROLLBACK   7
 #define MY_CLOSE_STMT 8
+#define MY_STORE      9
 
 typedef struct {
     MYSQL *(*mysql_init)(MYSQL *mysql);
@@ -72,6 +74,11 @@ typedef struct {
     int (*mysql_rollback_cont)(my_bool *ret, MYSQL *mysql, int status);
     int (*mysql_real_query_start)(int *ret, MYSQL *mysql, const char *q, unsigned long length);
     int (*mysql_real_query_cont)(int *ret, MYSQL *mysql, int status);
+    int (*mysql_store_result_start)(MYSQL_RES **ret, MYSQL *mysql);
+    int (*mysql_store_result_cont)(MYSQL_RES **ret, MYSQL *mysql, int status);
+    MYSQL_ROW (*mysql_fetch_row)(MYSQL_RES *res);
+    unsigned long *(*mysql_fetch_lengths)(MYSQL_RES *res);
+    my_bool (*mysql_more_results)(MYSQL *mysql);
     my_bool (*mariadb_get_infov)(MYSQL *mysql, enum mariadb_value value, void *arg, ...);
     MYSQL_FIELD *(*mysql_fetch_fields)(MYSQL_RES *res);
     unsigned int (*mysql_num_fields)(MYSQL_RES *res);
@@ -107,6 +114,7 @@ typedef struct {
     char verify;
     unsigned int protocol;
     MYSQL *connect_ret;
+    MYSQL_RES *text_res;
     const char *query;
     unsigned long query_len;
     unsigned long *param_len;
@@ -226,6 +234,11 @@ static int my_bind(void) {
         my_need((void **)&my.mysql_rollback_cont, "mysql_rollback_cont") ||
         my_need((void **)&my.mysql_real_query_start, "mysql_real_query_start") ||
         my_need((void **)&my.mysql_real_query_cont, "mysql_real_query_cont") ||
+        my_need((void **)&my.mysql_store_result_start, "mysql_store_result_start") ||
+        my_need((void **)&my.mysql_store_result_cont, "mysql_store_result_cont") ||
+        my_need((void **)&my.mysql_fetch_row, "mysql_fetch_row") ||
+        my_need((void **)&my.mysql_fetch_lengths, "mysql_fetch_lengths") ||
+        my_need((void **)&my.mysql_more_results, "mysql_more_results") ||
         my_need((void **)&my.mariadb_get_infov, "mariadb_get_infov") ||
         my_need((void **)&my.mysql_fetch_fields, "mysql_fetch_fields") ||
         my_need((void **)&my.mysql_num_fields, "mysql_num_fields") ||
@@ -384,6 +397,11 @@ static void my_note_warnings(my_sess *sess) {
     if (conn_n > n) {
         n = conn_n;
     }
+    sess->warnings = n > 2147483647u ? 2147483647 : (int)n;
+}
+
+static void my_note_text_warnings(my_sess *sess) {
+    unsigned int n = sess->mysql ? my.mysql_warning_count(sess->mysql) : 0;
     sess->warnings = n > 2147483647u ? 2147483647 : (int)n;
 }
 
@@ -987,21 +1005,126 @@ static int my_after_exec(my_sess *sess, kiln_db_conn *conn) {
     return my_begin_fetch(sess, conn);
 }
 
-static int my_after_query(my_sess *sess, kiln_db_conn *conn) {
-    if (sess->iret != 0) {
-        return my_conn_fail(sess, conn);
+static int my_text_row(my_sess *sess, MYSQL_ROW row, const unsigned long *lengths, size_t limit) {
+    size_t row_bytes = 0;
+    int i;
+    for (i = 0; i < sess->ncols; i++) {
+        if (row[i]) {
+            if (lengths[i] > limit - row_bytes) {
+                return KILN_DB_CAPACITY;
+            }
+            row_bytes += lengths[i];
+        }
     }
-    if (my.mysql_field_count(sess->mysql) > 0) {
-        conn->broken = 1;
-        return my_fail(sess, conn, KILN_DB_UNSUPPORTED, 0, NULL, "simple command returned rows");
+    if (row_bytes >= limit - sess->batch_len || !my_row_slots(sess) ||
+        !my_batch_room(sess, sess->batch_len + row_bytes + 1, limit)) {
+        return KILN_DB_CAPACITY;
     }
-    my_note_warnings(sess);
+    sess->row_start[sess->rows] = sess->batch_len;
+    for (i = 0; i < sess->ncols; i++) {
+        size_t at = ((size_t)sess->rows * (size_t)sess->ncols) + (size_t)i;
+        if (!row[i]) {
+            sess->cell_len[at] = -1;
+            continue;
+        }
+        if (lengths[i]) {
+            memcpy(sess->batch + sess->batch_len, row[i], lengths[i]);
+        }
+        sess->batch_len += lengths[i];
+        sess->cell_len[at] = (int64_t)lengths[i];
+    }
+    sess->rows++;
+    sess->row_start[sess->rows] = sess->batch_len;
+    return KILN_DB_OK;
+}
+
+static int my_take_text(my_sess *sess, MYSQL_RES *res) {
+    const kiln_db_limits *limits = kiln_db_limits_get();
+    size_t limit = limits ? limits->max_payload_bytes : 67108864u;
+    unsigned int n = my.mysql_num_fields(res);
+    MYSQL_FIELD *fields = my.mysql_fetch_fields(res);
+    MYSQL_ROW row;
+    unsigned int i;
+    if (n == 0 || n > KILN_DB_MAX_COLS || !fields) {
+        return n > KILN_DB_MAX_COLS ? KILN_DB_CAPACITY : KILN_DB_ERR;
+    }
+    if (!my_alloc_cols(sess, n)) {
+        return KILN_DB_CAPACITY;
+    }
+    sess->ncols = (int)n;
+    for (i = 0; i < n; i++) {
+        sess->rtype[i] = my_field_type(&fields[i]);
+        sess->rstore[i] = MY_STORE_TEXT;
+        sess->runsigned[i] = (fields[i].flags & UNSIGNED_FLAG) ? 1 : 0;
+    }
+    while ((row = my.mysql_fetch_row(res)) != NULL) {
+        const unsigned long *lengths = my.mysql_fetch_lengths(res);
+        int rc;
+        if (!lengths) {
+            return KILN_DB_ERR;
+        }
+        rc = my_text_row(sess, row, lengths, limit);
+        if (rc != KILN_DB_OK) {
+            return rc;
+        }
+    }
+    return KILN_DB_OK;
+}
+
+static int my_text_done(my_sess *sess, kiln_db_conn *conn) {
+    my_note_text_warnings(sess);
     conn->fetch_done = 1;
     conn->rows_affected = 0;
     sess->phase = MY_IDLE;
     conn->fd = (int)my.mysql_get_socket(sess->mysql);
     conn->wait_kind = 0;
     return KILN_DB_STEP_DONE;
+}
+
+static int my_after_store(my_sess *sess, kiln_db_conn *conn) {
+    MYSQL_RES *res = sess->text_res;
+    int rc;
+    sess->text_res = NULL;
+    if (!res) {
+        return my_conn_fail(sess, conn);
+    }
+    rc = my_take_text(sess, res);
+    my.mysql_free_result(res);
+    if (rc != KILN_DB_OK) {
+        my_free_results(sess);
+        return my_fail(sess, conn, rc, 0, NULL, "text result");
+    }
+    if (my.mysql_more_results(sess->mysql)) {
+        conn->broken = 1;
+        my_free_results(sess);
+        return my_fail(sess, conn, KILN_DB_UNSUPPORTED, 0, NULL, "multiple result sets");
+    }
+    return my_text_done(sess, conn);
+}
+
+static int my_begin_store(my_sess *sess, kiln_db_conn *conn) {
+    sess->text_res = NULL;
+    sess->phase = MY_STORE;
+    sess->status = my.mysql_store_result_start(&sess->text_res, sess->mysql);
+    if (sess->status) {
+        return my_park(sess, conn, sess->status);
+    }
+    return my_after_store(sess, conn);
+}
+
+static int my_after_query(my_sess *sess, kiln_db_conn *conn) {
+    if (sess->iret != 0) {
+        return my_conn_fail(sess, conn);
+    }
+    my_free_results(sess);
+    if (my.mysql_field_count(sess->mysql) > 0) {
+        return my_begin_store(sess, conn);
+    }
+    if (my.mysql_more_results(sess->mysql)) {
+        conn->broken = 1;
+        return my_fail(sess, conn, KILN_DB_UNSUPPORTED, 0, NULL, "multiple result sets");
+    }
+    return my_text_done(sess, conn);
 }
 
 static int my_after_prepare(my_sess *sess, kiln_db_conn *conn) {
@@ -1101,6 +1224,13 @@ static int my_resume(my_sess *sess, kiln_db_conn *conn, int ready_bits) {
             return my_park(sess, conn, sess->status);
         }
         return my_after_query(sess, conn);
+    }
+    if (sess->phase == MY_STORE) {
+        sess->status = my.mysql_store_result_cont(&sess->text_res, sess->mysql, mask);
+        if (sess->status) {
+            return my_park(sess, conn, sess->status);
+        }
+        return my_after_store(sess, conn);
     }
     if (sess->phase == MY_PREPARE) {
         sess->status = my.mysql_stmt_prepare_cont(&sess->iret, sess->stmt, mask);
@@ -1658,6 +1788,75 @@ static int my_prepare_miss(my_sess *sess, kiln_db_conn *conn) {
     return my_prepare_handle(sess, conn, 1);
 }
 
+static int my_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+static const char *my_skip_space(const char *sql) {
+    for (;;) {
+        while (my_space(*sql)) {
+            sql++;
+        }
+        if (sql[0] == '#' || (sql[0] == '-' && sql[1] == '-' && (unsigned char)sql[2] <= ' ')) {
+            while (*sql && *sql != '\n') {
+                sql++;
+            }
+        } else if (sql[0] == '/' && sql[1] == '*' && sql[2] != '!' &&
+                   !(sql[2] == 'M' && sql[3] == '!')) {
+            const char *end = strstr(sql + 2, "*/");
+            if (!end) {
+                return sql;
+            }
+            sql = end + 2;
+        } else {
+            return sql;
+        }
+    }
+}
+
+static int my_word(const char **at, const char *word) {
+    const char *sql = my_skip_space(*at);
+    size_t n = strlen(word);
+    unsigned char next;
+    if (strncasecmp(sql, word, n) != 0) {
+        return 0;
+    }
+    next = (unsigned char)sql[n];
+    if ((next >= '0' && next <= '9') || (next >= 'A' && next <= 'Z') ||
+        (next >= 'a' && next <= 'z') || next == '_' || next == '$' || next >= 128) {
+        return 0;
+    }
+    *at = sql + n;
+    return 1;
+}
+
+static int my_punct(const char **at, char c) {
+    const char *sql = my_skip_space(*at);
+    if (*sql != c) {
+        return 0;
+    }
+    *at = sql + 1;
+    return 1;
+}
+
+static int my_diagnostic(const char *sql) {
+    const char *at = sql;
+    if (my_word(&at, "SHOW")) {
+        if (my_word(&at, "COUNT") &&
+            !(my_punct(&at, '(') && my_punct(&at, '*') && my_punct(&at, ')'))) {
+            return 0;
+        }
+        return my_word(&at, "WARNINGS") || my_word(&at, "ERRORS");
+    }
+    if (!my_word(&at, "GET")) {
+        return 0;
+    }
+    if (!my_word(&at, "CURRENT")) {
+        my_word(&at, "STACKED");
+    }
+    return my_word(&at, "DIAGNOSTICS");
+}
+
 static int my_begin_prepare(my_sess *sess, kiln_db_conn *conn) {
     my_stmt_ent *hit;
     if (!conn->sql) {
@@ -1679,6 +1878,11 @@ static int my_begin_prepare(my_sess *sess, kiln_db_conn *conn) {
             return my_drain_closes(sess, conn);
         }
         return my_apply_hit(sess, conn, hit);
+    }
+    if (my_diagnostic(conn->sql)) {
+        conn->prepared = 0;
+        return my_fail(
+            sess, conn, KILN_DB_UNSUPPORTED, 0, NULL, "diagnostics use the text protocol");
     }
     return my_prepare_miss(sess, conn);
 }
@@ -1789,6 +1993,10 @@ static void my_release(kiln_db_conn *conn) {
     }
     if (sess->closing) {
         sess->closing->mysql = NULL;
+    }
+    if (sess->text_res) {
+        my.mysql_free_result(sess->text_res);
+        sess->text_res = NULL;
     }
     if (sess->mysql) {
         my.mysql_close(sess->mysql);

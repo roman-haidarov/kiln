@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.0.17
+
+### Fixed
+
+- MySQL: `import(..., on_duplicate_key_ignore: true)` raised `Kiln::DB::Unsupported: exec simple command returned rows` and broke the connection as soon as `INSERT IGNORE` reported a duplicate. The import reads the warnings with `SHOW WARNINGS`. MySQL 8.4 cannot prepare that statement (error 1295), so Kiln fell back to the text protocol, and the driver's text path rejected every result set. The failed prepare had also already replaced the `INSERT` warnings with its own 1295 error, so even a returned result would have been wrong. MariaDB prepares `SHOW WARNINGS`, so only MySQL failed. The check was added in 0.0.11; the live suite had not run against MySQL since then. This failed `gate_c_test` and `q_gates_test`.
+  - `SHOW WARNINGS`, `SHOW ERRORS`, `SHOW COUNT(*) WARNINGS`, `SHOW COUNT(*) ERRORS` and `GET [CURRENT | STACKED] DIAGNOSTICS` now go to the text protocol without a prepare, so the diagnostics of the previous statement survive. Leading whitespace, `#`, `-- ` and `/* */` comments are skipped, and the keywords are matched without regard to case.
+  - The MySQL/MariaDB text protocol returns result sets. It reads them with `mysql_store_result_start`/`_cont` and decodes them by column type, like prepared results. Other statements that have no bind values and that the server refuses to prepare (for example `CHECK TABLE` on MySQL) now return their rows instead of failing.
+  - A text-protocol statement that produces more than one result set raises `Unsupported` and marks the connection broken, so the connection is not left out of sync. A text-protocol statement reports its own rows and warning count. It does not expose the result or warnings of the prepared statement that ran before it.
+- `test/db/schema_guard_test.rb` created its limited MariaDB account for `'127.0.0.1'`. Under Docker Desktop the server sees the client at the bridge gateway (for example `172.26.0.1`), so that login was refused. The test now creates the account for the client host the server reports in `USER()`, and it connects through `DB_MARIA_HOST`.
+- `test/db/stmt_cache_test.rb` and `test/db/stream_import_test.rb` did not compile on Spinel `9d10403`. For `e.class.name` on an exception rescued as `Kiln::DB::Error` or `Exception`, the compiler emits the nullable `const char *` from `sp_class_name_or_nil` into a boxed `sp_RbVal` slot. The C compiler then reports `incompatible types when assigning to type 'sp_RbVal' from type 'const char *'`, and inside string interpolation `invalid initializer`. The tests use `e.class.to_s` and `"#{e.class}"`, which print the same names. 0.0.16 worked around the same compiler defect in `number_test.rb`.
+- `test/db/typed_decode_test.rb.expected` expected `Integer nil` for the signed 64-bit minimum (`int8` and `BIGINT` −9223372036854775808) on PostgreSQL, MySQL and MariaDB. That snapshot was recorded on Spinel `519280d`, which used the minimum as its nil sentinel, so `inspect` printed `nil`. DB.md maps integer columns to `Integer` and only `NULL` to `nil`, `Codec.typed_cell` returns the minimum, and Spinel `9d10403` keeps the two distinct (`int64_sentinel_test`, 0.0.16). The snapshot now expects `Integer -9223372036854775808`.
+
+### Changed
+
+- The MySQL/MariaDB driver also loads `mysql_store_result_start`, `mysql_store_result_cont`, `mysql_fetch_row`, `mysql_fetch_lengths` and `mysql_more_results` from Connector/C. All of them are present in the required 3.4 series. No FFI declaration in `kiln/db/native.rb` changed.
+
+### Added
+
+- `test/db/mysql_text_protocol_test.rb` is a live MySQL and MariaDB test. It covers `SHOW WARNINGS` (also in lower case and after a comment), `SHOW COUNT(*) WARNINGS`, `SHOW ERRORS`, `GET DIAGNOSTICS` and a streamed `SHOW WARNINGS` after `INSERT IGNORE`. It also checks that `import` with `on_duplicate_key_ignore` passes duplicates and still raises `import warnings` for a truncation, and that `CHECK TABLE` returns its rows through the fallback. Two more checks: a text statement without rows returns no rows from the previous result, and a diagnostic statement with bind values raises `Unsupported`. On 0.0.16 it fails at the first `SHOW WARNINGS` with `exec simple command returned rows`.
+
 ## 0.0.16
 
 ### Changed
