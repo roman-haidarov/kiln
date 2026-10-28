@@ -221,7 +221,7 @@ def failed_class(conn)
   conn.exec('SELEC 1 FROM kiln_sc_nowhere', [])
   'none'
 rescue Kiln::DB::Error => e
-  e.class.name
+  e.class.to_s
 end
 
 def failed_classes(conn, observer)

@@ -1,7 +1,7 @@
 ok stream pg typed
 pg typed r0 c0 Integer -32768
 pg typed r0 c1 Integer -2147483648
-pg typed r0 c2 Integer nil
+pg typed r0 c2 Integer -9223372036854775808
 pg typed r0 c3 Float 0.1
 pg typed r0 c4 TrueClass true
 pg typed r0 c5 String "café🙂" UTF-8
@@ -92,7 +92,7 @@ mysql types r0 c4 Integer -8388608
 mysql types r0 c5 Integer 0
 mysql types r0 c6 Integer -2147483648
 mysql types r0 c7 Integer 0
-mysql types r0 c8 Integer nil
+mysql types r0 c8 Integer -9223372036854775808
 mysql types r0 c9 Integer 0
 mysql types r0 c10 Float 0.1
 mysql types r0 c11 Float 1.1
@@ -189,7 +189,7 @@ mariadb types r0 c4 Integer -8388608
 mariadb types r0 c5 Integer 0
 mariadb types r0 c6 Integer -2147483648
 mariadb types r0 c7 Integer 0
-mariadb types r0 c8 Integer nil
+mariadb types r0 c8 Integer -9223372036854775808
 mariadb types r0 c9 Integer 0
 mariadb types r0 c10 Float 0.1
 mariadb types r0 c11 Float 1.1

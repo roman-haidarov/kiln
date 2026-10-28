@@ -1,0 +1,21 @@
+mysql84 show warnings 2 2 Warning:1062,Warning:1062
+mysql84 show count 2
+mysql84 show errors 0
+mysql84 get diagnostics 2
+mysql84 stream warnings Warning:1062,Warning:1062
+mysql84 import ignore COMMITTED kept,new
+mysql84 import other warning import warnings
+mysql84 check table 1 status OK
+mysql84 no stale rows 7 0
+mysql84 diagnostic binds unsupported
+mariadb114 show warnings 2 2 Warning:1062,Warning:1062
+mariadb114 show count 2
+mariadb114 show errors 0
+mariadb114 get diagnostics 2
+mariadb114 stream warnings Warning:1062,Warning:1062
+mariadb114 import ignore COMMITTED kept,new
+mariadb114 import other warning import warnings
+mariadb114 check table 1 status OK
+mariadb114 no stale rows 7 0
+mariadb114 diagnostic binds unsupported
+ok mysql text protocol

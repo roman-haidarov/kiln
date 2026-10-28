@@ -73,12 +73,12 @@ def check_nested(db, conn)
       begin
         SiItem.all.count
       rescue Kiln::DB::Error => e
-        query_error = "#{e.class.name}: #{e.message}"
+        query_error = "#{e.class}: #{e.message}"
       end
       begin
         Kiln::DB.transaction { |connection| connection.depth }
       rescue Kiln::DB::Error => e
-        tx_error = e.class.name
+        tx_error = e.class.to_s
       end
     end
     seen += 1 if row.get('id').positive?
@@ -118,7 +118,7 @@ def check_stream_error(db, conn)
   begin
     conn.each_row('SELECT missing_column FROM kiln_si_item', []) { |row| row }
   rescue Kiln::DB::Error => e
-    name = e.class.name
+    name = e.class.to_s
   end
   need("#{db} stream error usable", !conn.broken?)
   need("#{db} stream error after", SiItem.all.count == 3000)
@@ -277,7 +277,7 @@ def check_pool_closed(db, kind, host, port, user, password, database, ca_path, t
   begin
     pool.checkout
   rescue Exception => e
-    name = e.class.name
+    name = e.class.to_s
   end
   line(db, 'pool closed', "#{closed} #{name}")
 end

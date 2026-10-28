@@ -6,6 +6,49 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+### 0.0.17 live DB follow-up (2026-10-29)
+
+- Host: Linux x86-64 (Ubuntu 24.04), GCC 13.3.0, Spinel
+  `9d10403754b91db4df7555b482c7c1436b0ddb52` built from source, libpq 18.1,
+  MariaDB Connector/C 3.4.8. The servers ran natively, not under Docker:
+  PostgreSQL 17.11 and 18.6, MySQL 8.4.2, and MariaDB 10.11.14. MariaDB 11.4
+  was not available on this host. All servers used TLS with the
+  `db-services.sh` certificate layout and the same `session.env` keys.
+  MariaDB was reached through a TCP forwarder on `127.0.0.1`, so the server
+  saw the client at a non-loopback address (`192.0.2.2`), as it sees the
+  Docker Desktop gateway.
+- On the 0.0.16 tree, `gate_c` failed on MySQL with
+  `exec simple command returned rows (Kiln::DB::Unsupported)` at its
+  `on_duplicate_key_ignore` import. `q_gates` reaches the same import in its
+  q9 step. `schema_guard` failed with
+  `Access denied for user 'kiln_guard_user'@'192.0.2.2'`. `stmt_cache` and
+  `stream_import` failed C compilation with
+  `incompatible types when assigning to type 'sp_RbVal' from type 'const char *'`.
+  `typed_decode` differed on the three `Integer nil` lines, and on two
+  MariaDB `-0.0` lines described below. These match the failures reported
+  from macOS ARM64 with Docker.
+- MySQL 8.4 with the `mysql` client: `PREPARE s FROM 'SHOW WARNINGS'` returns
+  1295, and a `SHOW WARNINGS` after it lists only that 1295 error, not the
+  1062 warnings of the preceding `INSERT IGNORE`. `GET DIAGNOSTICS`,
+  `SHOW ERRORS` and `SHOW COUNT(*) WARNINGS` also return 1295. MariaDB 10.11
+  prepares `SHOW WARNINGS`.
+- With this tree, `TEST_TIMEOUT=300 sh ci/db-test.sh` ran 35 files, and 34
+  passed. The new `mysql_text_protocol` test fails on the 0.0.16 driver at
+  the first `SHOW WARNINGS`. `typed_decode` matches except for two MariaDB
+  lines, `types r1 c10` and `pluck f i1`, which print `Float -0.0`: MariaDB
+  10.11 returns `-0` for `-0e0`, while the snapshot records MariaDB 11.4's
+  `0.0` (see the P10-04 oracle). Those two lines are not changed.
+- `SPINEL_WORKERS=1 ./test-spinel.sh` passed 30/30.
+- `ci/db-native.sh unit`, `asan`, `affinity` and `safety` passed. clang-format
+  23 with the repo `.clang-format` leaves `ext/db/kiln_db_my.c` unchanged.
+  cppcheck 2.x and clang-tidy 22 with the rule 6 check sets report no new
+  finding kinds on that file compared with 0.0.16, apart from the existing
+  lowercase `u` literal style and the POSIX `<strings.h>` include for
+  `strncasecmp`.
+- RuboCop, Reek, Flog, Flay and rubyfast were not run: the `kiln-lint` image
+  and rubygems.org are not reachable from this host. `ruby -wc` passes on
+  the changed Ruby files.
+
 ### 0.0.16 final ORM and Linux TLS CI follow-up (2026-10-27)
 
 - The corrected shape cache, mutation/ownership regressions, actual `pick`

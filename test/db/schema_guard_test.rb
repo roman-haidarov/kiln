@@ -18,8 +18,14 @@ def open_pg(text)
 end
 
 def open_maria(text, user, pass)
-  Kiln::DB::Conn.open(Kiln::DB::Native::KIND_MY, '127.0.0.1', env_line(text, 'DB_MARIA_PORT').to_i,
+  Kiln::DB::Conn.open(Kiln::DB::Native::KIND_MY, env_line(text, 'DB_MARIA_HOST'), env_line(text, 'DB_MARIA_PORT').to_i,
                       user, pass, env_line(text, 'KILN_DB_MY_DB'), '', '', tls: :disable)
+end
+
+def guard_account(conn)
+  host = conn.exec("SELECT SUBSTRING_INDEX(USER(), '@', -1)", [])[0][0]
+  need('client host as the server sees it', host.is_a?(String) && host.match?(/\A[0-9A-Za-z.:_-]+\z/))
+  "'kiln_guard_user'@'#{host}'"
 end
 
 text = File.read('build/db-runtime/session.env')
@@ -108,15 +114,16 @@ ensure
 end
 
 conn = open_maria(text, 'root', env_line(text, 'KILN_DB_MY_ROOT_PASSWORD') || '')
+guard_user = guard_account(conn)
 limited = nil
 begin
   conn.exec('DROP TABLE IF EXISTS kiln_guard_hidden', [])
   conn.exec('CREATE TABLE kiln_guard_hidden(id INT PRIMARY KEY, name VARCHAR(20))', [])
   conn.exec('CREATE TRIGGER kiln_guard_hidden_t BEFORE INSERT ON kiln_guard_hidden FOR EACH ROW SET NEW.id = 3 - NEW.id', [])
-  conn.exec("DROP USER IF EXISTS 'kiln_guard_user'@'127.0.0.1'", [])
-  conn.exec("CREATE USER 'kiln_guard_user'@'127.0.0.1' IDENTIFIED BY 'guard-test'", [])
+  conn.exec("DROP USER IF EXISTS #{guard_user}", [])
+  conn.exec("CREATE USER #{guard_user} IDENTIFIED BY 'guard-test'", [])
   database = Kiln::DB::Sql.quote(:mysql, env_line(text, 'KILN_DB_MY_DB'))
-  conn.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{database}.kiln_guard_hidden TO 'kiln_guard_user'@'127.0.0.1'", [])
+  conn.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{database}.kiln_guard_hidden TO #{guard_user}", [])
   limited = open_maria(text, 'kiln_guard_user', 'guard-test')
   hidden = limited.exec("SELECT COUNT(*) FROM information_schema.triggers WHERE event_object_table = 'kiln_guard_hidden'", [])[0][0]
   need('trigger hidden', hidden == 0)
@@ -164,6 +171,6 @@ ensure
   conn.exec('DROP DATABASE IF EXISTS kiln_guard_other', [])
   conn.exec('DROP TABLE IF EXISTS kiln_guard_conflict', [])
   conn.exec('DROP TABLE IF EXISTS kiln_guard_hidden', [])
-  conn.exec("DROP USER IF EXISTS 'kiln_guard_user'@'127.0.0.1'", [])
+  conn.exec("DROP USER IF EXISTS #{guard_user}", [])
   conn.close
 end

@@ -439,6 +439,17 @@ raises `ArgumentError`: format it as a string the database accepts. A statement
 takes up to 65535 bound values; `import` splits its statements at 32767 values
 and `preload` accepts up to 32767 parent keys.
 
+MySQL and MariaDB run statements as prepared statements. `SHOW WARNINGS`,
+`SHOW ERRORS`, `SHOW COUNT(*) WARNINGS`, `SHOW COUNT(*) ERRORS` and
+`GET DIAGNOSTICS` go over the text protocol without a prepare: MySQL cannot
+prepare them, and a failed prepare would replace the diagnostics they read.
+A statement without bind values that the server refuses to prepare (error
+1295, for example `CHECK TABLE` or `LOCK TABLES` on MySQL) is sent over the
+text protocol too, and its rows are returned like any other result, decoded by
+column type as in the table above. These statements take no bind values; with
+bind values they raise `Unsupported`. A text-protocol statement that produces more than one
+result set raises `Unsupported` and marks the connection broken.
+
 Errors carry `sqlstate` and map to `UniqueViolation`, `ForeignKeyViolation`,
 `NotNullViolation`, `CheckViolation`, `Deadlock`, `SerializationFailure`,
 `LockWaitTimeout`, `Timeout` and `ConnectionError`; anything else is
