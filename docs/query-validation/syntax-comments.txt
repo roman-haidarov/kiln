@@ -1,2 +1,0 @@
-219 Ruby files parse
-43 DB and new test/helper Ruby files contain no comments

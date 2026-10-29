@@ -1,3 +1,0 @@
-test-spinel.sh: wrapper and real compiler configured
-ci/db-test.sh: wrapper and real compiler configured
-new shell scripts: 0

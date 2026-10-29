@@ -302,8 +302,10 @@ SPINEL_WORKERS=1 ruby bench/mutations.rb
 `bench/differential.rb` compares the parser with llhttp WASM over generated
 inputs and records complete counters and examples as JSON. The captured corpus
 contained 100,056 cases across two seeds, with no unexplained acceptance or
-request-boundary mismatch. `bench/native_fuzz.rb` runs native parser cases under
-ASan and UBSan; 100,000 cases completed without sanitizer errors. These checks
+request-boundary mismatch. `ci/c-native.sh` fuzzes `kiln_http_scan`,
+`kiln_http_scan_at`, and `kiln_chunk_size` through `bench/http_fuzz.c` under
+ASan and UBSan. An earlier fixed run of 100,000 cases completed without
+sanitizer errors. These checks
 do not prove correctness for every possible input, and sanitizer runs do not
 check for data races.
 
@@ -451,8 +453,7 @@ Hypothesis checked: moving socket I/O into a C event loop removes most of the
 per-request cost of `Server`. Same router and handler, Spinel `9922a2c`,
 `SPINEL_WORKERS=1`, one CPU shared with `wrk -t1`, three rotated rounds.
 These figures were recorded during the comparison; raw output is not stored in
-the project. Rerun `bench/event_compare.sh` to write fresh results under
-`/tmp/kiln-validation/`.
+the project. Fresh mode comparisons use `bench/regression.sh`.
 
 | connections | Server | EventServer inline | EventServer, 4 handler threads |
 |---|---|---|---|
@@ -557,7 +558,7 @@ process" instead of libuv's `EALREADY` text.
 
 ## Response head and body sent separately
 
-Profiles of the 11 KB `bench/body_modes.rb` load on macOS showed that about a
+Profiles of an 11 KB text response on macOS showed that about a
 fifth of server CPU went to joining the response head and body in Ruby:
 `payload.ascii_only?` scanned the body byte by byte, `wire << payload` scanned
 it again inside `sp_str_append_grow` before choosing the result encoding, and
