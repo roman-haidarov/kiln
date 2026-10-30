@@ -79,11 +79,11 @@ module Kiln
                %i[long long long long long long int_array int int_array float_array int_array int], :binstr
       ffi_func :kiln_db_conn_broken, %i[long long long], :int
       ffi_func :kiln_db_os_thread_token, [], :long
-      ffi_func :kiln_db_dns_submit, %i[str long int_array int], :int
-      ffi_func :kiln_db_dns_take, %i[int int_array int], :str
-      ffi_func :kiln_db_resolver_cancel, [:int], :int
+      ffi_func :kiln_db_conn_dns_submit, %i[long long long str long int_array int], :int
+      ffi_func :kiln_db_conn_dns_take, %i[long long long long int_array int], :str
       ffi_func :kiln_db_conn_set_hostaddr, %i[long long long str long], :int
       ffi_func :kiln_db_step, %i[long long long int int long int_array int], :int
+      ffi_func :kiln_db_wait_fd, %i[int int double], :int
       ffi_func :kiln_db_result_meta, %i[long long long int_array int], :int
       ffi_func :kiln_db_result_bytes, %i[long long long long long int_array int], :binstr
       ffi_func :kiln_db_error_text, %i[long long long], :str
@@ -121,32 +121,31 @@ module Kiln
           Native.kiln_db_client_version(kind)
         end
 
-        def pg_hostaddr(host, deadline_ms)
+        def pg_hostaddr(handle, host, deadline_ms)
           out = [0, 0, 0]
-          rc = Native.kiln_db_dns_submit(host, host.bytesize, out, 3)
+          rc = Native.kiln_db_conn_dns_submit(handle, 1, 1, host, host.bytesize, out, 3)
           raise ConnectionError, 'DNS submission failed' unless rc == OK
           return host if out[2] == 1
 
-          await_dns(out[0], out[1], deadline_ms)
+          await_dns(handle, out[0], out[1], deadline_ms)
         end
 
-        def await_dns(request, socket_fd, deadline_ms)
+        def await_dns(handle, request, socket_fd, deadline_ms)
           loop do
             state = [0]
-            resolved = Native.kiln_db_dns_take(request, state, 1)
+            resolved = Native.kiln_db_conn_dns_take(handle, 1, 1, request, state, 1)
             return resolved if state[0] == OK
             raise ConnectionError, 'DNS lookup failed' unless state[0] == BUSY
 
-            dns_wait(request, socket_fd, deadline_ms - now_ms)
+            dns_wait(socket_fd, deadline_ms - now_ms)
           end
         end
 
-        def dns_wait(request, socket_fd, remaining)
+        def dns_wait(socket_fd, remaining)
           if remaining <= 0
-            Native.kiln_db_resolver_cancel(request)
             raise Timeout.new('DNS lookup timed out', code: TIMEOUT)
           end
-          IO.for_fd(socket_fd, autoclose: false).wait_readable(remaining * 0.001)
+          Native.wait_once(socket_fd, READY_READ, remaining * 0.001)
         end
 
         def set_hostaddr(handle, scope, thread_id, address)
@@ -265,13 +264,19 @@ module Kiln
       end
 
       module Driving
-        def park(socket_fd, bits, wait_ms, remain_ms)
+        def park(socket_fd, bits, wait_ms, remain_ms, waiter)
           seconds = (wait_ms.positive? && wait_ms < remain_ms ? wait_ms : remain_ms) * 0.001
           if socket_fd.negative?
             sleep(seconds)
             return READY_TIMEOUT
           end
-          wait_ready(IO.for_fd(socket_fd, autoclose: false), bits, seconds)
+          return waiter.wait(socket_fd, bits, seconds) if waiter
+
+          wait_once(socket_fd, bits, seconds)
+        end
+
+        def wait_once(socket_fd, bits, seconds)
+          Native.kiln_db_wait_fd(socket_fd, bits, seconds)
         end
 
         def wait_ready(io, bits, seconds)
@@ -283,17 +288,19 @@ module Kiln
 
         def ready_or_timeout(got, ready) = got.nil? ? READY_TIMEOUT : ready
 
-        def drive(handle, scope, thread_id, operation, deadline_ms)
+        def drive(handle, scope, thread_id, operation, deadline_ms, waiter = nil)
           out = [0, 0, 0, 0, 0, 0, 0, 0]
           ready = 0
           loop do
+            return timed_out_step(out) if ready == READY_TIMEOUT && now_ms >= deadline_ms
+
             Native.kiln_db_step(handle, scope, thread_id, operation, ready, deadline_ms, out, 8)
             return out if out[0] != STEP_WAIT
 
             remain = deadline_ms - now_ms
             return timed_out_step(out) if remain <= 0
 
-            ready = park(out[1], out[2], out[3], remain)
+            ready = park(out[1], out[2], out[3], remain, waiter)
           end
         end
 
@@ -307,6 +314,38 @@ module Kiln
       extend Calls
       extend Blocks
       extend Driving
+    end
+
+    class SocketWait
+      def initialize
+        @io = nil
+        @fd = -1
+      end
+
+      def wait(socket_fd, bits, seconds)
+        Native.wait_ready(io_for(socket_fd), bits, seconds)
+      end
+
+      def close
+        io = @io
+        @io = nil
+        @fd = -1
+        io&.close
+        nil
+      end
+
+      private
+
+      def io_for(socket_fd)
+        io = @io
+        return io if io && @fd == socket_fd
+
+        close
+        io = IO.for_fd(socket_fd, autoclose: false)
+        @io = io
+        @fd = socket_fd
+        io
+      end
     end
   end
 end

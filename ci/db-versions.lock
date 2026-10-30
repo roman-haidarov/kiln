@@ -13,7 +13,3 @@ source_mariadb_11_4=docker.io/library/mariadb:11.4
 digest_mariadb_11_4=sha256:2839e4d3b46936876b26e34b808279013047eeffeefc7a6e0f0afc60f6476b77
 image_mariadb_11_4=docker.io/library/mariadb@sha256:2839e4d3b46936876b26e34b808279013047eeffeefc7a6e0f0afc60f6476b77
 image_digests_confirmed=1
-libpq_prefix=/opt/homebrew/opt/libpq
-libpq_pqlibversion=180004
-mariadb_connector_c_prefix=/opt/homebrew/opt/mariadb-connector-c
-mariadb_connector_c_packed=30408

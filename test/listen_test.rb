@@ -50,6 +50,7 @@ adopted.start
 check 'event: a listening descriptor handed over is served', adopted.port == inherited_port &&
                                                              exchange(inherited_port, REQUEST).end_with?('http ok')
 adopted.shutdown(grace: 0.5)
+Kiln::Transport::Sock.kiln_sock_close(fd)
 
 base_fd = Kiln::Transport::Listen.tcp('127.0.0.1', 0).open(16, false)
 base_port = Kiln::Transport::Sock.kiln_sock_port(base_fd)
@@ -57,6 +58,7 @@ base_adopted = Kiln::Server.new(router, log: log, backend: :base, listen: ["fd:#
 base_adopted.start
 check 'base: a listening descriptor named as fd:N is served', exchange(base_port, REQUEST).end_with?('http ok')
 base_adopted.shutdown(grace: 0.5)
+Kiln::Transport::Sock.kiln_sock_close(base_fd)
 
 parsed = Kiln::Server.new(router, log: log, listen: ['127.0.0.1:0', "unix:#{path}"])
 parsed.start

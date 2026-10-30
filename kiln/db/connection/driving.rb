@@ -24,7 +24,7 @@ module Kiln
           assert_owner!
           raise Unsupported, 'Kiln::DB on an inline event-loop handler; use handlers: N' if Thread.current[:kiln_inline]
 
-          out = Native.drive(@handle, 1, 1, operation, deadline_ms)
+          out = Native.drive(@handle, 1, 1, operation, deadline_ms, @waiter)
           return out if out[0] == Native::STEP_DONE
 
           fail_step(out, label, operation)

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+. "$root/ci/native-env.sh"
+prefix=$("$root/ci/build-spinel.sh")
+if [ "${KILN_DB:-1}" = 1 ]; then
+  kiln_mariadb_env "$("$root/ci/build-mariadb.sh")"
+fi
+SPINEL="$prefix/bin/spinel" "$root/ci/spinel-placement.sh"
+printf 'Kiln toolchain ready in %s\nUse bin/spin or bin/spinel to compile your application.\n' "$prefix"

@@ -1,0 +1,74 @@
+diff --git a/lib/sp_sched.c b/lib/sp_sched.c
+--- a/lib/sp_sched.c
++++ b/lib/sp_sched.c
+@@ -3562,6 +3562,12 @@
+   return a;
+ }
+ 
++#ifndef SP_THREADS
++int sp_sched_application_workers(void) {
++  return 1;
++}
++#endif
++
+ #ifdef SP_THREADS
+ /* ---- helper OS workers (design 3.2, Appendix B) ---- */
+ static pthread_t g_worker_threads[SP_MAX_WORKERS];
+@@ -3611,6 +3617,19 @@
+ }
+ 
+ /* min(available CPUs, SPINEL_WORKERS); the env var overrides the autodetect. */
++static int kiln_worker_count(void) {
++  const char *text = getenv("KILN_WORKERS");
++  if (!text || !*text) return 0;
++  char *end = NULL;
++  errno = 0;
++  long count = strtol(text, &end, 10);
++  if (errno || *end || count < 1 || count > SP_MAX_WORKERS - 2) {
++    fprintf(stderr, "kiln: KILN_WORKERS must be an integer from 1 to %d\n", SP_MAX_WORKERS - 2);
++    exit(EXIT_FAILURE);
++  }
++  return (int)count;
++}
++
+ static int sp_worker_count(void) {
+   const char *e = getenv("SPINEL_WORKERS");
+   int n;
+@@ -3618,6 +3637,17 @@
+   else n = sp_available_cpus();
+   if (n > SP_MAX_WORKERS) n = SP_MAX_WORKERS;
+   return n;
++}
++
++int sp_sched_application_workers(void) {
++  if (g_workers_started) return g_worker_cap > 0 ? g_worker_cap : 1;
++  int count = kiln_worker_count();
++  if (count) return count;
++  count = sp_worker_count();
++  const char *text = getenv("SPINEL_WORKERS");
++  if (text && *text && count > 1) count--;
++  if (count > SP_MAX_WORKERS - 2) count = SP_MAX_WORKERS - 2;
++  return count;
+ }
+ 
+ /* The monitor thread (sysmon, design §5). Two jobs, both off the workers' backs:
+@@ -4602,13 +4632,12 @@
+      it through the pthread_create happens-before edge (no lock needed). Helpers
+      themselves are spawned on demand (sp_sched_maybe_grow), not here -- main
+      stays worker 0 and starts as the only participant (sp_active_workers 1). */
+-  g_worker_cap = sp_worker_count();
+-  /* SPINEL_WORKERS=N counts every OS worker that runs Ruby code, main among
+-     them, as docs/thread.md says (#9840): N-1 helpers, and none at N=1,
+-     where main runs every green thread and the monitor asks it for their
+-     slices (sp_safepoint_preempt). The autodetect, with the variable unset,
+-     stays one helper per core beside main. */
+-  { const char *e = getenv("SPINEL_WORKERS"); if (e && *e) g_worker_cap--; }
++  int kiln_workers = kiln_worker_count();
++  g_worker_cap = kiln_workers ? kiln_workers : sp_worker_count();
++  if (!kiln_workers) {
++    const char *text = getenv("SPINEL_WORKERS");
++    if (text && *text) g_worker_cap--;
++  }
+   /* main is worker 0 and the last slot belongs to the sweeper threads */
+   if (g_worker_cap > SP_MAX_WORKERS - 2) g_worker_cap = SP_MAX_WORKERS - 2;
+   /* Install the preemption signal handler before any worker can be targeted.

@@ -318,3 +318,11 @@ const char *kiln_sock_errno_text(long code) {
     sp_ffi_bin_len = (int)strlen(text);
     return text;
 }
+
+long kiln_sock_dup(long fd) {
+    int copy;
+    do {
+        copy = fcntl((int)fd, F_DUPFD_CLOEXEC, 0);
+    } while (copy < 0 && errno == EINTR);
+    return copy < 0 ? -errno : copy;
+}

@@ -5,24 +5,26 @@ module Kiln
         private
 
         def pump
+          @start_ready << true if @start_ready
+          @start_gate&.pop
           scan = Array.new(HTTP::Native::CAP, 0)
           meta = Array.new(META, 0)
           drained = false
           drained = pump_round(scan, meta, drained) until @stop && workers_stopped?
           drain_done
-          Uv.kiln_uv_flush
-          Uv.kiln_uv_poll
+          @uv.kiln_uv_flush
+          @uv.kiln_uv_poll
         ensure
           pump_teardown
         end
 
         def pump_round(scan, meta, drained)
           drained = start_drain(drained)
-          Uv.kiln_uv_poll
+          @uv.kiln_uv_poll
           handled = pump_events + take_requests(scan, meta)
           @dispatch_ready = true if @cutoff
-          Uv.kiln_uv_flush
-          @quiet = drained && @inflight.zero? && Uv.kiln_uv_busy.zero?
+          @uv.kiln_uv_flush
+          @quiet = drained && @inflight.zero? && @uv.kiln_uv_busy.zero?
           idle(drained) if handled.zero?
           drained
         rescue Runtime::DeadlineExceeded
@@ -30,13 +32,13 @@ module Kiln
         end
 
         def idle(drained)
-          park(drained ? 0.01 : handler_wait) if Uv.kiln_uv_settle.zero?
+          park(drained ? 0.01 : handler_wait) if @uv.kiln_uv_settle.zero?
         end
 
         def start_drain(drained)
           return drained if drained || !@draining
 
-          Uv.kiln_uv_drain
+          @uv.kiln_uv_drain
           @inlets.each_value(&:nudge)
           true
         end
@@ -52,7 +54,7 @@ module Kiln
         def take_requests(scan, meta)
           handled = 0
           loop do
-            src = Uv.kiln_uv_next(scan, HTTP::Native::CAP, meta)
+            src = @uv.kiln_uv_next(scan, HTTP::Native::CAP, meta)
             break if src.empty?
 
             take_request(src, scan, meta)
@@ -64,7 +66,7 @@ module Kiln
         def take_request(src, scan, meta)
           return serve(src, scan, meta) unless @cutoff
 
-          Uv.kiln_uv_abort(meta[3], meta[4])
+          @uv.kiln_uv_abort(meta[3], meta[4])
           @aborted_taken += 1
         end
 
@@ -94,8 +96,11 @@ module Kiln
         end
 
         def stop_uv
-          Uv.kiln_uv_stop
-          @aborted_count = Uv.kiln_uv_aborted
+          @uv.kiln_uv_stop
+          @aborted_count = @uv.kiln_uv_aborted
+          @poller&.close
+          @uv.close
+          @uv = nil
           @uv_closed = true
         end
       end
@@ -115,7 +120,7 @@ module Kiln
         end
 
         def libuv_bound(timeout)
-          uv_timeout = Uv.kiln_uv_timeout
+          uv_timeout = @uv.kiln_uv_timeout
           libuv_wait = uv_timeout * 0.001
           uv_timeout >= 0 && libuv_wait < timeout ? libuv_wait : timeout
         end
@@ -123,7 +128,7 @@ module Kiln
         def idle_pump? = @done.empty? && @ready.empty? && (@inlets.empty? || @wants.empty?)
 
         def wake_pump
-          @wake_lock.synchronize { Uv.kiln_uv_wake if wakeable? }
+          @wake_lock.synchronize { @uv.kiln_uv_wake if wakeable? }
         end
 
         def nudge_pump(deadline = nil)
@@ -131,7 +136,7 @@ module Kiln
             return unless @parked
             return if deadline && deadline >= @wake_at
 
-            Uv.kiln_uv_wake if wakeable?
+            @uv.kiln_uv_wake if wakeable?
           end
         end
 

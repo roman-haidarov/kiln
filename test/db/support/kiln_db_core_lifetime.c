@@ -7,6 +7,9 @@
 #include <string.h>
 
 __thread int sp_ffi_bin_len;
+void kiln_db_resolver_cancel_conn(uint64_t handle) {
+    (void)handle;
+}
 static pthread_mutex_t gate_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t gate_cv = PTHREAD_COND_INITIALIZER;
 static int gate_started;

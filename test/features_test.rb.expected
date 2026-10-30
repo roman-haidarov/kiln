@@ -67,7 +67,7 @@ ok   run served while waiting
 ok   SIGTERM ends run with nothing in flight
 ok   run stops tasks
 ok   listener is closed after run
-ok   run raises when the event server is already up
+ok   run rejects starting the same server twice
 ok   a failed run restores the previous trap
 ok   run restores the previous trap
 ok   task errors are logged

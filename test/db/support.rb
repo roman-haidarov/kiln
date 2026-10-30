@@ -11,3 +11,22 @@ def env_line(text, key)
   end
   nil
 end
+
+def fd_count
+  return -1 unless File.directory?('/dev/fd')
+
+  total = 0
+  Dir.children('/dev/fd').each do |name|
+    next if name.empty?
+
+    numeric = true
+    index = 0
+    while index < name.bytesize
+      char = name[index]
+      numeric = false if char < '0' || char > '9'
+      index += 1
+    end
+    total += 1 if numeric
+  end
+  total
+end

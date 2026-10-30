@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-spinel_bin=${SPINEL:-spinel}
 cd "$(dirname "$0")/.."
+spinel_bin=${SPINEL:-$(./ci/build-spinel.sh)/bin/spinel}
+export SPINEL="$spinel_bin"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 mkdir -p build/bench

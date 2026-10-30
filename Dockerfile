@@ -1,12 +1,12 @@
 FROM ubuntu:26.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ARG SPINEL_REF=9d10403754b91db4df7555b482c7c1436b0ddb52
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     clang-18 \
+    cmake \
     curl \
     git \
     libclang-rt-18-dev \
@@ -22,15 +22,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN gem install prism -v 1.9.0 --no-document \
-    && git clone --filter=blob:none https://github.com/matz/spinel.git /tmp/spinel \
-    && git -C /tmp/spinel checkout "$SPINEL_REF" \
-    && make -C /tmp/spinel deps \
-    && make -C /tmp/spinel -j1 \
-    && make -C /tmp/spinel install PREFIX=/opt/spinel \
-    && rm -rf /tmp/spinel
+COPY ci/build-mariadb.sh ci/with-build-lock.rb ci/mariadb-ref ci/mariadb-source.sha256 /opt/kiln-toolchain/ci/
+RUN KILN_MARIADB_PREFIX=/opt/kiln-mariadb /opt/kiln-toolchain/ci/build-mariadb.sh
 
-ENV SPINEL_REF=$SPINEL_REF \
+COPY ci/build-spinel.sh ci/spinel-cc.sh ci/spinel-ref /opt/kiln-toolchain/ci/
+COPY patches/spinel/ /opt/kiln-toolchain/patches/spinel/
+RUN KILN_SPINEL_PREFIX=/opt/spinel /opt/kiln-toolchain/ci/build-spinel.sh
+
+ENV KILN_SPINEL_PREFIX=/opt/spinel \
+    KILN_MARIADB_PREFIX=/opt/kiln-mariadb \
     PATH=/opt/spinel/bin:$PATH \
     SPINEL=/opt/spinel/bin/spinel \
     SPINEL_WORKERS=1 \

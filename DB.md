@@ -4,16 +4,16 @@ Kiln::DB provides database connections, models, relations, transactions, and
 bulk imports for Spinel applications. The application entry point creates the
 connection; model and query examples are grouped below by task.
 
-**Status: experimental.** The MySQL 8.4 / MariaDB 11.4 /
-PostgreSQL 17–18 server matrix, macOS and a CI job are still open release gates.
+**Status: experimental.** See [VALIDATION.md](VALIDATION.md) for tested server
+versions, runtime checks and platform limits.
 
 ## Adapters
 
 | Database | Connection kind | Model dialect | Client library |
 | --- | --- | --- | --- |
 | PostgreSQL | `Kiln::DB::Native::KIND_PG` | `:postgres` | [libpq](https://www.postgresql.org/docs/current/libpq.html) 17 or newer |
-| MySQL | `Kiln::DB::Native::KIND_MY` | `:mysql` | [MariaDB Connector/C](https://mariadb.com/docs/connectors/mariadb-connector-c/) 3.4 or newer |
-| MariaDB | `Kiln::DB::Native::KIND_MY` | `:mysql` | [MariaDB Connector/C](https://mariadb.com/docs/connectors/mariadb-connector-c/) 3.4 or newer |
+| MySQL | `Kiln::DB::Native::KIND_MY` | `:mysql` | Managed [MariaDB Connector/C](https://mariadb.com/docs/connectors/mariadb-connector-c/), version 3.4.12 |
+| MariaDB | `Kiln::DB::Native::KIND_MY` | `:mysql` | Managed [MariaDB Connector/C](https://mariadb.com/docs/connectors/mariadb-connector-c/), version 3.4.12 |
 
 Both client libraries are loaded with `dlopen` when the first connection opens
 (`KILN_LIBPQ` and `KILN_LIBMARIADB` select a specific file). Their headers are
@@ -22,11 +22,19 @@ needed only to compile the database extension.
 ### Building
 
 Kiln::DB adapters are included in the default `spin build` and
-`ext/build.sh`. The build needs libpq 17+ and MariaDB Connector/C 3.4+
-development headers, plus `pkg-config`. On Homebrew, install both libraries
-and expose their `.pc` files through `PKG_CONFIG_PATH` when Homebrew keeps them
-outside the default search path. The package manifest reads compiler include
-flags from the `libpq` and `libmariadb` pkg-config modules.
+`ext/build.sh`. Install libpq 17+ development headers, CMake, OpenSSL development
+headers and `pkg-config`, then run `bin/setup`. Kiln automatically builds the
+Connector/C commit pinned in `ci/mariadb-ref`, checks the source archive's
+SHA-256 and installs it in `.tools/mariadb`. The pinned commit reports 3.4.12;
+it is not a claim about the latest published release. Older 3.4 clients can
+fail during nonblocking MariaDB TLS handshakes and are rejected.
+
+`bin/spin` and `bin/spinel` validate and rebuild this dependency when needed,
+select its pkg-config files and record its absolute library path in the
+compiled binary. `ext/build.sh` uses the same managed dependency by default.
+The runtime loads that exact file even when an older system client is present.
+Keep the managed installation available when running the binary. Set
+`KILN_MARIADB_PREFIX` to choose another absolute installation directory.
 
 To override nonstandard installation paths when building native objects
 directly:
@@ -35,16 +43,19 @@ directly:
 KILN_DB_LIBPQ_PREFIX=/opt/libpq17 KILN_DB_LIBMARIADB_PREFIX=/opt/mariadb-connector-c ./ext/build.sh
 ```
 
-Without the prefixes the script asks `pkg-config` (`libpq`, `libmariadb`), then
-`mariadb_config`, then the Homebrew paths. Compilation stops with an explicit
-error when the headers are older than libpq 17 or Connector/C 3.4. Set
+For libpq, the script uses the explicit prefix, pkg-config or Homebrew.
+An explicit `KILN_DB_LIBMARIADB_PREFIX` selects an externally managed
+Connector/C installation; its headers and runtime must be at least 3.4.12.
+`KILN_LIBMARIADB` overrides the runtime file and is subject to the same version
+check. External replacements must pass the TLS and interruption tests. Set
 `KILN_DB=0` only to build an HTTP-only native extension without database
-headers.
+headers. This switch applies to `ext/build.sh`; the package manifest includes
+database adapters.
 
 ### Connecting
 
 ```ruby
-pool = Kiln::DB::Pool.new(4, timeout: 1.0) do
+pool = Kiln::DB::Pool.new(timeout: 1.0) do
   Kiln::DB::Conn.open(Kiln::DB::Native::KIND_PG, host, 5432, user, password, database,
                       "/etc/ssl/db-ca.pem", "db.internal", timeout: 15.0)
 end

@@ -151,7 +151,7 @@ module Kiln
         end
 
         def abandon_step?(operation, stop)
-          out = Native.drive(@handle, 1, 1, operation, stop)
+          out = Native.drive(@handle, 1, 1, operation, stop, operation == Native::OP_CANCEL ? nil : @waiter)
           return mark_broken if out[0] != Native::STEP_DONE || Native.broken?(@handle, 1, 1)
           return true if Native.result_meta(@handle, 1, 1)[2] == 1
           return mark_broken if Native.now_ms >= stop

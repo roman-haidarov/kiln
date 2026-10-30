@@ -14,7 +14,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SPINEL_REF: 9d10403754b91db4df7555b482c7c1436b0ddb52
   SPINEL_WORKERS: 1
 
 jobs:
@@ -52,26 +51,57 @@ jobs:
           restore-keys: |
             kiln-corpus-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Fingerprint toolchains
+        id: toolchain
+        run: |
+          printf 'spinel=%s\n' "$(ci/build-spinel.sh --fingerprint)" >> "$GITHUB_OUTPUT"
+          printf 'mariadb=%s\n' "$(ci/build-mariadb.sh --fingerprint)" >> "$GITHUB_OUTPUT"
+
       - name: Restore Spinel
         id: spinel-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/spinel-install
-          key: spinel-${{ runner.os }}-${{ runner.arch }}-${{ env.SPINEL_REF }}
+          path: .tools/spinel
+          key: kiln-spinel-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.spinel }}
+
+      - name: Restore Connector/C
+        id: mariadb-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools/mariadb
+          key: kiln-mariadb-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.mariadb }}
 
       - name: Build Spinel
-        if: steps.spinel-cache.outputs.cache-hit != 'true'
         run: |
-          git clone --filter=blob:none https://github.com/matz/spinel.git "$RUNNER_TEMP/spinel"
-          git -C "$RUNNER_TEMP/spinel" checkout "$SPINEL_REF"
-          make -C "$RUNNER_TEMP/spinel" deps
-          make -C "$RUNNER_TEMP/spinel" -j1
-          make -C "$RUNNER_TEMP/spinel" install PREFIX="$RUNNER_TEMP/spinel-install"
+          if ! ci/build-spinel.sh --check >/dev/null; then
+            rm -rf .tools/spinel
+            ci/build-spinel.sh
+          fi
+
+      - name: Save Spinel
+        if: steps.spinel-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .tools/spinel
+          key: kiln-spinel-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.spinel }}
+
+      - name: Build Connector/C
+        run: |
+          if ! ci/build-mariadb.sh --check >/dev/null; then
+            rm -rf .tools/mariadb
+            ci/build-mariadb.sh
+          fi
+
+      - name: Save Connector/C
+        if: steps.mariadb-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .tools/mariadb
+          key: kiln-mariadb-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.mariadb }}
 
       - name: Run CI natively
         run: |
           mkdir -p "$RUNNER_TEMP/kiln-ci"
-          SPINEL="$RUNNER_TEMP/spinel-install/bin/spinel" \
           SPINEL_CC="cc -Wno-nullability-completeness" \
           SPINEL_WORKERS=1 \
           CI_NATIVE_C=1 \

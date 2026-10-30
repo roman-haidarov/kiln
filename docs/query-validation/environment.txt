@@ -1,4 +1,0 @@
-spinel 2026.09.12+7939 (519280dc9) [gcc 13.3.0 (cc)]
-cc (Ubuntu 13.3.0-6ubuntu2~24.04) 13.3.0
-ruby 3.2.3 (2024-01-18 revision 52bb2ac0a6) [x86_64-linux-gnu]
-rubyfast 2.1.1

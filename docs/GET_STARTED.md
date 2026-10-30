@@ -6,15 +6,82 @@ short project overview, see [README.md](../README.md).
 
 ## Install
 
+Install the system build dependencies first. On Debian/Ubuntu:
+
 ```sh
-spin add kiln --path ../kiln
-spin build
+sudo apt-get update
+sudo apt-get install build-essential cmake git curl ruby ruby-dev pkg-config libffi-dev libssl-dev libpq-dev zlib1g-dev
 ```
 
-`spin build` compiles a portable native build without an additional trust step.
+On macOS, install the Xcode Command Line Tools and Homebrew, then:
+
+```sh
+brew install cmake pkg-config libffi libpq openssl@3
+```
+
+The Kiln wrappers discover these Homebrew pkg-config directories automatically.
+Kiln::DB needs libpq 17+; upgrade older distribution packages before building.
+Kiln builds its tested MariaDB Connector/C revision automatically for both
+MySQL and MariaDB. No separate Connector/C installation is needed.
+
+From the Kiln checkout:
+
+```sh
+bin/setup
+cd ..
+kiln/bin/spin new my_app
+cd my_app
+../kiln/bin/spin add kiln --path ../kiln
+../kiln/bin/spin build
+KILN_WORKERS=2 ./build/bin/my_app
+```
+
+Put application code in `my_app/bin/my_app.rb`. Use `../kiln/bin/spin build`
+to rebuild or `../kiln/bin/spin run` to build and run. The Kiln directory can
+live elsewhere; adjust that path accordingly.
+
+`bin/setup` fetches the exact commit in `ci/spinel-ref`, applies every
+`patches/spinel/*.patch` with `git apply --check` followed by `git apply`,
+builds Spinel and installs it under `.tools/spinel`. It then checks placement
+of threads created from main and from another thread with 3 and 5 workers.
+The first build needs network access and takes longer; a matching installed
+toolchain is reused without fetching anything. Setup also builds Connector/C
+under `.tools/mariadb`, using the commit in `ci/mariadb-ref` and verifying
+the downloaded archive against `ci/mariadb-source.sha256`. This revision
+reports version 3.4.12; it is an exact upstream commit, not a floating release.
+`.tools/` is local build output. Git and Docker ignore it.
+Builds use an OS file lock, which is released if the builder is interrupted.
+A later setup can continue without removing lock directories by hand.
+
+`bin/spin` and `bin/spinel` also bootstrap a missing or stale toolchain and
+validate its build recipe and compiler/runtime checksums before use. They use
+this local installation regardless of a global Spinel on `PATH`. A failing
+patch stops the build. Set an absolute `KILN_SPINEL_PREFIX` to use another
+installation directory, and use the same value for setup and later commands.
+Set `SPINEL_CC` to select the C compiler, for example `SPINEL_CC=clang`.
+
+For `build`, `run` and `test`, `bin/spin` also records the toolchain in
+`build/.kiln-toolchain`. The Connector/C fingerprint and library path also
+participate. On a mismatch or missing stamp it moves prior
+`build/bin` and `build/test` into `build/.kiln-previous.*`, so timestamp-based
+checks cannot reuse executables from a different runtime. Matching builds
+keep Spinel's incremental behavior. The previous outputs remain under the
+ignored `build/` directory.
+
+Package C objects use `.tools/native-cache/<fingerprint>`, so a runtime,
+client or compiler change also bypasses old objects with future timestamps.
+`SPIN_NATIVE_CACHE` chooses the parent cache directory; the wrapper adds the
+fingerprint beneath it.
+
+`spin add kiln` only adds a dependency; upstream Spinel does not run Kiln's
+setup or patch an already installed compiler. Use the Kiln wrappers shown
+above for the managed toolchain. An explicit `SPINEL` in low-level test and
+benchmark scripts is an expert override; CI requires the managed installation.
+
+`bin/spin build` compiles a portable native build without an additional trust step.
 The optimized manual build (`ext/build.sh`) retains runtime-dispatched SIMD for
 zlib-ng and picohttpparser. Both build paths are checked separately in CI.
-Neither path compiles Kiln::DB unless it is requested; see [Database](#database).
+Both paths include Kiln::DB by default; see [Database](#database).
 
 ## Server
 
@@ -45,23 +112,48 @@ Without `host:` the server listens on all interfaces (`0.0.0.0`) on both
 backends. Pass `host: "127.0.0.1"` to accept only local connections, for
 example behind a reverse proxy on the same machine.
 
-Kiln does not spawn or supervise child processes: configure Spinel M:N
-parallelism via `SPINEL_WORKERS`, and use a process supervisor outside Kiln
-if independent processes or rolling upgrades are required.
+Set `KILN_WORKERS` when starting the application:
 
-`backend: :base` selects the thread-per-connection engine. The event backend
-runs handlers inline by default. `handlers: N` runs handlers on N worker
-threads; `handlers: 0` keeps them on the event loop. A free handler takes the
-next request of any connection, and requests of one connection run in order.
-With `handlers: N`, a handler that passes its `request_timeout` gets a 504
-response, and its worker is replaced so other requests can continue. Inline
-handlers share the event loop: blocking calls delay all connections and cannot
-be forcibly timed out without interrupting the loop itself. Work already done
-by a handler cannot be rolled back.
+```sh
+KILN_WORKERS=2 ./build/bin/my_app
+KILN_WORKERS=4 ./build/bin/my_app
+```
 
-With `handlers >= SPINEL_WORKERS - 1`, the event pump shares a worker with a
-handler because worker 0 runs the main thread. Set `handlers` to at most
-`SPINEL_WORKERS - 2` to keep the pump on its own worker.
+The value counts application CPU workers: 2 means two, 4 means four. The
+managed runtime provides its main and scheduler threads separately. This also
+works with `KILN_WORKERS=4 ../kiln/bin/spin run`; the value is read at runtime,
+so changing it does not require recompilation. Without it, Spinel detects the
+available CPUs, including Linux affinity and container CPU quotas.
+`Kiln::Runtime.workers` reports the application worker budget.
+
+Standard settings follow that budget automatically. The event backend uses
+16 concurrent handlers per CPU worker; the default database pool has the same
+capacity and opens connections lazily. Base uses one accounting shard per CPU
+worker. Start with these defaults; there is no `N+1` calculation and no need
+to set `handlers` or pool size for ordinary startup.
+
+These are bounded concurrency defaults, not a promise of linear throughput.
+Database latency, its connection limit, query cost and client concurrency
+still affect results. The standard event server starts one independent network
+loop per application worker, sharing the listening socket inside one process. Explicit small
+connection, stream, handshake or handler limits can reduce the loop count.
+`server.loops` reports the count.
+Kiln does not spawn or supervise child processes.
+
+`backend: :base` selects the thread-per-connection engine. `handlers: N`
+overrides event handler concurrency; `handlers: 0` runs handlers inline on
+the event loop. A free handler takes the next request of any connection, and
+requests of one connection run in order. With handler threads, an expired
+`request_timeout` produces a 504 and replaces that handler. Inline handlers
+share the event loop, so a waiting database operation is unsupported and a
+blocking call delays other connections. Work already done by a handler
+cannot be rolled back.
+
+Explicit handler counts, pool sizes and `shards:` remain available for
+workloads needing different resource limits. `SPINEL_WORKERS` is a low-level
+upstream override with its original semantics; `KILN_WORKERS` takes precedence.
+Use `KILN_WORKERS` for applications. `SPINEL_SCHED_STATS=2` is an optional
+placement diagnostic, not required setup.
 
 ## Listeners
 
@@ -81,7 +173,8 @@ server uses `host:` and `port:` (and `tls:` for that one listener).
 A unix socket file left by a dead process is replaced only if connecting
 to it returns `ECONNREFUSED`; other errors do not authorize removal. On
 shutdown, the server unlinks its original socket path only if the inode and
-device still match; it leaves replaced paths and inherited socket paths alone. `Kiln::Transport::Listen.fd(n)` serves a socket that is already listening, and
+device still match; it leaves replaced paths and inherited socket paths alone. `Kiln::Transport::Listen.fd(n)` duplicates a socket that is already listening;
+the caller retains ownership of the supplied descriptor.
 `Kiln::Transport::Listen.systemd` returns the sockets passed by systemd socket activation
 or `listenfd` (`LISTEN_FDS`/`LISTEN_PID`). `reuse_port: true` sets
 `SO_REUSEPORT`, so independently started servers can bind a **fixed** shared TCP port.
@@ -205,7 +298,7 @@ Compile and run the entry point with `app/` on Spinel's require path so the
 router module and controller files resolve:
 
 ```sh
-spinel -I app app/main.rb -o app_server
+../kiln/bin/spinel $(../kiln/bin/spin flags) -I app app/main.rb -o app_server
 ./app_server
 ```
 
@@ -596,10 +689,10 @@ comparing runs. Hash uses FIFO eviction; the native cache uses SIEVE.
 
 ## Database
 
-Kiln::DB remains experimental and is not compiled by `spin build`. Build it
-with `KILN_DB=1 ./ext/build.sh` (see [DB.md](../DB.md#building)); it needs
-libpq 17+ and MariaDB Connector/C 3.4+ headers at build time and loads the
-libraries at run time.
+Kiln::DB remains experimental and is included in standard builds. It needs
+libpq 17+ and the managed MariaDB Connector/C headers at build time and loads
+the libraries at runtime. `bin/setup` and the build wrappers prepare Connector/C
+automatically. See [DB.md](../DB.md#building).
 
 Connect the database in `main.rb` before starting the server. This example
 uses PostgreSQL; use `KIND_MY` for MySQL or MariaDB.
@@ -608,7 +701,7 @@ uses PostgreSQL; use `KIND_MY` for MySQL or MariaDB.
 require "kiln"
 require "kiln/db"
 
-pool = Kiln::DB::Pool.new(4, timeout: 1.0) do
+pool = Kiln::DB::Pool.new(timeout: 1.0) do
   Kiln::DB::Conn.open(
     Kiln::DB::Native::KIND_PG,
     ENV["DB_HOST"], (ENV["DB_PORT"] || "5432").to_i,
@@ -622,7 +715,7 @@ router = Kiln::Routing::Router.new
 router.get("/health", ->(ctx) { ctx.res.text("ok") })
 router.seal!
 log = Kiln::Observability::Log.new($stdout)
-server = Kiln::Server.new(router, log: log, host: "127.0.0.1", port: 8080, handlers: 4)
+server = Kiln::Server.new(router, log: log, host: "127.0.0.1", port: 8080)
 begin
   server.run(grace: 5.0)
 ensure
@@ -633,16 +726,17 @@ end
 
 Set `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` and `DB_CA` (the CA file
 that signed the server certificate); `DB_PORT` defaults to `5432`. TLS with
-certificate and host name verification is the default. Database calls need
-`handlers: N` (or the base backend): on an inline event-loop handler they raise
-`Kiln::DB::Unsupported`. Each request thread leases its own connection, and a
+certificate and host name verification is the default. Database calls work with the standard event handler pool or the base backend.
+Explicit inline mode (`handlers: 0`) raises `Kiln::DB::Unsupported`. Each request thread leases its own connection, and a
 query stops at the request deadline. See [DB.md](../DB.md) for adapters, model
 declarations, query examples, and result shapes.
 
 ## Tests
 
 ```sh
-SPINEL=/path/to/spinel SPINEL_WORKERS=1 ./test-spinel.sh
+bin/setup
+SPINEL_WORKERS=1 ./test-spinel.sh
+ci/db-offline.sh
 ```
 
 Do not use `spin test --regen`. Output is written to
@@ -652,7 +746,8 @@ Do not use `spin test --regen`. Output is written to
 
 `ci/run.sh` is the one CI entry point: it runs the suite with
 `SPINEL_WORKERS=1`, then a short benchmark (`SAMPLE=0`) and checks its
-performance and memory tables. Every job uses one Spinel worker. Linux x86_64
+performance and memory tables. Toolchain probes separately use 3 and 5
+workers. Linux x86_64
 (`ubuntu-24.04`) and Linux ARM64 (`ubuntu-24.04-arm`) run it in the image built
 from `Dockerfile`, which holds only the toolchain; the source is mounted at
 `/src`. macOS runners cannot run Docker (no nested virtualization), so
@@ -668,3 +763,26 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/src" kiln-ci ci/run.sh
 
 `CI_BENCH` (default `1`), `KILN_ARTIFACTS` (default `$TMPDIR/kiln-ci`) and
 `TEST_TIMEOUT` adjust a run.
+
+## Updating Spinel
+
+Change only `ci/spinel-ref` to the full upstream commit SHA, then run
+`bin/setup`. Local builds, Docker and macOS CI all call
+`ci/build-spinel.sh`; no second revision needs updating. Docker copies only
+the toolchain inputs before its build step. The macOS cache key includes the
+revision file, builder, C wrapper and patch contents, and restored toolchains
+are checked even on a cache hit.
+
+If a patch no longer applies, the build fails before `make`. Review the new
+scheduler and update the patch, or remove it once the same fixes exist
+upstream. A successful textual application alone does not prove correct
+placement: rerun `bin/setup`, `ci/toolchain-test.sh`, `ci/run.sh` and the Base
+and database scaling checks for the new runtime. With no `.patch` files, the
+builder compiles unmodified upstream.
+
+An installed toolchain records its commit and input hashes in
+`share/kiln-spinel/recipe` and compiler/runtime hashes in
+`share/kiln-spinel/payload`. `ci/build-spinel.sh --check` verifies them;
+`--fingerprint` prints the expected recipe hash. Spinel's `--version` alone
+does not distinguish the patched runtime. Existing application binaries must
+be rebuilt after a runtime change.

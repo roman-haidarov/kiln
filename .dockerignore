@@ -1,6 +1,7 @@
 .git
 .ruby-lsp
 build
+.tools
 validation
 AGENTS.md
 .DS_Store

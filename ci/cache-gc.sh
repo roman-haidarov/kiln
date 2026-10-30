@@ -3,7 +3,8 @@ set -eu
 
 cd "$(dirname "$0")/.."
 compiler=${CC:-cc}
-spinel=${SPINEL:-spinel}
+spinel=${SPINEL:-$(./ci/build-spinel.sh)/bin/spinel}
+export SPINEL="$spinel"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
 export SPINEL_CC=${SPINEL_CC:-$compiler}
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}

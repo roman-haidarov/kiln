@@ -125,8 +125,10 @@ begin
   database = Kiln::DB::Sql.quote(:mysql, env_line(text, 'KILN_DB_MY_DB'))
   conn.exec("GRANT SELECT, INSERT, UPDATE, DELETE ON #{database}.kiln_guard_hidden TO #{guard_user}", [])
   limited = open_maria(text, 'kiln_guard_user', 'guard-test')
-  hidden = limited.exec("SELECT COUNT(*) FROM information_schema.triggers WHERE event_object_table = 'kiln_guard_hidden'", [])[0][0]
-  need('trigger hidden', hidden == 0)
+  rows = limited.exec(
+    "SELECT action_statement FROM information_schema.triggers WHERE event_object_table = 'kiln_guard_hidden'", []
+  )
+  need('trigger body hidden', rows.all? { |row| row[0].nil? })
   Kiln::DB::Scope.use(limited)
   GuardItem.define_table(:mysql, 'kiln_guard_hidden', %w[id name], ['id'], 'g')
   rejected = false

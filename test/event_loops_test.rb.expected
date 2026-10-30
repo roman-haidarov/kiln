@@ -1,0 +1,6 @@
+ok independent event loops and shutdown
+ok facade loops and unique request IDs
+ok repeated start and stop release descriptors
+ok restart the same facade server
+ok all pumps wait for the startup barrier
+ok inherited listener stays owned by its caller

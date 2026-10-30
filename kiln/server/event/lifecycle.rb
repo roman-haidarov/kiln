@@ -2,18 +2,52 @@ module Kiln
   class Server
     class Event
       module Lifecycle
-        def start
-          raise IOError, 'another Kiln::Server::Event is already running in this process' if Uv.kiln_uv_running == 1
+        def start(defer_handlers: false, gate: nil, ready: nil)
+          raise IOError, 'event server is already running' if @pump&.alive?
 
-          Transport::Sock.kiln_sock_ignore_sigpipe
-          open_listeners
-          @poller = IO.for_fd(Uv.kiln_uv_fd, autoclose: false)
+          reset_event if @stopped || @uv_closed
+          @start_gate = gate
+          @start_ready = ready
+          @uv = Uv::Loop.new
+          started = false
+          begin
+            Transport::Sock.kiln_sock_ignore_sigpipe
+            open_listeners
+            @poller = IO.for_fd(@uv.kiln_uv_fd, autoclose: false)
+            start_lanes unless defer_handlers
+            @pump = Thread.new { pump_thread }
+            started = true
+            self
+          ensure
+            cleanup_start unless started
+          end
+        end
+
+        def activate_handlers
           start_lanes
-          @pump = Thread.new { pump_thread }
-          self
         end
 
         private
+
+        def reset_event
+          init_streams
+          init_workers(@handlers)
+          init_wake
+          init_flags
+          init_counters
+          @ports = []
+        end
+
+        def cleanup_start
+          stop_workers_now
+          @uv.kiln_uv_abandon
+          @uv.kiln_uv_stop
+          @poller&.close
+          @uv.close
+          @uv = nil
+          @uv_closed = true
+          release_listeners
+        end
 
         def start_lanes
           @handlers.times do |index|
@@ -34,11 +68,11 @@ module Kiln
         end
 
         def open_listeners
-          rc = Uv.kiln_uv_configure(@settings, @settings.size)
+          rc = @uv.kiln_uv_configure(@settings, @settings.size)
           raise IOError, "kiln event server setup failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
 
           start_listening
-          @ports = Array.new(@listen.size) { |index| Uv.kiln_uv_port(index) }
+          @ports = Array.new(@listen.size) { |index| @uv.kiln_uv_port(index) }
           @port = Kiln::Runtime.first_port(@ports)
         end
 
@@ -46,7 +80,7 @@ module Kiln
           started = false
           begin
             @listen.each { |spec| adopt(spec) }
-            rc = Uv.kiln_uv_start
+            rc = @uv.kiln_uv_start
             raise IOError, "kiln event server listen failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
 
             started = true
@@ -56,19 +90,19 @@ module Kiln
         end
 
         def abandon_listen
-          Uv.kiln_uv_abandon
+          @uv.kiln_uv_abandon
           release_listeners
         end
 
         def adopt(spec)
-          fd = spec.open(@backlog, @reuse_port)
-          @owned_paths << Transport::Sock.own_path(spec.path) if spec.owns_path?
           tls = spec.tls
           context = tls.nil? ? -1 : tls.context
-          index = Uv.kiln_uv_adopt(fd, context)
+          fd = spec.open(@backlog, @reuse_port)
+          @owned_paths << Transport::Sock.own_path(spec.path) if spec.owns_path?
+          index = @uv.kiln_uv_adopt(fd, context)
           return unless index.negative?
 
-          Transport::Sock.kiln_sock_close(fd) if spec.kind != :fd
+          Transport::Sock.kiln_sock_close(fd)
           raise IOError, "kiln event server cannot use #{spec}: #{Uv.kiln_uv_error_text(index)} (#{index})"
         end
 
@@ -80,6 +114,12 @@ module Kiln
       end
 
       module Stopping
+        def drain
+          @draining = true
+          @start_gate&.close
+          wake_pump
+        end
+
         def shutdown(grace: 5.0)
           check_rules([['shutdown grace', grace, :seconds_at_least]])
           return 0 if @stopped || @pump.nil?
@@ -97,6 +137,7 @@ module Kiln
           @stopped = true
           @quiet = false
           @draining = true
+          @start_gate&.close
           wake_pump
         end
 

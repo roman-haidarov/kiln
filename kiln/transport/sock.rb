@@ -7,6 +7,7 @@ module Kiln
       ffi_func :kiln_sock_port, [:long], :long
       ffi_func :kiln_sock_accept, %i[long long], :long
       ffi_func :kiln_sock_shutdown, %i[long long], :long
+      ffi_func :kiln_sock_dup, [:long], :long
       ffi_func :kiln_sock_close, [:long], :long
       ffi_func :kiln_sock_unlink, [:str], :long
       ffi_func :kiln_sock_path_id, %i[str int_array], :long

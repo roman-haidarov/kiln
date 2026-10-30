@@ -1,0 +1,11 @@
+pg17 registrations bounded
+pg17 close ends server session yes
+pg17 cancel and pipeline reuse ok
+pg17 stream break reuse ok
+mysql84 registrations bounded
+mysql84 close ends server session yes
+mysql84 stream break reuse ok
+mariadb114 registrations bounded
+mariadb114 close ends server session yes
+mariadb114 stream break reuse ok
+ok wait registration

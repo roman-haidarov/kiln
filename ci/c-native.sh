@@ -49,7 +49,12 @@ spinel_headers() {
     printf '%s\n' "$SPINEL_HDR_DIR"
     return
   fi
-  spinel_path=$(command -v "${SPINEL:-spinel}" 2>/dev/null || true)
+  spinel=${SPINEL:-}
+  if [ -z "$spinel" ]; then
+    prefix=$(./ci/build-spinel.sh) || return 1
+    spinel=$prefix/bin/spinel
+  fi
+  spinel_path=$(command -v "$spinel" 2>/dev/null || true)
   [ -n "$spinel_path" ] || return 1
   spinel_dir=$(cd "$(dirname "$spinel_path")" && pwd -P)
   if [ -L "$spinel_path" ]; then

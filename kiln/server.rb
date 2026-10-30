@@ -30,12 +30,14 @@ module Kiln
     def free_slots = @engine.free_slots
     def handling = @engine.handling
     def handshakes = @engine.handshakes
+    def workers = Runtime.workers
+    def loops = @backend == :event ? @engine.loops : 0
 
     private
 
     def take_backend(options)
       if options.key?(:workers)
-        raise ArgumentError, 'workers: was removed; configure Spinel parallelism with SPINEL_WORKERS'
+        raise ArgumentError, 'workers: was removed; set KILN_WORKERS when starting the application'
       end
 
       options.key?(:backend) ? options.delete(:backend) : :event
@@ -44,7 +46,7 @@ module Kiln
     def build_engine(backend, handler, options)
       options[:host] = Settings::SHARED[:host] unless options.key?(:host)
       case backend
-      in :event then Event.new(handler, **options)
+      in :event then Runtime.workers > 1 ? EventGroup.new(handler, **options) : Event.new(handler, **options)
       in :base then Base.new(handler, **options)
       else raise ArgumentError, 'backend must be :event or :base'
       end

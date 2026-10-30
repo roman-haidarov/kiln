@@ -17,7 +17,7 @@ module Kiln
         end
 
         def new_context(req)
-          @seq += 1
+          @seq += @seq_stride
           @inflight += 1
           Routing::Context.new(req, HTTP::Response.new, @seq, Kiln::Runtime.now + @request_timeout)
         end
@@ -73,11 +73,11 @@ module Kiln
           response = HTTP::Response.new
           response.text(body, status: status)
           head = HTTP::Response.build_head(status, response.headers, body.bytesize, false, version: version)
-          Uv.kiln_uv_send(meta[3], meta[4], head, head.bytesize, body, body.bytesize, 1)
+          @uv.kiln_uv_send(meta[3], meta[4], head, head.bytesize, body, body.bytesize, 1)
         end
 
         def reply_bad(meta)
-          Uv.kiln_uv_send(meta[3], meta[4], BAD_REQUEST, BAD_REQUEST.bytesize, EMPTY_BODY, 0, 1)
+          @uv.kiln_uv_send(meta[3], meta[4], BAD_REQUEST, BAD_REQUEST.bytesize, EMPTY_BODY, 0, 1)
         end
       end
 
@@ -87,7 +87,7 @@ module Kiln
         def refuse(meta, version, status)
           slot = meta[3]
           gen = meta[4]
-          Uv.kiln_uv_refuse(slot, gen)
+          @uv.kiln_uv_refuse(slot, gen)
           unless conn_busy?(slot, gen)
             return reply_bad(meta) if status == 400
 
@@ -135,7 +135,7 @@ module Kiln
         def build_request(src, meta, head)
           version, verb, target, headers = head
           flags = meta[5]
-          alpn = flags.anybits?(TLS_FLAG) ? Uv.kiln_uv_tls_alpn(meta[3], meta[4]) : nil
+          alpn = flags.anybits?(TLS_FLAG) ? @uv.kiln_uv_tls_alpn(meta[3], meta[4]) : nil
           payload = flags.anybits?(STREAMED) ? request_inlet(meta) : nil
           body = payload ? EMPTY_BODY : inline_body(src, meta)
           HTTP::Request.new(verb, target, headers, body, HTTP::Request::Wire.new(version, payload, alpn))

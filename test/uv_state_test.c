@@ -5,6 +5,9 @@
 __thread int sp_ffi_bin_len;
 
 int main(void) {
+    kuv_context *ctx = calloc(1, sizeof(*ctx));
+    assert(ctx);
+    ctx->buffer_body = KUV_BODY_HIGH;
     for (int state = 0; state < KUV_CONN_STATE_COUNT; state++) {
         for (int event = 0; event < KUV_CONN_EVENT_COUNT; event++) {
             kuv_conn_state next = kuv_conn_next((kuv_conn_state)state, (kuv_conn_event)event);
@@ -63,7 +66,7 @@ int main(void) {
     c.body_left = 3;
     c.in = strdup("abcNEXT");
     c.in_len = 7;
-    kuv_body_feed(&c);
+    kuv_body_feed(ctx, &c);
     assert(c.body_len == 3 && memcmp(c.body, "abc", 3) == 0);
     assert(c.body_left == 0 && c.in_len == 4 && memcmp(c.in, "NEXT", 4) == 0);
     kuv_body_complete(&c);
@@ -79,7 +82,7 @@ int main(void) {
     c.in = strdup("3\r\nabc\r\n0\r\n\r\nNEXT");
     c.in_len = strlen(c.in);
     kiln_uv_chunk_init(&c.chunk);
-    kuv_body_feed(&c);
+    kuv_body_feed(ctx, &c);
     assert(c.body_state == KUV_BODY_DONE && c.body_len == 3);
     assert(memcmp(c.body, "abc", 3) == 0 && c.in_len == 4 && memcmp(c.in, "NEXT", 4) == 0);
     free(c.in);
@@ -91,10 +94,11 @@ int main(void) {
     c.in = strdup("invalid\r\n");
     c.in_len = strlen(c.in);
     kiln_uv_chunk_init(&c.chunk);
-    kuv_body_feed(&c);
+    kuv_body_feed(ctx, &c);
     assert(c.body_state == KUV_BODY_FAILED && c.body_error == 400);
     free(c.in);
     free(c.body);
+    free(ctx);
     puts("ok connection transitions, read policy and body framing");
 
     return 0;
