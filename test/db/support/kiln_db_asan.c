@@ -54,12 +54,13 @@ static int check_resolve(void) {
     int wait_fd = -1;
     int done = 0;
     char addr[64];
+    uint64_t request = UINT64_MAX;
     int rc;
     if (kiln_db_configure_values(values, 8) != KILN_DB_OK) {
         return fail("configure");
     }
-    rc = kiln_db_resolver_submit("127.0.0.1", 9, &wait_fd, addr, sizeof addr, &done);
-    if (rc != 0 || done != 1 || strcmp(addr, "127.0.0.1") != 0) {
+    rc = kiln_db_resolver_submit("127.0.0.1", 9, &wait_fd, addr, sizeof addr, &done, &request);
+    if (rc != 0 || done != 1 || request != 0 || strcmp(addr, "127.0.0.1") != 0) {
         return fail("resolve");
     }
     printf("asan-resolve\n");

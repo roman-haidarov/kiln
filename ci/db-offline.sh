@@ -16,4 +16,7 @@ exec ./test-spinel.sh \
   test/db/query_sql_test.rb \
   test/db/shape_cache_test.rb \
   test/db/shape_cache_regression_test.rb \
-  test/db/spinel_pinning_test.rb
+  test/db/spinel_pinning_test.rb \
+  test/db/wait_interrupt_test.rb \
+  test/db/dns_interrupt_test.rb \
+  test/db/tls_deadline_test.rb

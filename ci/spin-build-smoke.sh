@@ -2,19 +2,13 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 cd "$root"
+. ./ci/native-env.sh
+kiln_mariadb_env "$(ci/build-mariadb.sh --check)"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
-spinel=${SPINEL:-spinel}
-spinel_path=$(command -v "$spinel")
-spinel_dir=$(CDPATH= cd -- "$(dirname -- "$spinel_path")" && pwd -P)
-spin=${SPIN:-$spinel_dir/spin}
-if [ -n "${SPINEL_REF:-}" ]; then
-  actual=$("$spinel" --version | sed -n 's/^[^(]*(\([^)]*\)).*/\1/p')
-  case "$SPINEL_REF" in
-    "$actual"*) ;;
-    *) printf 'Spinel revision mismatch: expected %s, got %s\n' "$SPINEL_REF" "$actual" >&2; exit 1 ;;
-  esac
-fi
+prefix=$(ci/build-spinel.sh --check)
+spinel=$prefix/bin/spinel
+spin=$prefix/bin/spin
 if ! command -v "$spin" >/dev/null 2>&1; then
   printf 'spin executable not found: %s\n' "$spin" >&2
   exit 1
@@ -39,10 +33,12 @@ require 'kiln/db'
 json = Kiln::HTTP::Json.generate({ 'x' => 'ё' })
 raise 'JSON mismatch' unless json == '{"x":"ё"}'
 raise 'version mismatch' unless Kiln::VERSION == ENV.fetch('KILN_EXPECTED_VERSION')
+raise 'client load' unless Kiln::DB::Native.load_kind(Kiln::DB::Native::KIND_MY) == Kiln::DB::Native::OK
+raise 'client version' unless Kiln::DB::Native.client_version(Kiln::DB::Native::KIND_MY) >= 30_412
 puts 'kiln spin build ok'
 RUBY
 CC="$spinel_cc" SPIN_NO_NATIVE_CACHE=1 SPIN_NATIVE_CACHE="$scratch/native-cache" "$spin" build
-result=$(KILN_EXPECTED_VERSION="$expected" "$scratch/kiln_smoke/build/bin/kiln_smoke")
+result=$(unset KILN_LIBMARIADB; KILN_EXPECTED_VERSION="$expected" "$scratch/kiln_smoke/build/bin/kiln_smoke")
 if [ "$result" != 'kiln spin build ok' ]; then
   printf 'unexpected spin output: %s\n' "$result" >&2
   exit 1

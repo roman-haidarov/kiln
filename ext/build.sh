@@ -2,12 +2,18 @@
 set -eu
 
 cd "$(dirname "$0")/.."
+. ./ci/native-env.sh
 cc_bin=${CC:-cc}
 flags="${KILN_EXT_CFLAGS:--O2} -DSP_THREADS -DKILN_OPTIMIZED"
 compiler_version=$("$cc_bin" --version | sed -n '1p')
 hdr_dir=${SPINEL_HDR_DIR:-}
 if [ -z "$hdr_dir" ]; then
-  spinel_path=$(command -v "${SPINEL:-spinel}" 2> /dev/null || true)
+  spinel_bin=${SPINEL:-}
+  if [ -z "$spinel_bin" ]; then
+    prefix=$(./ci/build-spinel.sh)
+    spinel_bin=$prefix/bin/spinel
+  fi
+  spinel_path=$(command -v "$spinel_bin" 2> /dev/null || true)
   if [ -n "$spinel_path" ]; then
     spinel_dir=$(cd "$(dirname "$spinel_path")" && pwd -P)
     if [ -L "$spinel_path" ]; then
@@ -39,7 +45,9 @@ fi
 content_key=$(find ext -path ext/croaring -prune -o -type f \( -name '*.c' -o -name '*.h' -o -name 'build.sh' \) -print | LC_ALL=C sort | xargs $hash_tool | $hash_tool)
 db_sources=""
 db_flags=""
+db_key=""
 db_enabled=${KILN_DB:-1}
+mariadb_library=
 if [ "$db_enabled" = "1" ]; then
   if [ -n "${KILN_DB_LIBPQ_PREFIX:-}" ]; then
     pq_flags="-I$KILN_DB_LIBPQ_PREFIX/include"
@@ -50,22 +58,17 @@ if [ "$db_enabled" = "1" ]; then
   else
     pq_flags=""
   fi
-  if [ -n "${KILN_DB_LIBMARIADB_PREFIX:-}" ]; then
-    my_flags="-I$KILN_DB_LIBMARIADB_PREFIX/include/mariadb"
-  elif pkg-config --exists libmariadb 2> /dev/null; then
-    my_flags=$(pkg-config --cflags libmariadb)
-  elif command -v mariadb_config > /dev/null 2>&1; then
-    my_flags=$(mariadb_config --include)
-  elif [ -d /opt/homebrew/opt/mariadb-connector-c/include/mariadb ]; then
-    my_flags="-I/opt/homebrew/opt/mariadb-connector-c/include/mariadb"
-  else
-    my_flags=""
+  if [ -z "${KILN_DB_LIBMARIADB_PREFIX:-}" ]; then
+    KILN_DB_LIBMARIADB_PREFIX=$(./ci/build-mariadb.sh)
   fi
+  mariadb_library=$(kiln_mariadb_library "$KILN_DB_LIBMARIADB_PREFIX")
+  my_flags="-I$KILN_DB_LIBMARIADB_PREFIX/include/mariadb"
   db_flags="$pq_flags $my_flags"
-  db_sources=$(printf '%s ' ext/db/*.c)
+  db_key=$(find "$KILN_DB_LIBMARIADB_PREFIX/include" -type f | LC_ALL=C sort | while IFS= read -r header; do $hash_tool "$header"; done | $hash_tool)
+  db_sources=$(printf '%s ' ext/db/*.c ext/kiln_db_wait.c)
 fi
 runtime_key=$(cd "$hdr_dir" && $hash_tool spinel/runtime.h spinel_rt.h sp_alloc.h sp_gc.h sp_types.h 2> /dev/null | $hash_tool)
-build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$("$cc_bin" -dumpmachine 2> /dev/null || true)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "$db_enabled" "$db_flags" "$content_key" "$runtime_key")
+build_key=$(printf '%s\n' "$(uname -s)" "$(uname -m)" "$("$cc_bin" -dumpmachine 2> /dev/null || true)" "$cc_bin" "$compiler_version" "$flags" "$hdr_dir" "$db_enabled" "$db_flags" "$db_key" "$mariadb_library" "$content_key" "$runtime_key")
 target=$("$cc_bin" -dumpmachine 2> /dev/null || uname -m)
 simd_flags() {
   case "$target" in
@@ -110,7 +113,11 @@ for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln
     ext/kiln_json.c | ext/kiln_yyjson.c | ext/kiln_gzip.c) extra="-ftls-model=initial-exec -I$hdr_dir" ;;
   esac
   if [ "$rebuild" -eq 1 ] || [ ! -f "$object" ]; then
-    "$cc_bin" $flags $extra -c "$source" -o "$object"
+    if [ "$source" = ext/db/kiln_db_my.c ]; then
+      "$cc_bin" $flags $extra "-DKILN_MY_LIBRARY=\"$mariadb_library\"" -c "$source" -o "$object"
+    else
+      "$cc_bin" $flags $extra -c "$source" -o "$object"
+    fi
   fi
   links="$links --link $object"
 done

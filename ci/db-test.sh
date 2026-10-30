@@ -1,10 +1,11 @@
 #!/bin/sh
 set -eu
 
-spinel_bin=${SPINEL:-spinel}
 limit=${TEST_TIMEOUT:-40}
 results_dir=${KILN_VALIDATION_DIR:-/tmp/kiln-validation}/db-tests
 cd "$(dirname "$0")/.."
+spinel_bin=${SPINEL:-$(./ci/build-spinel.sh)/bin/spinel}
+export SPINEL="$spinel_bin"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 . ./ci/test-process.sh

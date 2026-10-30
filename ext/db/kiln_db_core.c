@@ -460,6 +460,7 @@ static int step_close(
         return err;
     }
     conn = taken;
+    kiln_db_resolver_cancel_conn(handle);
     release = release_of[conn->kind];
     if (release) {
         release(conn);
@@ -1061,6 +1062,7 @@ int64_t kiln_db_peer_id(uint64_t handle, uint64_t scope, uint64_t thread_id) {
     kiln_db_unpin_conn(handle, scope, thread_id);
     return value;
 }
+
 
 int kiln_db_step(uint64_t handle, uint64_t scope, uint64_t thread_id, int op, int ready_bits,
     int64_t deadline_ms, int64_t *out, int out_n) {

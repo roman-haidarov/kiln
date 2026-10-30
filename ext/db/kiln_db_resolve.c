@@ -25,6 +25,8 @@ typedef struct {
     int cancel_sent;
     int rfd;
     int wfd;
+    uint64_t owner;
+    uint32_t generation;
     char host[DNS_NAME_MAX + 1];
     char addr[KILN_DB_HOSTADDR_CAP];
 } db_resolve;
@@ -272,8 +274,8 @@ int kiln_db_resolver_boot(uint32_t queue) {
     return KILN_DB_OK;
 }
 
-int kiln_db_resolver_submit(
-    const char *host, size_t host_len, int *wait_fd, char *addr, size_t addr_cap, int *done) {
+static int res_submit(const char *host, size_t host_len, int *wait_fd, char *addr,
+    size_t addr_cap, int *done, uint64_t owner, uint64_t *request) {
     char name[DNS_NAME_MAX + 1];
     db_resolve *slot = NULL;
     uint32_t i;
@@ -284,6 +286,9 @@ int kiln_db_resolver_submit(
     }
     *done = 0;
     *wait_fd = -1;
+    if (request) {
+        *request = 0;
+    }
     memcpy(name, host, host_len);
     name[host_len] = 0;
     numeric = res_numeric(name, addr, addr_cap);
@@ -298,6 +303,12 @@ int kiln_db_resolver_submit(
         return -KILN_DB_ERR;
     }
     pthread_mutex_lock(&res_mu);
+    for (i = 1; owner && i <= resolver_queue; i++) {
+        if (resolvers[i].owner == owner && resolvers[i].state != RES_FREE) {
+            pthread_mutex_unlock(&res_mu);
+            return -KILN_DB_BUSY;
+        }
+    }
     for (i = 1; i <= resolver_queue; i++) {
         db_resolve *candidate = &resolvers[i];
         if (candidate->state != RES_FREE) {
@@ -305,6 +316,13 @@ int kiln_db_resolver_submit(
         }
         slot = candidate;
         slot->state = RES_PREPARING;
+        slot->owner = owner;
+        if (++slot->generation == 0) {
+            slot->generation = 1;
+        }
+        if (request) {
+            *request = ((uint64_t)slot->generation << 32) | i;
+        }
         memcpy(slot->host, name, host_len + 1);
         slot->addr[0] = 0;
         *wait_fd = slot->rfd;
@@ -327,7 +345,16 @@ int kiln_db_resolver_submit(
     return (int)i;
 }
 
-int kiln_db_resolver_take(int id, char *addr, size_t addr_cap) {
+int kiln_db_resolver_submit(
+    const char *host, size_t host_len, int *wait_fd, char *addr, size_t addr_cap, int *done,
+    uint64_t *request) {
+    if (!request) {
+        return -KILN_DB_CONFIG;
+    }
+    return res_submit(host, host_len, wait_fd, addr, addr_cap, done, 0, request);
+}
+
+static int res_take(int id, char *addr, size_t addr_cap, uint64_t owner, uint32_t generation) {
     db_resolve *slot;
     size_t len;
     if (!addr || id <= 0) {
@@ -339,6 +366,10 @@ int kiln_db_resolver_take(int id, char *addr, size_t addr_cap) {
         return KILN_DB_ERR;
     }
     slot = &resolvers[id];
+    if (slot->owner != owner || slot->generation != generation) {
+        pthread_mutex_unlock(&res_mu);
+        return KILN_DB_STALE;
+    }
     if (slot->state == RES_PENDING || slot->state == RES_RUNNING) {
         pthread_mutex_unlock(&res_mu);
         return KILN_DB_BUSY;
@@ -346,6 +377,7 @@ int kiln_db_resolver_take(int id, char *addr, size_t addr_cap) {
     if (slot->state != RES_DONE) {
         if (slot->state == RES_FAIL) {
             slot->state = RES_FREE;
+            slot->owner = 0;
         }
         pthread_mutex_unlock(&res_mu);
         return KILN_DB_ERR;
@@ -357,21 +389,17 @@ int kiln_db_resolver_take(int id, char *addr, size_t addr_cap) {
     }
     memcpy(addr, slot->addr, len + 1);
     slot->state = RES_FREE;
+    slot->owner = 0;
     pthread_mutex_unlock(&res_mu);
     return KILN_DB_OK;
 }
 
-int kiln_db_resolver_cancel(int id) {
-    db_resolve *slot;
-    if (id <= 0) {
-        return KILN_DB_ERR;
-    }
-    pthread_mutex_lock(&res_mu);
-    if (!resolvers || (uint32_t)id > resolver_queue) {
-        pthread_mutex_unlock(&res_mu);
-        return KILN_DB_ERR;
-    }
-    slot = &resolvers[id];
+int kiln_db_resolver_take(uint64_t request, char *addr, size_t addr_cap) {
+    return res_take((int)(uint32_t)request, addr, addr_cap, 0, (uint32_t)(request >> 32));
+}
+
+static void res_cancel(db_resolve *slot) {
+    slot->owner = 0;
     switch (slot->state) {
     case RES_PENDING:
         slot->state = RES_FREE;
@@ -386,36 +414,91 @@ int kiln_db_resolver_cancel(int id) {
         slot->state = RES_FREE;
         break;
     }
+}
+
+int kiln_db_resolver_cancel(uint64_t request) {
+    db_resolve *slot;
+    int id = (int)(uint32_t)request;
+    if (id <= 0) {
+        return KILN_DB_ERR;
+    }
+    pthread_mutex_lock(&res_mu);
+    if (!resolvers || (uint32_t)id > resolver_queue) {
+        pthread_mutex_unlock(&res_mu);
+        return KILN_DB_ERR;
+    }
+    slot = &resolvers[id];
+    if (slot->generation != (uint32_t)(request >> 32)) {
+        pthread_mutex_unlock(&res_mu);
+        return KILN_DB_STALE;
+    }
+    if (slot->owner) {
+        pthread_mutex_unlock(&res_mu);
+        return KILN_DB_OWNERSHIP;
+    }
+    res_cancel(slot);
     pthread_mutex_unlock(&res_mu);
     return KILN_DB_OK;
 }
 
-int kiln_db_dns_submit(const char *host, long n, int64_t *out, int len) {
+void kiln_db_resolver_cancel_conn(uint64_t handle) {
+    uint32_t i;
+    if (!handle) {
+        return;
+    }
+    pthread_mutex_lock(&res_mu);
+    for (i = 1; i <= resolver_queue; i++) {
+        if (resolvers[i].owner == handle) {
+            res_cancel(&resolvers[i]);
+        }
+    }
+    pthread_mutex_unlock(&res_mu);
+}
+
+int kiln_db_conn_dns_submit(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    const char *host, long n, int64_t *out, int len) {
     char addr[KILN_DB_HOSTADDR_CAP];
     int fd = -1;
     int done = 0;
     int id;
+    int err = KILN_DB_OK;
+    uint64_t request = 0;
+    kiln_db_conn *conn;
     if (n <= 0 || !out || len < 3) {
         return KILN_DB_ERR;
     }
-    id = kiln_db_resolver_submit(host, (size_t)n, &fd, addr, sizeof addr, &done);
+    conn = kiln_db_slot_acquire(handle, KILN_DB_SLOT_CONN, scope, thread_id, &err);
+    if (!conn) {
+        return err;
+    }
+    id = res_submit(host, (size_t)n, &fd, addr, sizeof addr, &done, handle, &request);
+    kiln_db_slot_release(handle, KILN_DB_SLOT_CONN);
     if (id < 0) {
         return -id;
     }
-    out[0] = id;
+    out[0] = (int64_t)request;
     out[1] = fd;
     out[2] = done;
     return KILN_DB_OK;
 }
 
-const char *kiln_db_dns_take(int id, int64_t *state, int n) {
+const char *kiln_db_conn_dns_take(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    uint64_t request, int64_t *state, int n) {
     static __thread char addr[KILN_DB_HOSTADDR_CAP];
     int rc;
+    int err = KILN_DB_OK;
+    kiln_db_conn *conn;
     if (!state || n < 1) {
         return "";
     }
     addr[0] = 0;
-    rc = kiln_db_resolver_take(id, addr, sizeof addr);
+    conn = kiln_db_slot_acquire(handle, KILN_DB_SLOT_CONN, scope, thread_id, &err);
+    if (!conn) {
+        state[0] = err;
+        return "";
+    }
+    rc = res_take((int)(uint32_t)request, addr, sizeof addr, handle, (uint32_t)(request >> 32));
+    kiln_db_slot_release(handle, KILN_DB_SLOT_CONN);
     state[0] = rc;
     return addr;
 }

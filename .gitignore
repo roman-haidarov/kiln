@@ -1,4 +1,5 @@
 /build/
+/.tools/
 /.ruby-lsp/
 /validation/
 .DS_Store

@@ -3,7 +3,8 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$root"
-spinel_bin=${SPINEL:-spinel}
+spinel_bin=${SPINEL:-$(./ci/build-spinel.sh)/bin/spinel}
+export SPINEL="$spinel_bin"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
 port=${PORT:-18421}
@@ -14,7 +15,7 @@ rounds=${ROUNDS:-3}
 selected_modes=${MODES:-"inline lanes server"}
 selected_features=${FEATURES:-"text json stream gzip gzip-stream"}
 selected_clients=${CLIENTS:-"wrk k6 oha"}
-workers=${SPINEL_WORKERS:-1}
+workers=${KILN_WORKERS:-1}
 sampling=${SAMPLE:-1}
 memory=${MEMORY:-0}
 sample_interval=${SAMPLE_INTERVAL:-1}
@@ -155,10 +156,10 @@ start_server() {
   mode=$1
   alloc_report="$results/alloc-$mode.current.folded"
   if [ "$memory" -eq 1 ]; then
-    KILN_MODE=$mode PORT=$port SPINEL_WORKERS=$workers SPINEL_GC_STATS=1 \
+    KILN_MODE=$mode PORT=$port KILN_WORKERS=$workers SPINEL_GC_STATS=1 \
       SPINEL_ALLOC_REPORT="$alloc_report" SPINEL_ALLOC_SITES=1 "./$server_binary" >"$results/server-$mode.log" 2>&1 &
   else
-    KILN_MODE=$mode PORT=$port SPINEL_WORKERS=$workers SPINEL_GC_STATS=1 \
+    KILN_MODE=$mode PORT=$port KILN_WORKERS=$workers SPINEL_GC_STATS=1 \
       "./$server_binary" >"$results/server-$mode.log" 2>&1 &
   fi
   server_pid=$!

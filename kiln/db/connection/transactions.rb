@@ -72,6 +72,7 @@ module Kiln
           return nil if @closed
 
           stream_close
+          release_waiter
           out = Native.drive(@handle, 1, 1, Native::OP_CLOSE, Native.now_ms + 5000)
           if out[0] != Native::STEP_DONE
             @broken = true
@@ -79,6 +80,12 @@ module Kiln
           end
           @closed = true
           nil
+        end
+
+        def release_waiter
+          waiter = @waiter
+          @waiter = nil
+          waiter&.close
         end
 
         def close_quietly

@@ -1,3 +1,4 @@
+require 'kiln/runtime/parallelism'
 require 'kiln/runtime/errors'
 require 'kiln/runtime/core'
 require 'kiln/runtime/check'

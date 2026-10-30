@@ -6,6 +6,75 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+### 0.0.18 setup shell isolation follow-up (2026-10-30)
+
+- The four test blocks in `ci/spinel-placement.sh` now run in subshells,
+  export their environment internally, print their result and explicitly
+  propagate `status`. The SPINEL-only and held-worker blocks unset
+  `KILN_WORKERS`. Each outer block also explicitly propagates failure;
+  early Bash 3.2 cannot be assumed to stop on a failing subshell with
+  `set -e` alone. Result-file read failures are propagated too.
+- The original environment leak is independently reproduced on GNU Bash
+  3.2.0 invoked as `sh` on Linux. With fixture executables and the actual
+  `ci/test-process.sh`, the corrected wrapper passes 72 shell cases across
+  `/bin/sh`, dash, Bash 5.2 POSIX mode and Bash 3.2 `sh`: both timeout
+  implementations, all seven expected environments, failure at each stage,
+  owned scratch cleanup and a false-green negative control.
+- These are shell-wrapper checks, not a new Spinel placement run. macOS
+  `bin/setup`, the complete Spinel suite and live DB services were not rerun
+  in this follow-up. The previous source and benchmark validation remains
+  historical. A complete release acceptance still needs `bin/setup` on
+  macOS with this corrected script.
+- This follow-up changes no production Ruby/C or runtime patches. It does
+  not add `Kiln.configure` or restore `Server.new(workers:)`. See
+  `docs/scaling-0.0.18/SETUP-FOLLOWUP.md` for the exact scope and results.
+
+### 0.0.18 automatic workers and independent event loops (2026-10-30)
+
+- Linux x86-64; managed Spinel `9d10403754b91db4df7555b482c7c1436b0ddb52`
+  with the checked-in placement and application-worker patches. The compiler
+  and runtime were built with Clang 18.1.3; the release application used GCC
+  13.3.0 through `ci/spinel-cc.sh`. A fresh native-object cache was used for
+  the measured application. It was built through `spin new`, `spin add kiln
+  --path`, and the Kiln `bin/spin build` wrapper.
+- The 32-file main-suite sweep had two fixture failures and one host
+  limitation. The fixtures now explicitly select inline mode where the test
+  needs inline execution, and test starting the same server twice instead of
+  the removed process-global Event restriction. Both corrected files pass.
+  `listen_test.rb` remains blocked by AF_UNIX bind returning EPERM on this
+  host; this is not counted as a pass. After the final 64-bit connection
+  generation change, all 13 affected server/parallelism test files passed
+  with two or four application workers. The loop and parallelism binaries
+  also passed with one application worker.
+- All 17 offline DB files pass under the managed runtime. Native resolver
+  generation/ownership tests and native DB ASan/UBSan tests pass. The complete
+  live PostgreSQL/MySQL/MariaDB suite was not repeated in this iteration.
+- The native libuv regression passes 20 concurrent lifecycle runs under
+  ASan/UBSan. It verifies that a connection in a reused slot has a different
+  generation across loop destruction, that generations exceed UINT32_MAX,
+  and that a stale abort cannot affect the replacement connection.
+  LeakSanitizer is disabled because this host cannot inspect all process
+  threads; this is not a LeakSanitizer result.
+  The adapted native connection/body state regression also passes with GCC
+  and Clang using the explicit loop context.
+- Managed setup, main/nested thread placement, the deterministic inactive
+  worker probe, frozen startup budget, package-build smoke, toolchain and
+  Connector/C cache rejection tests, wrapper cache invalidation, and build
+  lock recovery after SIGKILL pass.
+- RuboCop, Reek, Flog, Flay and rubyfast ran over the required Ruby trees;
+  clang-format, clang-tidy, cppcheck (including exhaustive) and Lizard ran
+  over both required C files. Formatting passes and RuboCop has no error or
+  fatal findings. Existing style/complexity findings remain; these checkers
+  are not reported as an all-green lint gate. cppcheck's write-request leak
+  report is callback ownership: `kuv_after_write` releases that allocation.
+  The final targeted Spinel tests were run after the checkers.
+- Linux PostgreSQL 17.6 scaling uses 100,000 rows, TLS with `verify_full`,
+  automatic handlers/pool/shards, and only `KILN_WORKERS` as the application
+  scaling setting. Raw windows, medians, limits and commands are in
+  `docs/scaling-0.0.18/`. macOS, ARM64, Docker, MySQL and MariaDB scaling
+  numbers are not claimed for this iteration. CI configuration was updated
+  but was not executed on GitHub from this workspace.
+
 ### 0.0.17 live DB follow-up (2026-10-29)
 
 - Host: Linux x86-64 (Ubuntu 24.04), GCC 13.3.0, Spinel

@@ -74,6 +74,7 @@ module Kiln
           detect_server
           raise ConnectionError, 'statement_cache' if Native.set_stmt_cache(@handle, 1, 1, cache) != Native::OK
 
+          @waiter = SocketWait.new
           connected = true
         ensure
           close_quietly unless connected
@@ -110,7 +111,7 @@ module Kiln
       private
 
       def resolve_host(host)
-        resolved = Native.pg_hostaddr(host, deadline_ms)
+        resolved = Native.pg_hostaddr(@handle, host, deadline_ms)
         raise ConnectionError, 'hostaddr' unless Native.set_hostaddr(@handle, 1, 1, resolved) == Native::OK
       end
 
@@ -121,6 +122,7 @@ module Kiln
         @poisoned = false
         @closed = false
         @mariadb = false
+        @waiter = nil
       end
 
       def init_owner

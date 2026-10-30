@@ -15,7 +15,7 @@ object_names() {
   line=$(awk '/^for source in /{print; exit}' ext/build.sh)
   list=${line#for source in }
   list=${list%; do}
-  db_sources=$(printf '%s ' ext/db/*.c)
+  db_sources=$(printf '%s ' ext/db/*.c ext/kiln_db_wait.c)
   eval "set -- $list"
   for source in "$@"; do
     basename "$source" .c
@@ -35,7 +35,7 @@ check_objects() {
 }
 
 libpq_prefix=${KILN_DB_LIBPQ_PREFIX:-/opt/homebrew/opt/libpq}
-mariadb_prefix=${KILN_DB_LIBMARIADB_PREFIX:-/opt/homebrew/opt/mariadb-connector-c}
+mariadb_prefix=${KILN_DB_LIBMARIADB_PREFIX:-$(./ci/build-mariadb.sh)}
 db_includes="-I ext/db -I${libpq_prefix}/include -I${mariadb_prefix}/include/mariadb"
 
 build_uv() {
@@ -45,7 +45,7 @@ build_uv() {
 unit() {
   check_objects
   out=$(mktemp -d "${TMPDIR:-/tmp}/kiln-db-unit.XXXXXX")
-  for source in ext/db/*.c; do
+  for source in ext/db/*.c ext/kiln_db_wait.c; do
     "$cc_bin" -std=c11 -Wall -Wextra -Werror -O2 -DSP_THREADS -DKILN_OPTIMIZED $db_includes \
       -c "$source" -o "$out/$(basename "$source" .c).o"
   done

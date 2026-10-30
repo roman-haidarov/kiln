@@ -10,11 +10,11 @@
 #include <string.h>
 #include <strings.h>
 
-#if !defined(MARIADB_PACKAGE_VERSION_ID) || MARIADB_PACKAGE_VERSION_ID < 30400
-#error "Kiln::DB needs MariaDB Connector/C >= 3.4 headers: set KILN_DB_LIBMARIADB_PREFIX"
+#if !defined(MARIADB_PACKAGE_VERSION_ID) || MARIADB_PACKAGE_VERSION_ID < 30412
+#error "Kiln::DB needs MariaDB Connector/C >= 3.4.12 headers: run bin/setup"
 #endif
 
-#define MY_RUNTIME_FLOOR 30400
+#define MY_RUNTIME_FLOOR 30412
 #define MY_CELL_START    256
 #define MY_STORE_TEXT    0
 #define MY_STORE_I64     1
@@ -259,6 +259,9 @@ static void *my_open(void) {
     if (env && env[0]) {
         return dlopen(env, RTLD_NOW | RTLD_LOCAL);
     }
+#ifdef KILN_MY_LIBRARY
+    return dlopen(KILN_MY_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+#endif
     for (i = 0; my_names[i]; i++) {
         void *handle = dlopen(my_names[i], RTLD_NOW | RTLD_LOCAL);
         if (handle) {
@@ -281,7 +284,7 @@ static int my_load_now(void) {
     }
     my_version = (long)my.mysql_get_client_version();
     if (my_version < MY_RUNTIME_FLOOR) {
-        kiln_db_set_load_error("mysql_get_client_version");
+        kiln_db_set_load_error("MariaDB Connector/C >= 3.4.12 required; run bin/setup");
         dlclose(my_lib);
         my_lib = NULL;
         my_version = 0;

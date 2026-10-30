@@ -35,15 +35,20 @@ check 'caller timeout -> Runtime::PoolTimeout', r == :pool_timeout && waited < 0
 check 'expired queued task is not started', late.empty? && cpu_t.skipped >= 1
 
 full = Kiln::Runtime::CpuPool.new(1, queue: 1)
+release = Queue.new
+started = Queue.new
 hold = Thread.new do
   full.run(timeout: 5) do
-    Kernel.sleep 0.3
+    started << true
+    release.pop
     1
   end
 end
-Kernel.sleep 0.05
+started.pop
 filler = Thread.new { full.run(timeout: 5) { 2 } }
-Kernel.sleep 0.05
+limit = Kiln::Runtime.now + 2
+Kernel.sleep 0.01 while full.queued < 1 && Kiln::Runtime.now < limit
+occupied = full.queued == 1
 ran = Queue.new
 r = begin
   full.run(timeout: 0.05) do
@@ -53,10 +58,12 @@ r = begin
 rescue Kiln::Runtime::PoolTimeout
   :pool_timeout
 end
+release << true
 hold.join
 filler.join
 Kernel.sleep 0.05
-check 'full queue -> Runtime::PoolTimeout, task is not run', r == :pool_timeout && ran.empty?
+check 'full queue -> Runtime::PoolTimeout, task is not run',
+      occupied && r == :pool_timeout && ran.empty?
 
 puts '-- Runtime::CpuPool: worker recovery'
 sup = Kiln::Runtime::CpuPool.new(2, queue: 8)

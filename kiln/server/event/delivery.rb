@@ -14,7 +14,7 @@ module Kiln
 
         def drained?(key)
           slot, gen = @stalled[key]
-          Uv.kiln_uv_backlog(slot, gen) < OUT_LOW
+          @uv.kiln_uv_backlog(slot, gen) < OUT_LOW
         end
 
         def promote_drained(key)
@@ -60,7 +60,7 @@ module Kiln
           waiting = @busy[key]
           return unless waiting
 
-          backlog = Uv.kiln_uv_backlog(slot, gen)
+          backlog = @uv.kiln_uv_backlog(slot, gen)
           return discard_waiting(key, slot, gen, waiting) if backlog.negative?
           return @stalled[key] = [slot, gen] if !waiting.empty? && backlog >= OUT_HIGH
 
@@ -102,7 +102,7 @@ module Kiln
           req = ctx.req
           return 0 unless req.streamed?
 
-          Uv.kiln_uv_body_finish(slot, gen, req.payload.failed? ? 1 : 0)
+          @uv.kiln_uv_body_finish(slot, gen, req.payload.failed? ? 1 : 0)
         end
 
         def drop_inlet(slot, gen)
@@ -119,7 +119,7 @@ module Kiln
           return outlet.hold_back(ctx) if outlet && outlet.gen == gen
 
           unread = settle_body(ctx, slot, gen)
-          return Uv.kiln_uv_send(slot, gen, EMPTY_BODY, 0, EMPTY_BODY, 0, 1) if ctx.gone
+          return @uv.kiln_uv_send(slot, gen, EMPTY_BODY, 0, EMPTY_BODY, 0, 1) if ctx.gone
 
           res = ctx.res
           return open_tunnel(ctx, slot, gen) if HTTP::Response.tunnels?(res)
@@ -132,7 +132,7 @@ module Kiln
 
         def keep_open?(req, slot, gen, unread)
           unread.zero? && HTTP::Syntax.persistent?(req.http_version, req.headers['connection']) &&
-            Uv.kiln_uv_closes_after(slot, gen, @draining ? 1 : 0).zero?
+            @uv.kiln_uv_closes_after(slot, gen, @draining ? 1 : 0).zero?
         end
 
         def send_fixed(ctx, slot, gen, keep)
@@ -142,7 +142,7 @@ module Kiln
           payload = HTTP::Response.payload(status, res.body)
           head = HTTP::Response.build_head(status, res.headers, payload.bytesize, keep, version: req.http_version)
           payload = HTTP::Response.body_for(req.verb, status, payload)
-          Uv.kiln_uv_send(slot, gen, head, head.bytesize, payload, payload.bytesize, keep ? 0 : 1)
+          @uv.kiln_uv_send(slot, gen, head, head.bytesize, payload, payload.bytesize, keep ? 0 : 1)
         end
       end
 

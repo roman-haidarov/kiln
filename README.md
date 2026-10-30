@@ -51,6 +51,13 @@ routing, room to organize application code by layer, and native compilation.
 
 ## Get started
 
+Kiln 0.0.18 builds its pinned, patched Spinel automatically. Run `bin/setup`
+once, then use `bin/spin` or `bin/spinel` for application builds. Both commands
+also set up a missing toolchain and check its fingerprint before use.
+Start with `KILN_WORKERS=2 ./build/bin/my_app` for two application CPU workers.
+Event handler concurrency, Base shards and the lazy database pool follow that
+number automatically.
+
 <p align="center"><a href="docs/GET_STARTED.md"><strong>Installation, examples, and usage →</strong></a></p>
 
 Kiln::DB (experimental, built only on request) covers database adapters,

@@ -1,7 +1,7 @@
 module Kiln
   module DB
     class Pool
-      def initialize(size_or_conn = 4, timeout: 1.0, &factory)
+      def initialize(size_or_conn = Kiln::Runtime.concurrency, timeout: 1.0, &factory)
         @timeout = timeout
         @single = nil
         @factory = factory

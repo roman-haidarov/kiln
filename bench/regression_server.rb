@@ -16,7 +16,6 @@ app = Kiln::Middleware::Compress.new(router.seal!, min_size: 64)
 log = Kiln::Observability::Log.new($stdout)
 port = (ENV['PORT'] || '18421').to_i
 mode = ENV['KILN_MODE'] || 'inline'
-workers = (ENV['SPINEL_WORKERS'] || '1').to_i
-server = kiln_mode_server(mode, app, log, port, shard_count: [workers, 1].max)
+server = kiln_mode_server(mode, app, log, port)
 server.start
 loop { Kiln::Runtime.pause(3600) }

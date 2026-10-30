@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.0.18
+
+- Add `KILN_WORKERS=N`: N application CPU workers, with no main-thread offset.
+  Standard event handlers and lazy DB pools use 16 slots per CPU worker; Base
+  shards follow the same worker budget. Explicit concurrency settings remain
+  available. The managed runtime and build fingerprints include this change.
+- Run independent libuv loops per application worker in the event backend,
+  including inline mode. Loop state is owned explicitly, listeners are shared
+  through duplicated descriptors, shutdown drains all loops together, and
+  request IDs stay unique within the server. Connection generations remain
+  unique across loop lifetimes, and stale stream notifications are ignored.
+- Recover interrupted toolchain builds with OS file locks; validate inherited
+  lock descriptors. Route macOS CI through the managed builder and key caches
+  by the revision, patches and builder inputs.
+- Add a repeatable scaling benchmark built through the Getting Started
+  wrappers. It records CPU, p99, raw wrk output, errors and 1/2/4 worker runs.
+
+### Fixed
+
+- The public native DNS resolver uses 64-bit generation tokens for take and
+  cancel. A stale token cannot consume or cancel a reused slot; cancellation
+  checks the generation before connection ownership. Submit now requires a
+  token output argument, including a zero token for numeric addresses.
+  Native callers must rebuild against the updated header.
+- Interrupted PostgreSQL DNS lookups belong to the connection and are cancelled
+  by native connection close. Completed and pending requests no longer exhaust
+  the resolver queue after `Thread#raise` or `Thread#kill`. Generation tokens
+  reject stale results after slot reuse.
+- Deadline expiry is checked before resuming a timed-out native wait, so TLS
+  and query timeouts report `Kiln::DB::Timeout` without resuming an expired
+  Connector/C operation.
+- The Spinel descriptor wait bridge is built separately from the standalone
+  database core, restoring native safety, sanitizer, affinity and DNS tests.
+- macOS CI uses the same patched runtime builder and validates cached installs;
+  local toolchain directories are excluded from Git and Docker contexts.
+- Database connections reuse one socket wait wrapper and close it before the
+  driver connection closes. Temporary DNS, connect and cancellation waits
+  park the driver's own descriptor and drop that poller registration before
+  returning, without a Ruby `IO`. This keeps the normal query path from
+  accumulating registrations and avoids the Spinel 9d10403 `ensure` unwind
+  crash on an early PostgreSQL stream `break`.
+- `test/db/schema_guard_test.rb` required a MariaDB account without the
+  `TRIGGER` privilege to see no row in `information_schema.triggers`. MariaDB
+  11.4.13 returns the row and leaves `ACTION_STATEMENT` NULL. The test now
+  requires that statement to stay hidden, and `returning: true` still raises
+  `UnsupportedReturn` before any write.
+- `bench/modes.rb` passes the requested lane count to the `lanes` handler
+  pool instead of always using four handlers.
+- The pinned Spinel build applies `patches/spinel/placement.patch`: newly
+  created helpers participate in initial placement, and threads created by
+  another thread also choose the least populated helper. Running threads
+  retain their existing worker.
+
+### Added
+
+- A checksum-verified, project-local Connector/C build shared by setup,
+  application wrappers, Docker and macOS CI. `ci/mariadb-ref` pins the tested
+  upstream TLS implementation; headers and runtime older than 3.4.12 fail
+  explicitly. Build caches include the client fingerprint and library path.
+- Offline regressions for interrupted DNS, recycled resolver tokens and one
+  stalled TLS handshake. `ci/run.sh` runs that offline suite with
+  `SPINEL_WORKERS=1`. Descriptor interruption tests run in ordinary offline CI.
+- `bin/setup`, `bin/spin` and `bin/spinel` automatically build and validate a
+  project-local toolchain. `ci/spinel-ref` is the single pinned revision;
+  `ci/build-spinel.sh` is shared by local builds, Docker and macOS CI.
+- Build provenance and compiler/runtime checksums reject stale or damaged
+  installations. macOS cache keys include the patch and build scripts.
+  A patch application failure stops compilation.
+- Application build caches record the managed toolchain fingerprint. On a
+  change, `bin/spin` moves prior `build/bin` and `build/test` outputs into
+  `build/.kiln-previous.*` before rebuilding, including binaries with newer
+  timestamps. Other build artifacts are retained.
+- Placement checks for threads created from main and from another thread,
+  bootstrap failure/cache checks, and `test/db/wait_registration_test.rb`.
+
 ## 0.0.17
 
 ### Fixed

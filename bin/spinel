@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+. "$root/ci/native-env.sh"
+prefix=$("$root/ci/build-spinel.sh")
+if [ "${KILN_DB:-1}" = 1 ]; then
+  kiln_mariadb_env "$("$root/ci/build-mariadb.sh")"
+fi
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-${KILN_SPINEL_REAL_CC:-${CC:-cc}}}
+export PATH="$prefix/bin:$PATH"
+exec "$prefix/bin/spinel" "--cc=$root/ci/spinel-cc.sh" "$@"

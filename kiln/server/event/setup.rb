@@ -7,7 +7,7 @@ module Kiln
         def init_wiring(config, handler)
           @handler = handler
           @log = config.log
-          @listen = config.listen
+          @listen = config.listen.map(&:copy)
           @port = config.port
           @ports = []
           @owned_paths = []
@@ -77,6 +77,7 @@ module Kiln
 
         def init_counters
           @seq = 0
+          @seq_stride = 1
           @inflight = 0
           @aborted_count = 0
           @aborted_taken = 0

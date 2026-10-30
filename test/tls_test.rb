@@ -155,6 +155,19 @@ check 'ALPN without http/1.1 fails the handshake', refused.include?('no applicat
                                                    refused.include?('alert number 120')
 server.shutdown(grace: 1.0)
 
+shared_tls = Kiln::Transport::Tls.new(cert: CERT, key: KEY)
+first_tls = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0, tls: shared_tls)
+second_tls = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0, tls: shared_tls)
+first_tls.start
+second_tls.start
+first_reply = tls_exchange(first_tls.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+first_tls.shutdown(grace: 0.5)
+second_reply = tls_exchange(second_tls.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+check 'servers sharing TLS settings own independent contexts',
+      first_reply.is_a?(String) && first_reply.include?('scheme=https') &&
+      second_reply.is_a?(String) && second_reply.include?('scheme=https')
+second_tls.shutdown(grace: 0.5)
+
 gated_options = { log: log, host: '127.0.0.1', port: 0,
                   tls: Kiln::Transport::Tls.new(cert: CERT, key: KEY),
                   max_connection_rate: 1, header_timeout: 0.6 }

@@ -10,7 +10,7 @@ class PressureServer < Kiln::Server::Event
 
   def send_fixed(ctx, slot, gen, keep)
     super
-    @reports << Kiln::Uv.kiln_uv_backlog(slot, gen) if ctx.req.path == '/large'
+    @reports << @uv.kiln_uv_backlog(slot, gen) if ctx.req.path == '/large'
   end
 end
 

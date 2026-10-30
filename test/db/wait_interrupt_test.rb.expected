@@ -1,0 +1,4 @@
+timeout close ok
+raise close ok
+kill close ok
+ok wait interrupt

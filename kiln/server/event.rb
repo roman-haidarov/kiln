@@ -41,6 +41,12 @@ module Kiln
         init_counters
       end
 
+      def sequence(index, count)
+        @seq_stride = count
+        @seq = index + 1 - count
+        self
+      end
+
       def stream_ready(outlet)
         @ready << outlet
         nudge_pump
@@ -52,13 +58,14 @@ module Kiln
       end
 
       def draining? = @draining
+      def loops = 1
 
-      def connections = Uv.kiln_uv_open
+      def connections = @wake_lock.synchronize { @uv.nil? ? 0 : @uv.kiln_uv_open }
       def in_flight = @inflight
       def late = 0
       def free_slots = @max_conns - connections
       def handling = @inflight
-      def handshakes = Uv.kiln_uv_handshakes
+      def handshakes = @wake_lock.synchronize { @uv.nil? ? 0 : @uv.kiln_uv_handshakes }
     end
 
     private_constant :Event, :Outlet

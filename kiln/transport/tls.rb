@@ -28,6 +28,11 @@ module Kiln
         @context = made
       end
 
+      def copy
+        Tls.new(cert: @cert, key: @key, ca: @ca, verify: @verify, ciphers: @ciphers,
+                ciphersuites: @ciphersuites, min_version: @min_version, alpn: @alpn)
+      end
+
       def release
         return if @context.negative?
 

@@ -263,14 +263,14 @@ held = Kiln::Server.new(say('hold'), log:, port: 0, host: '127.0.0.1')
 held.start
 trap_reader, trap_writer = IO.pipe
 Signal.trap('USR1') { trap_writer.write_nonblock('1', exception: false) }
-failed = Kiln::Server.new(say('no'), log:, port: 0, host: '127.0.0.1')
+failed = held
 failed_run = begin
   failed.run(grace: 0.5, signals: ['USR1'])
   false
 rescue IOError
   true
 end
-check 'run raises when the event server is already up', failed_run
+check 'run rejects starting the same server twice', failed_run
 Process.kill('USR1', Process.pid)
 restored = nil
 begin

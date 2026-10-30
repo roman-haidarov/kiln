@@ -9,7 +9,10 @@ lock="$root/ci/db-versions.lock"
 compose_file="$root/ci/db-compose.yml"
 start_timeout=${KILN_DB_START_TIMEOUT:-300}
 pq_prefix=${KILN_DB_LIBPQ_PREFIX:-/opt/homebrew/opt/libpq}
-my_prefix=${KILN_DB_LIBMARIADB_PREFIX:-/opt/homebrew/opt/mariadb-connector-c}
+. "$root/ci/native-env.sh"
+my_prefix=${KILN_DB_LIBMARIADB_PREFIX:-$("$root/ci/build-mariadb.sh")}
+my_library=$(kiln_mariadb_library "$my_prefix")
+my_libdir=${my_library%/*}
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -111,9 +114,6 @@ pull_locked() {
 }
 
 measure_clients() {
-  if grep -q '^libpq_pqlibversion=' "$lock"; then
-    return 0
-  fi
   cat > "$runtime/client_ver.c" <<'EOF'
 #include <stdio.h>
 #include <libpq-fe.h>
@@ -125,15 +125,16 @@ int main(void) {
 }
 EOF
   cc -std=c11 -I"$pq_prefix/include" -I"$my_prefix/include/mariadb" "$runtime/client_ver.c" \
-    -L"$pq_prefix/lib" -L"$my_prefix/lib" -lpq -lmariadb -o "$runtime/client_ver"
-  ver=$("$runtime/client_ver")
+    -L"$pq_prefix/lib" -L"$my_libdir" -Wl,-rpath,"$pq_prefix/lib" -Wl,-rpath,"$my_libdir" \
+    -lpq -lmariadb -o "$runtime/client_ver"
+  ver=$(LD_LIBRARY_PATH="$my_libdir:$pq_prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    DYLD_LIBRARY_PATH="$my_libdir:$pq_prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" "$runtime/client_ver")
   pqv=$(printf '%s\n' "$ver" | awk 'NR==1{print}')
   myv=$(printf '%s\n' "$ver" | awk 'NR==2{print}')
   umask 022
-  printf 'libpq_prefix=%s\n' "$pq_prefix" >> "$lock"
-  printf 'libpq_pqlibversion=%s\n' "$pqv" >> "$lock"
-  printf 'mariadb_connector_c_prefix=%s\n' "$my_prefix" >> "$lock"
-  printf 'mariadb_connector_c_packed=%s\n' "$myv" >> "$lock"
+  [ "$pqv" -ge 170000 ] && [ "$myv" -ge 30412 ] || fail "database clients are older than the supported minimum"
+  printf 'libpq_prefix=%s\nlibpq_pqlibversion=%s\nmariadb_connector_c_prefix=%s\nmariadb_connector_c_packed=%s\n' \
+    "$pq_prefix" "$pqv" "$my_prefix" "$myv" > "$runtime/client-versions.env"
   umask 077
   printf 'client_libpq=%s\n' "$pqv"
   printf 'client_mariadb=%s\n' "$myv"
@@ -240,8 +241,8 @@ EOF
 
 compile_probe() {
   cc -std=c11 -Wall -Wextra -I"$pq_prefix/include" -I"$my_prefix/include/mariadb" \
-    "$root/ci/db-host-probe.c" -L"$pq_prefix/lib" -L"$my_prefix/lib" -lpq -lmariadb \
-    -Wl,-rpath,"$pq_prefix/lib" -Wl,-rpath,"$my_prefix/lib" \
+    "$root/ci/db-host-probe.c" -L"$pq_prefix/lib" -L"$my_libdir" -lpq -lmariadb \
+    -Wl,-rpath,"$pq_prefix/lib" -Wl,-rpath,"$my_libdir" \
     -o "$runtime/host-probe"
 }
 
@@ -254,6 +255,8 @@ run_probe() {
   db=$6
   tls_name=$7
   KILN_DB_PROBE_MODE="$mode" \
+    LD_LIBRARY_PATH="$my_libdir:$pq_prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    DYLD_LIBRARY_PATH="$my_libdir:$pq_prefix/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}" \
     KILN_DB_PROBE_HOST="$host" \
     KILN_DB_PROBE_PORT="$port" \
     KILN_DB_PROBE_USER="$user" \

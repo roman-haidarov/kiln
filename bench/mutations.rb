@@ -6,7 +6,13 @@ require 'tmpdir'
 require 'timeout'
 
 project = File.expand_path('..', __dir__)
-compiler = ENV.fetch('SPINEL') { 'spinel' }
+compiler = ENV.fetch('SPINEL') do
+  prefix, error, status = Open3.capture3(File.join(project, 'ci', 'build-spinel.sh'))
+  raise error unless status.success?
+
+  File.join(prefix.strip, 'bin', 'spinel')
+end
+ENV['SPINEL'] = compiler
 spinel_cc = File.join(project, 'ci', 'spinel-cc.sh')
 ENV['KILN_SPINEL_REAL_CC'] = ENV.fetch('SPINEL_CC') { 'cc' }
 timeout_seconds = Integer(ENV.fetch('MUTATION_TIMEOUT') { '30' })
@@ -49,7 +55,7 @@ mutations.each do |name, relative, test, old, replacement, expected|
       next if relative_path.empty?
 
       if File.directory?(path)
-        if %w[build .git __pycache__].include?(File.basename(path))
+        if %w[build .git .tools __pycache__].include?(File.basename(path))
           Find.prune
           next
         end

@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+. "$root/ci/native-env.sh"
+prefix=$("$root/ci/build-spinel.sh")
+if [ "${KILN_DB:-1}" = 1 ]; then
+  kiln_mariadb_env "$("$root/ci/build-mariadb.sh")"
+fi
+export KILN_SPINEL_REAL_CC=${SPINEL_CC:-${KILN_SPINEL_REAL_CC:-${CC:-cc}}}
+export CC="$root/ci/spinel-cc.sh"
+export PATH="$prefix/bin:$PATH"
+signature=$(cat "$prefix/share/kiln-spinel/recipe" "$prefix/share/kiln-spinel/payload")
+signature="$signature
+$KILN_SPINEL_REAL_CC"
+if [ "${KILN_DB:-1}" = 1 ]; then
+  signature="$signature
+$(cat "$KILN_DB_LIBMARIADB_PREFIX/share/kiln-mariadb/recipe" "$KILN_DB_LIBMARIADB_PREFIX/share/kiln-mariadb/payload")
+$KILN_MARIADB_LIBRARY"
+fi
+if command -v sha256sum >/dev/null 2>&1; then
+  fingerprint=$(printf '%s\n' "$signature" | sha256sum | awk '{print $1}')
+else
+  fingerprint=$(printf '%s\n' "$signature" | shasum -a 256 | awk '{print $1}')
+fi
+export SPIN_NATIVE_CACHE=${SPIN_NATIVE_CACHE:-$root/.tools/native-cache}/$fingerprint
+action=
+help=0
+for argument in "$@"; do
+  case "$argument" in
+    --) break ;;
+    --help|-h) help=1 ;;
+    --verbose) ;;
+    *) [ -n "$action" ] || action=$argument ;;
+  esac
+done
+case "$action:$help" in
+  build:0|run:0|test:0)
+    project=$(pwd -P)
+    while [ ! -f "$project/spin.toml" ] && [ "$project" != / ]; do
+      project=$(dirname -- "$project")
+    done
+    if [ -f "$project/spin.toml" ]; then
+      stamp=$project/build/.kiln-toolchain
+      installed=$(cat "$stamp" 2>/dev/null || true)
+      if [ "$installed" != "$signature" ]; then
+        mkdir -p "$project/build"
+        previous=
+        for output in bin test; do
+          if [ -e "$project/build/$output" ] || [ -L "$project/build/$output" ]; then
+            [ -n "$previous" ] || previous=$(mktemp -d "$project/build/.kiln-previous.XXXXXX")
+            mv "$project/build/$output" "$previous/$output"
+          fi
+        done
+        printf '%s\n' "$signature" > "$stamp"
+      fi
+    fi
+    ;;
+esac
+exec "$prefix/bin/spin" "$@"

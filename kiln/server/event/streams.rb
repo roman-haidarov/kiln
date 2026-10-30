@@ -9,7 +9,7 @@ module Kiln
           return deliver(fallback_context(ctx, 503, refusal), slot, gen) if refusal
 
           head = ctx.res.upgrade_head
-          return Uv.kiln_uv_abort(slot, gen) if Uv.kiln_uv_tunnel(slot, gen, head, head.bytesize).negative?
+          return @uv.kiln_uv_abort(slot, gen) if @uv.kiln_uv_tunnel(slot, gen, head, head.bytesize).negative?
 
           start_tunnel(ctx, Outlet.new(self, slot, gen, false, false))
         end
@@ -56,13 +56,13 @@ module Kiln
           head = stream_head(req, res, keep)
           return send_head_only(slot, gen, head, keep) if req.verb == HEAD
           return deliver(fallback_context(ctx, 503, "too many streams\n"), slot, gen) if @outlets.size >= @max_streams
-          return -1 if Uv.kiln_uv_part(slot, gen, head, head.bytesize).negative?
+          return -1 if @uv.kiln_uv_part(slot, gen, head, head.bytesize).negative?
 
           spawn_stream(ctx, Outlet.new(self, slot, gen, keep, chunked))
         end
 
         def send_head_only(slot, gen, head, keep)
-          Uv.kiln_uv_send(slot, gen, head, head.bytesize, EMPTY_BODY, 0, keep ? 0 : 1)
+          @uv.kiln_uv_send(slot, gen, head, head.bytesize, EMPTY_BODY, 0, keep ? 0 : 1)
         end
 
         def stream_head(req, res, keep)
@@ -129,7 +129,7 @@ module Kiln
         end
 
         def feed_inlet?(inlet)
-          data = Uv.kiln_uv_body_take(inlet.slot, inlet.gen, inlet.want, @take_state)
+          data = @uv.kiln_uv_body_take(inlet.slot, inlet.gen, inlet.want, @take_state)
           state = @take_state[0]
           return false if state == TAKE_WAIT
 
@@ -150,6 +150,8 @@ module Kiln
           count = 0
           until @ready.empty?
             outlet = @ready.pop
+            next unless @outlets[outlet.slot].equal?(outlet)
+
             count += 1
             pieces, finished, failed = outlet.drain_pending
             feed(outlet, pieces)
@@ -163,7 +165,7 @@ module Kiln
           slot = outlet.slot
           gen = outlet.gen
           pieces.each do |bytes|
-            left = Uv.kiln_uv_part(slot, gen, bytes, bytes.bytesize)
+            left = @uv.kiln_uv_part(slot, gen, bytes, bytes.bytesize)
             note_backlog(outlet, left)
             break if left.negative?
           end
@@ -185,7 +187,7 @@ module Kiln
           targets = sweep ? @outlets : @backlogged
           return if targets.empty?
 
-          targets.each_value { |outlet| note_backlog(outlet, Uv.kiln_uv_backlog(outlet.slot, outlet.gen)) }
+          targets.each_value { |outlet| note_backlog(outlet, @uv.kiln_uv_backlog(outlet.slot, outlet.gen)) }
         end
 
         def close_stream(outlet, failed)
@@ -204,16 +206,16 @@ module Kiln
           slot = outlet.slot
           gen = outlet.gen
           drop_inlet(slot, gen)
-          Uv.kiln_uv_end(slot, gen)
+          @uv.kiln_uv_end(slot, gen)
         end
 
         def send_ending(outlet, broken)
           slot = outlet.slot
           gen = outlet.gen
-          return Uv.kiln_uv_abort(slot, gen) if broken
+          return @uv.kiln_uv_abort(slot, gen) if broken
 
           ending = outlet.ending
-          Uv.kiln_uv_send(slot, gen, EMPTY_BODY, 0, ending, ending.bytesize, outlet.keep ? 0 : 1)
+          @uv.kiln_uv_send(slot, gen, EMPTY_BODY, 0, ending, ending.bytesize, outlet.keep ? 0 : 1)
         end
       end
 

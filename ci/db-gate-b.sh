@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+spinel_bin=${SPINEL:-$(./ci/build-spinel.sh)/bin/spinel}
+export SPINEL="$spinel_bin"
 spinel_cc=$(pwd)/ci/spinel-cc.sh
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-cc}
-spinel_bin=${SPINEL:-/tmp/spinel-d12-prefix/bin/spinel}
-export SPINEL="$spinel_bin"
 out=${KILN_GATE_B_DIR:-/tmp/kiln-gate-b-run}
 gate_iters=${KILN_GATE_B_ITERS:-2000}
 mkdir -p "$out"

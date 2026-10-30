@@ -8,8 +8,8 @@ module Kiln
         buffer_body: nil, backlog: 1024, tcp_nodelay: true, reuse_port: false, max_connection_rate: 256,
         read_timeout: 5.0, request_timeout: 2.0, write_timeout: 10.0, header_timeout: nil, keep_alive_timeout: nil
       }.freeze
-      EVENT = SHARED.merge(host: '127.0.0.1', handlers: 0, max_streams: 1024, client_disconnect_timeout: 1.0).freeze
-      BASE = SHARED.merge(host: '127.0.0.1', kill_grace: 1.0, coop_budget: 4, shards: 1,
+      EVENT = SHARED.merge(host: '127.0.0.1', handlers: nil, max_streams: 1024, client_disconnect_timeout: 1.0).freeze
+      BASE = SHARED.merge(host: '127.0.0.1', kill_grace: 1.0, coop_budget: 4, shards: nil,
                           client_disconnect_timeout: 0.5).freeze
       RULES = [
         [:max_conns, 'max_conns', :int_at_least_one], [:max_body, 'max_body', :int_at_least_zero],
@@ -67,11 +67,11 @@ module Kiln
       def header_timeout = (@raw[:header_timeout] || @raw[:read_timeout]).to_f
       def keep_alive_timeout = (@raw[:keep_alive_timeout] || @raw[:read_timeout]).to_f
       def client_disconnect_timeout = @raw[:client_disconnect_timeout].to_f
-      def handlers = @raw[:handlers].to_i
+      def handlers = @raw[:handlers].nil? ? Runtime.concurrency : @raw[:handlers].to_i
       def max_streams = @raw[:max_streams].to_i
       def kill_grace = @raw[:kill_grace].to_f
       def coop_budget = @raw[:coop_budget].to_i
-      def shards = @raw[:shards].to_i
+      def shards = @raw[:shards].nil? ? Runtime.workers : @raw[:shards].to_i
 
       private
 

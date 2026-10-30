@@ -45,11 +45,20 @@ module Kiln
         opened = case @kind
                  in :tcp then Sock.kiln_sock_tcp(@host, @port, backlog, reuse_port ? 1 : 0)
                  in :unix then Sock.kiln_sock_unix(@path, backlog, @mode)
-                 in :fd then Sock.kiln_sock_kind(@fd).negative? ? Sock.kiln_sock_kind(@fd) : @fd
+                 in :fd then Sock.kiln_sock_kind(@fd).negative? ? Sock.kiln_sock_kind(@fd) : Sock.kiln_sock_dup(@fd)
                  end
         raise Sock.failure("cannot listen on #{self}", opened) if opened.negative?
 
         opened
+      end
+
+      def copy
+        made = Listen.new(@kind, @tls&.copy)
+        case @kind
+        in :tcp then made.use_tcp(@host, @port)
+        in :unix then made.use_unix(@path, @mode)
+        in :fd then made.use_fd(@fd)
+        end
       end
 
       def owns_path? = @kind == :unix

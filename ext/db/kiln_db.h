@@ -264,6 +264,7 @@ int kiln_db_set_copy(
 int kiln_db_pg_set_copy(kiln_db_conn *conn, const char *data, long len);
 int kiln_db_step(uint64_t handle, uint64_t scope, uint64_t thread_id, int op, int ready_bits,
     int64_t deadline_ms, int64_t *out, int out_n);
+int kiln_db_wait_fd(int fd, int bits, double seconds);
 int kiln_db_take_error(uint64_t handle, uint64_t scope, uint64_t thread_id, char *buf, size_t cap,
     int *vendor, char sqlstate[6]);
 const char *kiln_db_error_text(uint64_t handle, uint64_t scope, uint64_t thread_id);
@@ -322,11 +323,15 @@ void kiln_db_step_out(
 int kiln_db_is_ready(void);
 int kiln_db_resolver_boot(uint32_t queue);
 int kiln_db_resolver_submit(
-    const char *host, size_t host_len, int *wait_fd, char *addr, size_t addr_cap, int *done);
-int kiln_db_resolver_take(int slot, char *addr, size_t addr_cap);
-int kiln_db_resolver_cancel(int slot);
-int kiln_db_dns_submit(const char *host, long n, int64_t *out, int len);
-const char *kiln_db_dns_take(int id, int64_t *state, int n);
+    const char *host, size_t host_len, int *wait_fd, char *addr, size_t addr_cap, int *done,
+    uint64_t *request);
+int kiln_db_resolver_take(uint64_t request, char *addr, size_t addr_cap);
+int kiln_db_resolver_cancel(uint64_t request);
+void kiln_db_resolver_cancel_conn(uint64_t handle);
+int kiln_db_conn_dns_submit(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    const char *host, long n, int64_t *out, int len);
+const char *kiln_db_conn_dns_take(uint64_t handle, uint64_t scope, uint64_t thread_id,
+    uint64_t request, int64_t *state, int n);
 int kiln_db_conn_set_hostaddr(
     uint64_t handle, uint64_t scope, uint64_t thread_id, const char *addr, long n);
 int kiln_db_configure_values(const int64_t *values, int n);
