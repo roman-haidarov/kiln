@@ -4,7 +4,7 @@ set -eu
 cd "$(dirname "$0")/.."
 . ./ci/native-env.sh
 cc_bin=${CC:-cc}
-flags="${KILN_EXT_CFLAGS:--O2} -DSP_THREADS -DKILN_OPTIMIZED"
+flags="${KILN_EXT_CFLAGS:--O2} -DKILN_OPTIMIZED"
 compiler_version=$("$cc_bin" --version | sed -n '1p')
 hdr_dir=${SPINEL_HDR_DIR:-}
 if [ -z "$hdr_dir" ]; then
@@ -100,7 +100,7 @@ if [ ! -f "$settings" ] || [ "$(cat "$settings")" != "$build_key" ]; then
   rebuild=1
 fi
 for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln_http.c ext/kiln_uv.c ext/kiln_uv_parse.c ext/kiln_tls.c ext/kiln_sock.c ext/kiln_ws.c ext/kiln_json.c ext/kiln_yyjson.c ext/kiln_gzip.c ext/kiln_cache.c ext/uvsrc/*.c ext/zngsrc/*.c $db_sources; do
-  object=build/ext/$(basename "$source" .c).o
+  plain=build/ext/$(basename "$source" .c).o
   extra=""
   case "$source" in
     ext/uvsrc/*.c) extra="-Iext/libuv/include -Iext/libuv/src -Iext/libuv/src/unix" ;;
@@ -112,14 +112,26 @@ for source in ext/picohttpparser/picohttpparser.c ext/kiln_pico_sse42.c ext/kiln
   case "$source" in
     ext/kiln_json.c | ext/kiln_yyjson.c | ext/kiln_gzip.c) extra="-ftls-model=initial-exec -I$hdr_dir" ;;
   esac
-  if [ "$rebuild" -eq 1 ] || [ ! -f "$object" ]; then
-    if [ "$source" = ext/db/kiln_db_my.c ]; then
-      "$cc_bin" $flags $extra "-DKILN_MY_LIBRARY=\"$mariadb_library\"" -c "$source" -o "$object"
-    else
-      "$cc_bin" $flags $extra -c "$source" -o "$object"
+  variants=plain
+  case "$source" in
+    ext/kiln*.c | ext/db/*.c) variants="plain mt" ;;
+  esac
+  for variant in $variants; do
+    object=$plain
+    thread_flags=
+    if [ "$variant" = mt ]; then
+      object=${plain%.o}_mt.o
+      thread_flags="-DSP_THREADS -ftls-model=initial-exec"
     fi
-  fi
-  links="$links --link $object"
+    if [ "$rebuild" -eq 1 ] || [ ! -f "$object" ]; then
+      if [ "$source" = ext/db/kiln_db_my.c ]; then
+        "$cc_bin" $flags $thread_flags $extra "-DKILN_MY_LIBRARY=\"$mariadb_library\"" -c "$source" -o "$object"
+      else
+        "$cc_bin" $flags $thread_flags $extra -c "$source" -o "$object"
+      fi
+    fi
+  done
+  links="$links --link $plain"
 done
 printf '%s\n' "$build_key" > "$settings"
 printf '%s\n' "$links"

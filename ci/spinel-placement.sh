@@ -23,9 +23,6 @@ fi
 "$spinel" "--cc=$spinel_cc" --link "$scratch/worker.o" --link "$keep" \
   ${visible:+--link "$visible"} \
   ci/spinel-placement.rb -o "$scratch/probe"
-"$spinel" "--cc=$spinel_cc" --link "$scratch/worker.o" --link "$keep" \
-  ${visible:+--link "$visible"} \
-  ci/spinel-placement-hold.rb -o "$scratch/hold"
 cat >"$scratch/budget.rb" <<'RUBY'
 module WorkerBudget
   ffi_func :sp_sched_application_workers, [], :int
@@ -57,6 +54,13 @@ for workers in 1 2 4; do
     exit "$status"
   ) || exit "$?"
 done
+if [ "${KILN_SPINEL_TEST_HOOKS:-0}" != 1 ]; then
+  printf 'production runtime: inactive-worker instrumentation is excluded\n'
+  exit
+fi
+"$spinel" "--cc=$spinel_cc" --link "$scratch/worker.o" --link "$keep" \
+  ${visible:+--link "$visible"} \
+  ci/spinel-placement-hold.rb -o "$scratch/hold"
 mkfifo "$scratch/gate"
 (
   unset KILN_WORKERS

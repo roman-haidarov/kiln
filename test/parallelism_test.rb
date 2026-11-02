@@ -8,7 +8,7 @@ if ENV['KILN_WORKERS']
   raise 'KILN_WORKERS must count application workers' unless workers == Integer(ENV.fetch('KILN_WORKERS'))
 end
 pool = Kiln::DB::Pool.new { raise 'the unused pool must stay lazy' }
-raise 'automatic pool capacity' unless pool.size == workers * 16 && pool.opened.zero?
+raise 'automatic pool capacity' unless pool.size == 16 && pool.opened.zero?
 pool.close
 explicit = Kiln::DB::Pool.new(3) { raise 'unused' }
 raise 'explicit pool capacity' unless explicit.size == 3

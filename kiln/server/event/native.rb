@@ -24,6 +24,11 @@ module Kiln
     ffi_func :kiln_uv_refuse, %i[long long long], :long
     ffi_func :kiln_uv_flush, [:long], :long
     ffi_func :kiln_uv_open, [:long], :long
+    ffi_func :kiln_uv_admitted, [:long], :long
+    ffi_func :kiln_uv_pending_reserve, %i[long long long long], :long
+    ffi_func :kiln_uv_pending_release, %i[long long], :long
+    ffi_func :kiln_uv_pending_requests, [:long], :long
+    ffi_func :kiln_uv_pending_bytes, [:long], :long
     ffi_func :kiln_uv_stop, [:long], :long
     ffi_func :kiln_uv_wake, [:long], :long
     ffi_func :kiln_uv_drain, [:long], :long
@@ -35,6 +40,12 @@ module Kiln
     ffi_func :kiln_uv_body_finish, %i[long long long long], :long
     ffi_func :kiln_uv_tunnel, %i[long long long str long], :long
     ffi_func :kiln_uv_tls_alpn, %i[long long long], :binstr
+    ffi_func :kiln_uv_group_new, [], :long
+    ffi_func :kiln_uv_group_release, [:long], :long
+    ffi_func :kiln_uv_group_streams, %i[long long], :long
+    ffi_func :kiln_uv_group_reserve, %i[long long], :long
+    ffi_func :kiln_uv_join, %i[long long long], :long
+    ffi_func :kiln_uv_stats, %i[long int_array long], :long
     ffi_func :kiln_uv_sigpipe_enter, [], :long
     ffi_func :kiln_uv_sigpipe_leave, [], :long
 
@@ -53,6 +64,8 @@ module Kiln
         @handle = 0
       end
 
+      def kiln_uv_join(group, balance) = Uv.kiln_uv_join(@handle, group, balance)
+      def kiln_uv_stats(out, n) = Uv.kiln_uv_stats(@handle, out, n)
       def kiln_uv_configure(cfg, n) = Uv.kiln_uv_configure(@handle, cfg, n)
       def kiln_uv_adopt(fd, tls) = Uv.kiln_uv_adopt(@handle, fd, tls)
       def kiln_uv_start = Uv.kiln_uv_start(@handle)
@@ -77,6 +90,11 @@ module Kiln
       def kiln_uv_tls_alpn(slot, gen) = Uv.kiln_uv_tls_alpn(@handle, slot, gen)
       def kiln_uv_flush = Uv.kiln_uv_flush(@handle)
       def kiln_uv_open = Uv.kiln_uv_open(@handle)
+      def kiln_uv_admitted = Uv.kiln_uv_admitted(@handle)
+      def kiln_uv_pending_reserve(requests, bytes, amount) = Uv.kiln_uv_pending_reserve(@handle, requests, bytes, amount)
+      def kiln_uv_pending_release(bytes) = Uv.kiln_uv_pending_release(@handle, bytes)
+      def kiln_uv_pending_requests = Uv.kiln_uv_pending_requests(@handle)
+      def kiln_uv_pending_bytes = Uv.kiln_uv_pending_bytes(@handle)
       def kiln_uv_aborted = Uv.kiln_uv_aborted(@handle)
       def kiln_uv_handshakes = Uv.kiln_uv_handshakes(@handle)
       def kiln_uv_stop = Uv.kiln_uv_stop(@handle)

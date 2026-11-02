@@ -13,9 +13,6 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  SPINEL_REF: 9d10403754b91db4df7555b482c7c1436b0ddb52
-
 jobs:
   linux:
     name: linux/${{ matrix.arch }}
@@ -46,7 +43,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          build-args: SPINEL_REF=${{ env.SPINEL_REF }}
           load: true
           tags: kiln-ci:${{ matrix.arch }}
           cache-from: type=gha,scope=kiln-ci-${{ matrix.arch }}

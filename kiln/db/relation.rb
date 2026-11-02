@@ -8,15 +8,6 @@ require 'kiln/db/relation/preloading'
 module Kiln
   module DB
     class Relation
-      include QueryComposition
-      include State
-      include Building
-      include Joining
-      include Reading
-      include Counting
-      include Preloading
-      include PreloadSql
-
       attr_reader :model, :pred, :groups, :orders, :limit_n, :offset_n, :picks, :distinct_on, :source, :ctes
 
       def initialize(model, base = nil)

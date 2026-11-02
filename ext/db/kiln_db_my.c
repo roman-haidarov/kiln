@@ -260,7 +260,12 @@ static void *my_open(void) {
         return dlopen(env, RTLD_NOW | RTLD_LOCAL);
     }
 #ifdef KILN_MY_LIBRARY
-    return dlopen(KILN_MY_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+    {
+        void *baked = dlopen(KILN_MY_LIBRARY, RTLD_NOW | RTLD_LOCAL);
+        if (baked) {
+            return baked;
+        }
+    }
 #endif
     for (i = 0; my_names[i]; i++) {
         void *handle = dlopen(my_names[i], RTLD_NOW | RTLD_LOCAL);

@@ -83,19 +83,18 @@ run_analyze() {
   else
     printf 'Spinel headers unavailable; analyzing parser and event parse sources only\n'
   fi
+  set --
   for source in $sources; do
     log="$artifacts/$source-analyzer.log"
-    plist="$artifacts/$source-analyzer.plist"
-    if ! "$cc_bin" --analyze -std=c11 -DSP_THREADS $include "$root/ext/$source.c" \
-      -o "$plist" >"$log" 2>&1; then
+    report="$artifacts/$source-analyzer.sarif"
+    if ! "$cc_bin" --analyze --analyzer-output sarif -std=c11 -DSP_THREADS $include \
+      "$root/ext/$source.c" -o "$report" >"$log" 2>&1; then
       cat "$log" >&2
       return 1
     fi
-    if [ -s "$log" ]; then
-      cat "$log" >&2
-      return 1
-    fi
+    set -- "$@" "$report"
   done
+  ruby "$root/ci/analyzer-scope.rb" "$root/ext" "$@" || return 1
   printf 'Clang Static Analyzer passed for %s\n' "$sources"
 }
 
@@ -253,6 +252,10 @@ run_fuzz() {
 }
 
 run_tsan() {
+  CC="$cc_bin" KILN_ADMISSION_CFLAGS='-O1 -g -fsanitize=thread -fno-omit-frame-pointer' \
+    "$root/ci/admission.sh" > "$artifacts/admission-tsan.log" 2>&1
+  CC="$cc_bin" KILN_ADMISSION_CFLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' \
+    "$root/ci/admission.sh" > "$artifacts/admission-asan.log" 2>&1
   binary="$run_dir/http_tsan"
   "$cc_bin" -std=c11 -O1 -g -DSP_THREADS -D_GNU_SOURCE -I "$root/ext" \
     -fsanitize=thread -fno-omit-frame-pointer -pthread \

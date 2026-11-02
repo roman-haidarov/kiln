@@ -1,0 +1,7 @@
+ok   concurrent streams never exceed max_streams
+ok   a refused static stream closes its file without GC
+ok   the stream slot is given back
+ok   refused connections stay within max_conns plus the refusal reserve
+ok   max_conns counts admitted connections separately from refusals
+ok   loop statistics expose local refusing and admitted gauges
+ok   the admitted connection keeps working

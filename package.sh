@@ -14,7 +14,7 @@ rm -f "$temporary"
   if [ -d .git ] && command -v git >/dev/null 2>&1; then
     git ls-files --cached --others --exclude-standard
   else
-    find . -type d \( -name .git -o -name build -o -name __pycache__ -o -name .ruby-lsp -o -name validation -o -name __MACOSX -o -path ./ext/croaring \) -prune -o \
+    find . -type d \( -name .git -o -name build -o -name __pycache__ -o -name .ruby-lsp -o -name validation -o -name .tools -o -name __MACOSX -o -path ./ext/croaring \) -prune -o \
       -type f ! -name .DS_Store ! -name '._*' ! -name '*.zip' ! -name '*.tmp' -print |
       sed 's|^\./||'
   fi |
@@ -23,7 +23,7 @@ rm -f "$temporary"
       [ -f "$file" ] || continue
       case "$file" in
         AGENTS.md|OPEN_QUESTIONS.md|ext/croaring/*|\
-        build/*|validation/*|.ruby-lsp/*|.git/*|__MACOSX/*|*/._*|._*|*.DS_Store|*.zip|*.tmp|*.env)
+        build/*|validation/*|.tools/*|.ruby-lsp/*|.git/*|__MACOSX/*|*/._*|._*|*.DS_Store|*.zip|*.tmp|*.env)
           continue ;;
       esac
       [ "$file" != "${temporary#"$root"/}" ] || continue

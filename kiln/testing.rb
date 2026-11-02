@@ -46,9 +46,13 @@ module Kiln
       def collect(res)
         buffer = (+'').b
         out = HTTP::Stream.new(->(_prefix, bytes) { buffer << bytes }, -> { false }, false, res.stream_length)
-        res.stream_body.call(out)
-        out.flush
-        out.verify!
+        begin
+          res.stream_body.call(out)
+          out.flush
+          out.verify!
+        ensure
+          res.release_stream
+        end
         res.body = buffer
       end
 

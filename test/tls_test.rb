@@ -99,9 +99,11 @@ CERT = 'test/fixtures/tls_cert.pem'.freeze
 KEY = 'test/fixtures/tls_key.pem'.freeze
 UPLOAD = ('tls-body' * 400_000).b.freeze
 log = Kiln::Observability::Log.new(StringIO.new)
+resumable = nil
 router = Kiln::Routing::Router.new
 router.get('/', ->(ctx) { ctx.res.text("scheme=#{ctx.req.scheme} tls=#{ctx.req.tls?} alpn=#{ctx.req.alpn}") })
 router.get('/big', ->(ctx) { ctx.res.text('b' * 1_000_000) })
+router.get('/resume', ->(ctx) { ctx.res.text("lane=#{ctx.id % resumable.loops}\n") })
 router.post('/up', ->(ctx) { ctx.res.text(ctx.req.body == UPLOAD ? 'same' : 'differs') }, limit: 8 << 20)
 router.get('/ws', lambda { |ctx|
   ctx.res.websocket(ctx) { |ws| ws.each { |message| ws.send_text("echo:#{message.data}") } }
@@ -189,6 +191,23 @@ strict.start
 old = `openssl s_client -connect 127.0.0.1:#{strict.port} -tls1_2 < /dev/null 2>&1`
 check 'min_version 1.3 refuses TLS 1.2', old.include?('alert protocol version') || old.include?('alert number 70')
 strict.shutdown(grace: 0.5)
+
+resumable = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0,
+                                     tls: Kiln::Transport::Tls.new(cert: CERT, key: KEY))
+resumable.start
+reuse = `sh ci/tls-resumption-check.sh #{resumable.port} #{resumable.loops} 2>&1`
+resumed = reuse.start_with?('ok TLS session resumption on tested event loops')
+puts reuse unless resumed
+check 'a TLS 1.2 session resumes on every tested event loop', resumed
+rejected = false
+begin
+  resumable.shutdown(grace: -1)
+rescue ArgumentError
+  rejected = true
+end
+again = tls_exchange(resumable.port, "GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+check 'a rejected shutdown leaves TLS serving', rejected && again.is_a?(String) && again.end_with?('scheme=https tls=true alpn=')
+resumable.shutdown(grace: 0.5)
 
 mutual = Kiln::Transport::Tls.new(cert: CERT, key: KEY, ca: CERT, verify: :require)
 guarded = Kiln::Server.new(router, log: log, host: '127.0.0.1', port: 0, tls: mutual)

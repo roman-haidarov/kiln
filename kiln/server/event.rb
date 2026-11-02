@@ -1,4 +1,5 @@
 require 'kiln/server/event/native'
+require 'kiln/server/event/budget'
 require 'kiln/server/event/state'
 require 'kiln/server/event/configuration'
 require 'kiln/server/event/setup'
@@ -13,20 +14,6 @@ require 'kiln/server/event/outlet'
 module Kiln
   class Server
     class Event
-      include Setup
-      include Lifecycle
-      include Stopping
-      include Pumping
-      include Waking
-      include Workers
-      include Intake
-      include Refusals
-      include Requests
-      include Delivery
-      include Stalling
-      include Outgoing
-      include Streams
-
       attr_reader :port, :killed, :ports
 
       def initialize(handler, **options)
@@ -47,6 +34,20 @@ module Kiln
         self
       end
 
+      def share(group, balance)
+        @group = group
+        @balance = balance
+        self
+      end
+
+      def stats
+        out = Array.new(STATS, 0)
+        @wake_lock.synchronize { @uv&.kiln_uv_stats(out, STATS) }
+        out
+      end
+
+      def loop_stats = [stats]
+
       def stream_ready(outlet)
         @ready << outlet
         nudge_pump
@@ -61,10 +62,16 @@ module Kiln
       def loops = 1
 
       def connections = @wake_lock.synchronize { @uv.nil? ? 0 : @uv.kiln_uv_open }
+      def admission_count = @wake_lock.synchronize { @uv&.kiln_uv_admitted }
+      def admitted = admission_count || 0
       def in_flight = @inflight
       def late = 0
-      def free_slots = @max_conns - connections
+      def free_slots = [@max_conns - admitted, 0].max
       def handling = @inflight
+      def pending_requests_count = @wake_lock.synchronize { @dispatch_budget.requests }
+      def pending_bytes_count = @wake_lock.synchronize { @dispatch_budget.bytes }
+      def queued_requests = pending_requests_count || 0
+      def queued_bytes = pending_bytes_count || 0
       def handshakes = @wake_lock.synchronize { @uv.nil? ? 0 : @uv.kiln_uv_handshakes }
     end
 

@@ -89,3 +89,48 @@ need('caller descriptor was closed', Kiln::Transport::Sock.kiln_sock_kind(fd).po
                                     Kiln::Transport::Sock.kiln_sock_port(fd) == port)
 Kiln::Transport::Sock.kiln_sock_close(fd)
 puts 'ok inherited listener stays owned by its caller'
+
+KEEP = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n".freeze
+limited = Kiln::Server.new(->(ctx) { ctx.res.text('ok') }, host: '127.0.0.1', port: 0, max_conns: 8)
+limited.start
+begin
+  held = Array.new(8) { TCPSocket.new('127.0.0.1', limited.port) }
+  heads = held.map do |sock|
+    sock.write(KEEP)
+    read_head(sock, 2.0)[0]
+  end
+  need('max_conns admits its full budget across loops', heads.all? { |head| head.start_with?('HTTP/1.1 200') })
+  extra = TCPSocket.new('127.0.0.1', limited.port)
+  extra.write(KEEP)
+  need('max_conns refuses past the process-wide budget', read_head(extra, 2.0)[0].start_with?('HTTP/1.1 503'))
+  extra.close
+  held.each(&:close)
+  puts 'ok max_conns is shared by all loops'
+ensure
+  limited.shutdown(grace: 0.5)
+end
+
+release = Queue.new
+slow_handler = lambda do |ctx|
+  release.pop(timeout: 3)
+  ctx.res.text('slow')
+end
+draining = Kiln::Server.new(slow_handler, host: '127.0.0.1', port: 0, handlers: 2)
+draining.start
+slow = TCPSocket.new('127.0.0.1', draining.port)
+slow.write(REQUEST)
+Kernel.sleep 0.1
+stopper = Thread.new { draining.shutdown(grace: 3) }
+Kernel.sleep 0.2
+refused = begin
+  late = TCPSocket.new('127.0.0.1', draining.port)
+  late.close
+  false
+rescue SystemCallError
+  true
+end
+release << true
+stopper.join
+slow.close
+need('a draining server refuses new connections', refused)
+puts 'ok draining loops refuse new connections'

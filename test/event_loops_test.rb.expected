@@ -4,3 +4,5 @@ ok repeated start and stop release descriptors
 ok restart the same facade server
 ok all pumps wait for the startup barrier
 ok inherited listener stays owned by its caller
+ok max_conns is shared by all loops
+ok draining loops refuse new connections

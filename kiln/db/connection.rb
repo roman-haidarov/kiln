@@ -41,17 +41,6 @@ module Kiln
       BATCH_ROWS = 256
       BATCH_BYTES = 1_048_576
 
-      extend Opening
-      include Ownership
-      include Running
-      include Fetching
-      include Copying
-      include Transactions
-      include Pipeline
-      include Driving
-      include Streaming
-      include Cursor
-
       attr_reader :kind, :dialect, :schema_name, :handle, :depth
 
       def initialize(kind, handle, database)
