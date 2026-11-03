@@ -26,6 +26,8 @@ long kiln_sock_nosigpipe(long fd);
 
 #define KUV_SPARE_MAX     64
 #define KUV_MAX_SLOTS     65536
+#define KUV_HOLD_NS       2000000ULL
+#define KUV_HOLD_OFF_NS   50000000ULL
 #define KUV_MAX_LISTENERS 16
 #define KUV_WRITEV_MIN    4096
 #define KUV_PIPELINE_MAX  16
@@ -100,12 +102,59 @@ typedef struct kuv_listener {
     int kind;
     int tls;
     int paused;
+    int held;
     int open;
+    uint64_t held_at;
+    long held_mark;
 } kuv_listener;
+
+typedef struct kuv_group {
+    long open;
+    long admitted;
+    long refusing;
+    long accepted;
+    long streams;
+    long pending_requests;
+    long pending_bytes;
+    long lanes;
+    long refs;
+} kuv_group;
+
+static int kuv_try_acquire(long *counter, long limit) {
+    long current = __atomic_load_n(counter, __ATOMIC_RELAXED);
+    while (current < limit) {
+        if (__atomic_compare_exchange_n(
+                counter, &current, current + 1, 1, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int kuv_try_add(long *counter, long limit, long amount) {
+    if (amount < 0 || limit < amount) {
+        return 0;
+    }
+    long current = __atomic_load_n(counter, __ATOMIC_RELAXED);
+    while (current <= limit - amount) {
+        if (__atomic_compare_exchange_n(
+                counter, &current, current + amount, 1, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void kuv_group_release(kuv_group *group) {
+    if (group && __atomic_sub_fetch(&group->refs, 1, __ATOMIC_ACQ_REL) == 0) {
+        free(group);
+    }
+}
 
 typedef struct kuv_conn {
     kuv_handle h;
     uv_shutdown_t shut;
+    int over_limit;
     uint32_t slot;
     uint64_t gen;
     int listener;
@@ -189,6 +238,17 @@ typedef struct kuv_context {
     uint32_t free[KUV_MAX_SLOTS];
     long free_count;
     long open;
+    long admitted;
+    long refusing;
+    kuv_group solo;
+    kuv_group *group;
+    kuv_group *counts;
+    int balance;
+    uint64_t hold_off_until;
+    long stat_accepted;
+    long stat_holds;
+    long stat_refused;
+    long stat_dropped;
     long max_conns;
     long buffer_body;
     uint64_t header_ms;
@@ -220,8 +280,8 @@ typedef struct kuv_context {
     int spare_out_count;
 } kuv_context;
 
-static const char KUV_400[] =
-    "HTTP/1.1 400 Bad Request\r\nContent-Length: 12\r\nConnection: close\r\n\r\nbad request\n";
+static const char KUV_400[] = "HTTP/1.1 400 Bad Request\r\nContent-Length: "
+                              "12\r\nConnection: close\r\n\r\nbad request\n";
 static const char KUV_408[] = "HTTP/1.1 408 Request Timeout\r\nContent-Length: 16\r\nConnection: "
                               "close\r\n\r\nrequest timeout\n";
 static const char KUV_413[] = "HTTP/1.1 413 Content Too Large\r\nContent-Length: 18\r\nConnection: "
@@ -234,9 +294,19 @@ static const char KUV_417[] = "HTTP/1.1 417 Expectation Failed\r\nContent-Length
                               "19\r\nConnection: close\r\n\r\nexpectation failed\n";
 static const char KUV_CONTINUE[] = "HTTP/1.1 100 Continue\r\n\r\n";
 static const char KUV_503[] =
-    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 5\r\nConnection: close\r\n\r\nbusy\n";
+    "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 5\r\nConnection: "
+    "close\r\n\r\nbusy\n";
 
 static void kuv_accept_one(kuv_context *ctx, kuv_listener *l);
+static int kuv_over_share(const kuv_context *ctx);
+
+static long kuv_refuse_reserve(const kuv_context *ctx) {
+    long reserve = ctx->max_conns / 16;
+    if (reserve < 16) {
+        reserve = 16;
+    }
+    return reserve > 1024 ? 1024 : reserve;
+}
 static long kuv_api_open(kuv_context *ctx);
 static void kuv_on_read(uv_stream_t *stream, ssize_t nread, const uv_buf_t *buf);
 static void kuv_alloc(uv_handle_t *handle, size_t suggested, uv_buf_t *buf);
@@ -312,7 +382,7 @@ static void kuv_sync_read(kuv_conn *c) {
 static void kuv_resume_listeners(kuv_context *ctx) {
     for (long i = 0; i < ctx->listener_count; i++) {
         kuv_listener *l = &ctx->listeners[i];
-        if (!l->paused || !l->open) {
+        if (!l->paused || l->held || !l->open) {
             continue;
         }
         if (ctx->max_handshakes > 0 && ctx->handshakes >= ctx->max_handshakes) {
@@ -323,12 +393,79 @@ static void kuv_resume_listeners(kuv_context *ctx) {
     }
 }
 
+static void kuv_next_round(kuv_context *ctx) {
+    for (long i = 0; i < ctx->listener_count; i++) {
+        kuv_listener *l = &ctx->listeners[i];
+        if (!l->held) {
+            continue;
+        }
+        if (!l->open || ctx->draining) {
+            l->held = 0;
+            continue;
+        }
+        uint64_t now = uv_hrtime();
+        int over = kuv_over_share(ctx);
+        if (over && now - l->held_at < KUV_HOLD_NS) {
+            continue;
+        }
+        if (over && ctx->group &&
+            __atomic_load_n(&ctx->group->accepted, __ATOMIC_RELAXED) == l->held_mark) {
+            ctx->hold_off_until = now + KUV_HOLD_OFF_NS;
+        }
+        l->held = 0;
+        if (l->tls >= 0 && ctx->max_handshakes > 0 && ctx->handshakes >= ctx->max_handshakes) {
+            continue;
+        }
+        l->paused = 0;
+        kuv_accept_one(ctx, l);
+    }
+}
+
+static int kuv_over_share(const kuv_context *ctx) {
+    if (!ctx->group) {
+        return 0;
+    }
+    long lanes = __atomic_load_n(&ctx->group->lanes, __ATOMIC_RELAXED);
+    if (lanes < 2) {
+        return 0;
+    }
+    long share = __atomic_load_n(&ctx->group->open, __ATOMIC_RELAXED) / lanes;
+    return __atomic_load_n(&ctx->open, __ATOMIC_RELAXED) > share + (share / 4) + 2;
+}
+
+static int kuv_should_hold(const kuv_context *ctx) {
+    if (!ctx->balance || !ctx->group) {
+        return 0;
+    }
+    if (ctx->hold_off_until && uv_hrtime() < ctx->hold_off_until) {
+        return 0;
+    }
+    return kuv_over_share(ctx);
+}
+
+static int kuv_any_held(const kuv_context *ctx) {
+    for (long i = 0; i < ctx->listener_count; i++) {
+        if (ctx->listeners[i].held && ctx->listeners[i].open) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void kuv_on_close(uv_handle_t *handle) {
     kuv_context *ctx = handle->loop->data;
     kuv_conn *c = (kuv_conn *)handle->data;
     ctx->slots[c->slot] = NULL;
     ctx->free[ctx->free_count++] = c->slot;
     __atomic_sub_fetch(&ctx->open, 1, __ATOMIC_RELAXED);
+    __atomic_sub_fetch(&ctx->counts->open, 1, __ATOMIC_RELAXED);
+    if (c->over_limit) {
+        __atomic_sub_fetch(&ctx->refusing, 1, __ATOMIC_RELAXED);
+        __atomic_sub_fetch(&ctx->counts->refusing, 1, __ATOMIC_RELAXED);
+    } else {
+        __atomic_sub_fetch(&ctx->admitted, 1, __ATOMIC_RELAXED);
+        __atomic_sub_fetch(&ctx->counts->admitted, 1, __ATOMIC_RELEASE);
+    }
     if (c->handshaking) {
         ctx->handshakes--;
     }
@@ -1084,7 +1221,25 @@ static void kuv_accept_one(kuv_context *ctx, kuv_listener *l) {
     c->head_state = KUV_HEAD_READING;
     c->head_since = c->last_active;
     ctx->slots[c->slot] = c;
-    long open = __atomic_add_fetch(&ctx->open, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&ctx->open, 1, __ATOMIC_RELAXED);
+    kuv_group *counts = ctx->counts;
+    __atomic_add_fetch(&counts->open, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&counts->accepted, 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&ctx->stat_accepted, 1, __ATOMIC_RELAXED);
+    int over = !kuv_try_acquire(&counts->admitted, ctx->max_conns);
+    if (over) {
+        c->over_limit = 1;
+        __atomic_add_fetch(&ctx->refusing, 1, __ATOMIC_RELAXED);
+        long refusing = __atomic_add_fetch(&counts->refusing, 1, __ATOMIC_RELAXED);
+        if (refusing > kuv_refuse_reserve(ctx)) {
+            __atomic_add_fetch(&ctx->stat_dropped, 1, __ATOMIC_RELAXED);
+            kuv_close(c);
+            return;
+        }
+        __atomic_add_fetch(&ctx->stat_refused, 1, __ATOMIC_RELAXED);
+    } else {
+        __atomic_add_fetch(&ctx->admitted, 1, __ATOMIC_RELAXED);
+    }
     if (l->kind == KUV_TCP && ctx->nodelay) {
         uv_tcp_nodelay(&c->h.tcp, 1);
     }
@@ -1096,13 +1251,13 @@ static void kuv_accept_one(kuv_context *ctx, kuv_listener *l) {
 #endif
     if (l->tls >= 0) {
         c->tls = kiln_tls_conn_new(l->tls);
-        if (!c->tls || open > ctx->max_conns) {
+        if (!c->tls || over) {
             kuv_close(c);
             return;
         }
         c->handshaking = 1;
         ctx->handshakes++;
-    } else if (open > ctx->max_conns) {
+    } else if (over) {
         kuv_reply_and_close(ctx, c, KUV_503);
         return;
     }
@@ -1117,6 +1272,14 @@ static void kuv_on_connection(uv_stream_t *server, int status) {
     kuv_listener *l = (kuv_listener *)server->data;
     if (l->tls >= 0 && ctx->max_handshakes > 0 && ctx->handshakes >= ctx->max_handshakes) {
         l->paused = 1;
+        return;
+    }
+    if (kuv_should_hold(ctx)) {
+        l->paused = 1;
+        l->held = 1;
+        l->held_at = uv_hrtime();
+        l->held_mark = __atomic_load_n(&ctx->group->accepted, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&ctx->stat_holds, 1, __ATOMIC_RELAXED);
         return;
     }
     kuv_accept_one(ctx, l);
@@ -1323,6 +1486,7 @@ static long kuv_api_fd(kuv_context *ctx) {
 }
 
 static long kuv_api_poll(kuv_context *ctx) {
+    kuv_next_round(ctx);
     uv_run(ctx->loop, UV_RUN_NOWAIT);
     return ctx->ready;
 }
@@ -1336,7 +1500,14 @@ static long kuv_api_settle(kuv_context *ctx) {
 }
 
 static long kuv_api_timeout(kuv_context *ctx) {
-    return ctx->loop ? uv_backend_timeout(ctx->loop) : -1;
+    if (!ctx->loop) {
+        return -1;
+    }
+    int timeout = uv_backend_timeout(ctx->loop);
+    if (kuv_any_held(ctx) && (timeout < 0 || timeout > 1)) {
+        return 1;
+    }
+    return timeout;
 }
 
 static int kuv_out_blocked(const kuv_conn *c) {
@@ -2113,6 +2284,7 @@ long kiln_uv_create(void) {
         return 0;
     }
     ctx->loop->data = ctx;
+    ctx->counts = &ctx->solo;
     return (long)(intptr_t)ctx;
 }
 
@@ -2121,6 +2293,12 @@ long kiln_uv_destroy(long handle) {
     int rc = uv_loop_close(ctx->loop);
     if (rc != 0)
         return rc;
+    if (ctx->group) {
+        __atomic_sub_fetch(&ctx->group->lanes, 1, __ATOMIC_RELAXED);
+        kuv_group_release(ctx->group);
+    }
+    ctx->group = NULL;
+    ctx->counts = &ctx->solo;
     free(ctx->flush_list);
     free(ctx->take_buf);
     for (int i = 0; i < ctx->spare_in_count; i++)
@@ -2129,6 +2307,104 @@ long kiln_uv_destroy(long handle) {
         free(ctx->spare_out[i]);
     free(ctx);
     return 0;
+}
+
+long kiln_uv_group_new(void) {
+    kuv_group *group = calloc(1, sizeof *group);
+    if (!group) {
+        return 0;
+    }
+    group->refs = 1;
+    return (long)(intptr_t)group;
+}
+
+long kiln_uv_group_release(long group) {
+    kuv_group_release((kuv_group *)(intptr_t)group);
+    return 0;
+}
+
+long kiln_uv_group_streams(long group, long delta) {
+    kuv_group *g = (kuv_group *)(intptr_t)group;
+    if (!g) {
+        return 0;
+    }
+    return __atomic_add_fetch(&g->streams, delta, __ATOMIC_RELAXED);
+}
+
+long kiln_uv_group_reserve(long group, long max) {
+    kuv_group *g = (kuv_group *)(intptr_t)group;
+    if (!g) {
+        return 0;
+    }
+    return kuv_try_acquire(&g->streams, max);
+}
+
+long kiln_uv_admitted(long handle) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    return __atomic_load_n(&ctx->counts->admitted, __ATOMIC_ACQUIRE);
+}
+
+long kiln_uv_pending_reserve(long handle, long max_requests, long max_bytes, long bytes) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    kuv_group *counts = ctx->counts;
+    if (bytes < 0 || bytes > max_bytes ||
+        !kuv_try_acquire(&counts->pending_requests, max_requests)) {
+        return 0;
+    }
+    if (!kuv_try_add(&counts->pending_bytes, max_bytes, bytes)) {
+        __atomic_sub_fetch(&counts->pending_requests, 1, __ATOMIC_RELEASE);
+        return 0;
+    }
+    return 1;
+}
+
+long kiln_uv_pending_release(long handle, long bytes) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    __atomic_sub_fetch(&ctx->counts->pending_bytes, bytes, __ATOMIC_RELEASE);
+    __atomic_sub_fetch(&ctx->counts->pending_requests, 1, __ATOMIC_RELEASE);
+    return 0;
+}
+
+long kiln_uv_pending_requests(long handle) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    return __atomic_load_n(&ctx->counts->pending_requests, __ATOMIC_ACQUIRE);
+}
+
+long kiln_uv_pending_bytes(long handle) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    return __atomic_load_n(&ctx->counts->pending_bytes, __ATOMIC_ACQUIRE);
+}
+
+long kiln_uv_join(long handle, long group, long balance) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    kuv_group *g = (kuv_group *)(intptr_t)group;
+    if (ctx->listening || ctx->group || !g) {
+        return UV_EALREADY;
+    }
+    __atomic_add_fetch(&g->refs, 1, __ATOMIC_ACQ_REL);
+    __atomic_add_fetch(&g->lanes, 1, __ATOMIC_RELAXED);
+    ctx->group = g;
+    ctx->counts = g;
+    ctx->balance = balance != 0;
+    return 0;
+}
+
+long kiln_uv_stats(long handle, int64_t *out, long n) {
+    kuv_context *ctx = (kuv_context *)(intptr_t)handle;
+    int64_t values[7] = {
+        __atomic_load_n(&ctx->open, __ATOMIC_RELAXED),
+        __atomic_load_n(&ctx->stat_accepted, __ATOMIC_RELAXED),
+        __atomic_load_n(&ctx->stat_holds, __ATOMIC_RELAXED),
+        __atomic_load_n(&ctx->stat_refused, __ATOMIC_RELAXED),
+        __atomic_load_n(&ctx->stat_dropped, __ATOMIC_RELAXED),
+        __atomic_load_n(&ctx->refusing, __ATOMIC_RELAXED),
+        __atomic_load_n(&ctx->admitted, __ATOMIC_RELAXED),
+    };
+    long count = n < 7 ? n : 7;
+    for (long i = 0; i < count; i++) {
+        out[i] = values[i];
+    }
+    return count;
 }
 
 long kiln_uv_configure(long handle, const int64_t *cfg, long n) {

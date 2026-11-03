@@ -42,6 +42,11 @@ printf '== application toolchain cache checks\n'
 ci/spin-wrapper-test.sh
 printf '== Spinel placement from main and child threads\n'
 ci/spinel-placement.sh
+printf '== strict connection admission interleaving\n'
+CC="$c_compiler" ci/admission.sh
+if [ "${CI_SCHEDULER_TESTS:-0}" = 1 ]; then
+  ci/scheduler-test-runtime.sh
+fi
 
 if [ "${CI_NATIVE_C:-0}" = 1 ]; then
   command -v "$native_compiler" >/dev/null 2>&1 || {
@@ -57,13 +62,16 @@ if [ "${CI_NATIVE_C:-0}" = 1 ]; then
 fi
 
 printf '== test suite, SPINEL_WORKERS=1\n'
+SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/load-order" ci/load-order.sh
 SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/workers-1" ./test-spinel.sh
-printf '== database compiler and ORM tests without database services\n'
-for workers in 2 4; do
+for workers in 2 4 17; do
   printf '== application workers %s\n' "$workers"
-  KILN_WORKERS=$workers KILN_VALIDATION_DIR="$artifacts/application-$workers" \
-    ./test-spinel.sh test/event_loops_test.rb test/parallelism_test.rb test/tls_test.rb test/listen_test.rb
+  KILN_TEST_PREBUILT=1 KILN_WORKERS=$workers KILN_VALIDATION_DIR="$artifacts/application-$workers" \
+    ./test-spinel.sh test/event_loops_test.rb test/release_test.rb test/stream_lifecycle_test.rb \
+      test/pending_test.rb test/workers_config_test.rb test/parallelism_test.rb test/tls_test.rb \
+      test/stream_test.rb test/listen_test.rb
 done
+printf '== database compiler and ORM tests without database services\n'
 SPINEL_WORKERS=1 KILN_VALIDATION_DIR="$artifacts/db-offline" ci/db-offline.sh
 printf '== cache mutex and concurrent garbage collection\n'
 CC="$c_compiler" KILN_CACHE_TEST_DIR="$artifacts/cache-gc" ci/cache-gc.sh

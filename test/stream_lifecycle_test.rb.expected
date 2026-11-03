@@ -1,0 +1,22 @@
+ok   event: forced timeout releases an unstarted stream
+ok   event: the replacement handler keeps serving
+ok   event: shutdown does not release a timed-out response twice
+ok   base: forced timeout releases an unstarted stream
+ok   base: the replacement handler keeps serving
+ok   base: shutdown does not release a timed-out response twice
+ok   forced upload timeout releases an unstarted stream
+ok   upload shutdown keeps release exactly once
+ok   event: a release exception cannot stop the server
+ok   base: a release exception cannot stop the server
+ok   slot reuse keeps producer count within max_streams
+ok   shutdown releases every generation without application help
+ok   late producer notifications cannot release twice
+ok   disconnect cancels an idle producer without slot reuse
+ok   disconnect returns the last stream reservation
+ok   event: plain GET and HEAD release once
+ok   event: gzip GET and HEAD release once
+ok   base: plain GET and HEAD release once
+ok   base: gzip GET and HEAD release once
+ok   concurrent terminal paths consume release once
+ok   upgrading and cancellation share one cleanup owner
+ok   a late response of a reset connection leaves a newer stream on its slot alone

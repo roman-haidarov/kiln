@@ -59,11 +59,6 @@ module Kiln
         end
       end
 
-      include Drawing
-      include Building
-      include Matching
-      include Dispatch
-
       def initialize(trailing_slash: :strict)
         unless TRAILING_SLASH.include?(trailing_slash)
           raise ArgumentError, 'trailing_slash must be :strict or :redirect'

@@ -6,6 +6,230 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+### Parallel test compilation and binary reuse (2026-11-04)
+
+- macOS/ARM64: `TEST_JOBS=2 SPINEL_WORKERS=1 ./test-spinel.sh` passed
+  36/36 tests. With `KILN_TEST_PREBUILT=1`, the 2, 4 and 17 worker
+  passes reused those binaries and passed 9/9 each.
+- A temporary test with spaces in its source and results paths compiled and
+  ran in both modes. The reuse mode rejected a newer source and a missing
+  binary. A parse error and a missing snapshot also failed the run.
+
+### Spinel `0c4519e7` and analyzer scope (2026-11-02)
+
+- `0c4519e7bae8b5993ac5162ba0a3b996773ae6bc` with `placement.patch` and
+  `workers.patch` (the scheduler hold fixture still applies). Linux x86-64,
+  2 CPUs, GCC 13.3, clang 18 for `ci/c-native.sh`; PostgreSQL 17,
+  MySQL 8.4.2 and MariaDB 10.11.
+- `ci/load-order.sh` 6/6; `SPINEL_WORKERS=1 ./test-spinel.sh` 36/36;
+  `KILN_WORKERS=2`, 4 and 17: 9/9 each; `ci/db-offline.sh` 17/17;
+  `ci/db-test.sh` 38/39 (`typed_decode`: MariaDB 10.11 `-0.0`, as before);
+  `ci/c-native.sh all` passes (analyzer, fuzz, ASan/UBSan, TSan including
+  OpenSSL, coverage).
+- Analyzer gate: Spinel's `sp_string.h` has two dead stores (lines 333 and
+  382); they are reported as external and do not fail. A dead store added to
+  `ext/kiln_json.c` fails the gate, and so does a null pointer passed from a
+  file in `ext/` into an inline function of an outside header.
+- macOS/ARM64 with Apple clang 17: the managed Spinel build, production
+  placement, `ci/toolchain-test.sh`, `ci/load-order.sh` 6/6 and
+  `SPINEL="$PWD/.tools/spinel/bin/spinel" ./test-spinel.sh` 36/36 passed.
+  `ci/c-native.sh analyze` reported the two Spinel dead stores as external
+  and no findings through Kiln sources. GitHub Actions was not run locally.
+
+### Spinel `6d17e273` update (2026-11-02)
+
+- macOS/ARM64: the managed Spinel built from
+  `6d17e273d5d74afdd65054387ddf37ce37eda2d0` with `placement.patch` and
+  `workers.patch`. The separate scheduler-test runtime also built with its
+  fixture patch; production placement and inactive-worker placement passed.
+- `SPINEL="$PWD/.tools/spinel/bin/spinel" ./test-spinel.sh` passed 36/36
+  outside the restricted sandbox, including `listen_test`. `ci/load-order.sh`
+  passed 6/6, and `ci/toolchain-test.sh` passed.
+- Ruby and C checker runs completed. Their reported RuboCop, Reek, rubyfast,
+  clang-tidy, cppcheck and Lizard findings are in unchanged source files.
+
+### Ordinary class parts on Spinel `eb08037d`, independent rerun (2026-11-02)
+
+- Linux x86-64, 2 CPUs, GCC 13.3; `eb08037d` built with `placement.patch`
+  and `workers.patch` only (Prism and RBS of the pinned versions vendored).
+  PostgreSQL 17, MySQL 8.4.2 and MariaDB 10.11 services.
+- Generated C for `require 'kiln'` plus `require 'kiln/db'` and for
+  `log_close_test` contains no guard copies (`__prep`) and no version cells:
+  no class in Kiln includes a module after its first body any more.
+- `ci/load-order.sh` 6/6. `SPINEL_WORKERS=1 ./test-spinel.sh` 36/36, with
+  `listen_test` (AF_UNIX works on this host). `KILN_WORKERS=2`, 4 and 17:
+  9/9 each. `ci/db-offline.sh` 17/17. `ci/db-test.sh` against live
+  services 38/39; `typed_decode` differs only in MariaDB 10.11 returning
+  `-0.0` for a zero float, as with the previous trees.
+- The method contract check (`signatures, bodies, visibility`) of the
+  previous tree against this one passes for Server, Event, Base, Conn,
+  Relation and Router.
+- One worker on CPU 0, `/` text route, six alternating 4 s windows against
+  the previous tree: medians 75.8k vs 79.5k req/s with overlapping ranges
+  (66.7k-84.9k vs 70.7k-86.6k); no difference is claimed.
+
+### Ordinary class parts on Spinel `eb08037d` (2026-11-01 UTC)
+
+- A fresh `ci/build-spinel.sh` fetched the pinned
+  `eb08037d0fb4d3bab214f3f274eedc2019014f0a`, downloaded its Prism and RBS
+  dependencies with `make deps`, and built both runtimes with GCC 13.3.
+  Only `placement.patch` and `workers.patch` were applied. Production
+  `test-hooks=0`. Fresh Connector/C
+  3.4.12, `bin/setup` and both installation checks pass.
+- Linux x86-64, affinity 0-8, cgroup quota 8 CPU equivalents; Clang 18.1.3
+  for application C through `ci/spinel-cc.sh`, OpenSSL 3 and libpq 17.6.
+- 47 single-owner implementation modules in Server, Event, Base, Conn,
+  Relation and Router became ordinary method definitions in their owning
+  classes, in the existing files. AST comparison verifies 628 method
+  signatures, bodies and visibility levels. Shared Check and
+  QueryComposition mixins remain. See `docs/STATIC_ASSEMBLY.md` for the
+  internal reflection changes.
+- `SPINEL_WORKERS=1 ./test-spinel.sh`: all 36 files compile; 35 pass their
+  snapshots. `listen_test` is blocked by AF_UNIX bind returning EPERM.
+  The runner reports `35/36` and exits nonzero; this is not a clean 36/36.
+- The compiled `event_loops`, `release`, `stream_lifecycle`, `pending`,
+  `workers_config`, `parallelism`, `tls`, `stream` and `listen` binaries
+  were rerun with `KILN_WORKERS=2`, 4 and 17: eight pass at each setting;
+  `listen` hits the same AF_UNIX policy. Total: 24 pass, 3 blocked, no
+  other failures. Seventeen workers is an oversubscription check.
+- `ci/db-offline.sh`: 17/17 pass, including `wait_interrupt`,
+  `dns_interrupt` and `tls_deadline`. Live DB services were not run in this
+  iteration; the earlier agent's 38/39 result is not a result for this
+  refactored tree. Docker is absent, PostgreSQL rejects root, and the
+  environment does not allow switching to an unprivileged UID.
+- `ci/load-order.sh`: 6/6 pass. It covers a bare require, top-level output
+  before require, DB-first loading, a constant lambda called before loading
+  both entry points, and real JSON calls in single-threaded and threaded
+  applications. Build ingredients confirm the matching runtime archive.
+  The local extension builder now supplies ordinary and `_mt` companions
+  using Spinel's documented native object convention.
+- `ci/spin-build-smoke.sh` passes: a fresh application installs Kiln,
+  builds through Spin and uses JSON and Connector/C. Toolchain, wrapper,
+  Connector/C cache and build-lock checks pass. Native admission/pending
+  interleaving and connection-state checks pass.
+- All 245 Ruby files parse with Prism; changed shell scripts parse.
+  Clang static analysis reports no diagnostics. clang-tidy still reports
+  84 warnings, Lizard flags 10 existing functions, and cppcheck reports
+  callback-owned `uv_write` storage as a leak; `kuv_after_write` frees it.
+  Both core C files are byte-identical to the supplied archive. Native
+  lint is not reported as clean. The input has no `.clang-format`.
+- Not checked here: macOS/ARM64, live DB, Docker lint, GitHub Actions,
+  Valgrind or full sanitizer matrices. Existing historical results below
+  describe their own earlier trees and do not certify this revision.
+
+### 0.0.19 release tree (2026-11-01)
+
+- Linux x86-64, 2 CPUs; managed Spinel `9d10403754b91db4df7555b482c7c1436b0ddb52`
+  rebuilt from upstream with the checked-in `placement.patch` and
+  `workers.patch` (no scheduler test hook); GCC 13.3 through
+  `ci/spinel-cc.sh`; OpenSSL 3; libpq 17; Connector/C 3.4.12.
+- `SPINEL_WORKERS=1 ./test-spinel.sh`: 36/36, `listen_test` included.
+- `KILN_WORKERS=2`, 4 and 17: `event_loops`, `release`, `stream_lifecycle`,
+  `pending`, `workers_config`, `parallelism`, `tls`, `stream` and `listen`
+  pass, 9/9 at each setting. With 17 workers `tls_test` saw a resumed
+  TLS 1.2 session on all 17 loops (`ci/tls-resumption-check.sh`, openssl
+  CLI). Seventeen workers on two CPUs checks correctness, not scaling.
+- `ci/db-offline.sh`: 17/17. `ci/admission.sh`: the two-loop interleaving
+  with `max_conns=1` leaves one serving connection; the pending budget holds
+  across two loops and 12 threads.
+- A late response for a reset connection used to cancel the stream of the
+  newer connection that reused its slot; `stream_lifecycle_test` covers it.
+- Throughput against the comment-free 0.0.19 preview on the same runtime,
+  `/` text route, default handlers, six alternating 4 s windows: one worker
+  pinned to CPU 0, keep-alive, medians 81.1k vs 78.4k req/s; two workers,
+  keep-alive 66.7k vs 63.6k, `Connection: close` 16.9k vs 16.2k. Window
+  ranges overlap; no difference is claimed either way.
+- Not run here: live DB services, macOS/ARM64, Docker, sanitizer and fuzz
+  runs, a fresh `bin/setup`.
+
+### 0.0.19 verification on a 9-CPU host (previous revision, 2026-11-01)
+
+This independent run covers the tree before the slot-reuse delivery fix,
+the shell resumption check and the reverted formatting changes above.
+
+
+- Linux x86-64, CPU affinity 0-8, cgroup quota 8 CPU equivalents and 8 GiB
+  RAM. Managed Spinel `9d10403754b91db4df7555b482c7c1436b0ddb52` with the
+  checked-in production patches; Clang 18.1.3 for generated C through
+  `ci/spinel-cc.sh`, GCC 13.3 for native extensions, OpenSSL 3,
+  libpq 17.6 and freshly built Connector/C 3.4.12.
+- All 36 main test files were compiled and run with `KILN_DB=1`,
+  `KILN_WORKERS=1`, `SPINEL_WORKERS=1`: 35 pass. `listen_test` is blocked
+  by AF_UNIX bind returning EPERM and is not counted as passed. This complete
+  sweep was repeated after the dispatch accounting optimization; all outputs
+  were compared with their snapshots.
+- With `KILN_WORKERS=2`, 4 and 17, all eight runnable files pass at each
+  setting: `event_loops`, `release`, `parallelism`, `tls`,
+  `stream_lifecycle`, `pending`, `workers_config`, `stream`. That is 24/24
+  runnable file executions. `listen` is blocked by the same AF_UNIX policy
+  at all three settings. Seventeen workers is an oversubscription check,
+  not evidence of scaling on seventeen physical cores.
+- All 17 offline DB files pass. The new lifecycle file has 21 checks,
+  including forced handler/upload cancellation, release exceptions, old
+  connection generations, disconnect without slot reuse, gzip, HEAD and
+  concurrent upgrade/cleanup. The original cooperative `ClientGone` and
+  SSE shutdown checks also pass.
+- The deterministic two-loop native admission interleaving passes under
+  ASan/UBSan and TSan: with `max_conns=1`, three physical connections and
+  two refusals leave exactly one serving object. The previous preview
+  fails the same invariant in the negative-control harness.
+- The native pending budget also passes ASan/UBSan and TSan with 12 threads
+  sharing two loop handles: 100 barrier rounds, count/byte capacity,
+  failed-reservation rollback and an overflowing request size. Shared groups
+  use native atomic counters; a single loop retains local Ruby accounting.
+- Native HTTP/TLS/cache TSan checks pass, with an instrumented OpenSSL
+  build for TLS. Cache ASan/UBSan, native connection/body state checks,
+  twenty libuv embedding cycles and all native fuzz targets (two seconds
+  per target) pass. LeakSanitizer was disabled and is not claimed.
+- Fresh production and test toolchain setup pass. Production excludes the
+  held-worker hook; the dedicated test build runs the inactive-worker
+  probe. Each build rejects the other mode's fingerprint. Toolchain cache,
+  Connector/C cache, build-lock and six wrapper cache checks pass.
+- All 252 Ruby syntax checks and core C formatting checks pass. Clang
+  Static Analyzer reports no errors in nine first-party C sources.
+  clang-tidy, cppcheck (standard and exhaustive) and Lizard were run;
+  existing style/complexity and FFI/callback-ownership findings remain.
+  These results are not an all-green lint claim.
+- The release bundle includes raw outputs, benchmark windows, source
+  checksums and checks that both complete patches reproduce every final
+  source file. Generated toolchains and native object caches are excluded.
+- Not executed here: live PostgreSQL/MySQL/MariaDB services, macOS/ARM64,
+  the Docker Ruby checker image, Docker Valgrind, and GitHub Actions.
+  These are outstanding platform validation limits.
+
+The final performance comparison uses the supplied 0.0.19 preview and the
+final application code on the same final production runtime: wrk with two
+client threads, 64 connections, one-second warmup and three five-second
+windows per point, alternating versions. Server affinity is CPU 0 or 0-3;
+client affinity is 5-7. There is no concurrent compilation in these windows.
+The route is `/hello`, with default handlers. Churn sends `Connection: close`.
+
+| Workers | Mode | Preview median req/s | Final median req/s | Change | Preview p99 ms | Final p99 ms |
+|---|---|---:|---:|---:|---:|---:|
+| 1 | keep-alive | 127640 | 117837 | -7.7% | 0.842 | 0.880 |
+| 1 | churn | 34706 | 30343 | -12.6% | 10.690 | 9.910 |
+| 4 | keep-alive | 215316 | 210890 | -2.1% | 5.190 | 5.240 |
+| 4 | churn | 56173 | 54995 | -2.1% | 1.660 | 1.540 |
+
+All 24 final windows have zero HTTP/socket errors. Three short windows do not
+establish workload-independent performance: one-worker churn ranges are
+26479-51751 req/s for preview and 28172-43768 for final. Bounded dispatch has
+an accounting cost; no general claim of unchanged throughput is made.
+The first shared Ruby-mutex implementation lost 13.1% in four-worker
+keep-alive; removing the header walk and using native group counters reduced
+the measured final difference to 2.1% in these windows.
+
+Seventy-two separate burst probes cover 2/4 workers and 8/16/64 clients,
+six repetitions per version/point. Sockets are opened in a batch and held
+keep-alive, without a simultaneous SYN barrier. With four workers the final
+median largest-loop share is 50%, 43.75%, and 32.8125% respectively. At eight
+clients a run is `4/0/0/4`; at sixty-four a run is `3/21/20/20`.
+The hold policy is best effort and still leaves loops idle on small bursts.
+Raw vectors and timing windows accompany the release bundle.
+
+The sections below are historical validation supplied with earlier source
+snapshots. Their results are not additional checks of this final tree.
+
 ### 0.0.18 setup shell isolation follow-up (2026-10-30)
 
 - The four test blocks in `ci/spinel-placement.sh` now run in subshells,
@@ -26,8 +250,8 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
   historical. A complete release acceptance still needs `bin/setup` on
   macOS with this corrected script.
 - This follow-up changes no production Ruby/C or runtime patches. It does
-  not add `Kiln.configure` or restore `Server.new(workers:)`. See
-  `docs/scaling-0.0.18/SETUP-FOLLOWUP.md` for the exact scope and results.
+  not add `Kiln.configure` or restore `Server.new(workers:)`. The historical
+  setup-follow-up attachment is not included in this source snapshot.
 
 ### 0.0.18 automatic workers and independent event loops (2026-10-30)
 
@@ -70,8 +294,8 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
   The final targeted Spinel tests were run after the checkers.
 - Linux PostgreSQL 17.6 scaling uses 100,000 rows, TLS with `verify_full`,
   automatic handlers/pool/shards, and only `KILN_WORKERS` as the application
-  scaling setting. Raw windows, medians, limits and commands are in
-  `docs/scaling-0.0.18/`. macOS, ARM64, Docker, MySQL and MariaDB scaling
+  scaling setting. Its historical raw scaling attachment is not included
+  in this snapshot. macOS, ARM64, Docker, MySQL and MariaDB scaling
   numbers are not claimed for this iteration. CI configuration was updated
   but was not executed on GitHub from this workspace.
 

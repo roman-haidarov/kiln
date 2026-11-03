@@ -1,205 +1,212 @@
 module Kiln
   class Server
     class Event
-      module Lifecycle
-        def start(defer_handlers: false, gate: nil, ready: nil)
-          raise IOError, 'event server is already running' if @pump&.alive?
+      def start(defer_handlers: false, gate: nil, ready: nil)
+        raise IOError, 'event server is already running' if @pump&.alive?
 
-          reset_event if @stopped || @uv_closed
-          @start_gate = gate
-          @start_ready = ready
-          @uv = Uv::Loop.new
-          started = false
-          begin
-            Transport::Sock.kiln_sock_ignore_sigpipe
-            open_listeners
-            @poller = IO.for_fd(@uv.kiln_uv_fd, autoclose: false)
-            start_lanes unless defer_handlers
-            @pump = Thread.new { pump_thread }
-            started = true
-            self
-          ensure
-            cleanup_start unless started
-          end
-        end
-
-        def activate_handlers
-          start_lanes
-        end
-
-        private
-
-        def reset_event
-          init_streams
-          init_workers(@handlers)
-          init_wake
-          init_flags
-          init_counters
-          @ports = []
-        end
-
-        def cleanup_start
-          stop_workers_now
-          @uv.kiln_uv_abandon
-          @uv.kiln_uv_stop
-          @poller&.close
-          @uv.close
-          @uv = nil
-          @uv_closed = true
-          release_listeners
-        end
-
-        def start_lanes
-          @handlers.times do |index|
-            @workers << start_worker(index)
-          end
-        end
-
-        def pump_thread
-          Thread.current.report_on_exception = false
-          rc = Uv.kiln_uv_sigpipe_enter
-          raise IOError, "cannot block SIGPIPE on event thread (#{rc})" unless rc.zero?
-
-          begin
-            pump
-          ensure
-            Uv.kiln_uv_sigpipe_leave
-          end
-        end
-
-        def open_listeners
-          rc = @uv.kiln_uv_configure(@settings, @settings.size)
-          raise IOError, "kiln event server setup failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
-
-          start_listening
-          @ports = Array.new(@listen.size) { |index| @uv.kiln_uv_port(index) }
-          @port = Kiln::Runtime.first_port(@ports)
-        end
-
-        def start_listening
-          started = false
-          begin
-            @listen.each { |spec| adopt(spec) }
-            rc = @uv.kiln_uv_start
-            raise IOError, "kiln event server listen failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
-
-            started = true
-          ensure
-            abandon_listen unless started
-          end
-        end
-
-        def abandon_listen
-          @uv.kiln_uv_abandon
-          release_listeners
-        end
-
-        def adopt(spec)
-          tls = spec.tls
-          context = tls.nil? ? -1 : tls.context
-          fd = spec.open(@backlog, @reuse_port)
-          @owned_paths << Transport::Sock.own_path(spec.path) if spec.owns_path?
-          index = @uv.kiln_uv_adopt(fd, context)
-          return unless index.negative?
-
-          Transport::Sock.kiln_sock_close(fd)
-          raise IOError, "kiln event server cannot use #{spec}: #{Uv.kiln_uv_error_text(index)} (#{index})"
-        end
-
-        def release_listeners
-          @owned_paths.each { |record| Transport::Sock.unlink_owned(record) }
-          @owned_paths.clear
-          @listen.each { |spec| spec.tls&.release }
+        reset_event if @stopped || @uv_closed
+        @start_gate = gate
+        @start_ready = ready
+        @uv = Uv::Loop.new
+        started = false
+        begin
+          Transport::Sock.kiln_sock_ignore_sigpipe
+          join_group
+          @dispatch_budget.bind(@uv, @group.positive? && @seq_stride > 1)
+          open_listeners
+          @poller = IO.for_fd(@uv.kiln_uv_fd, autoclose: false)
+          start_lanes unless defer_handlers
+          @pump = Thread.new { pump_thread }
+          started = true
+          self
+        ensure
+          cleanup_start unless started
         end
       end
 
-      module Stopping
-        def drain
-          @draining = true
-          @start_gate&.close
-          wake_pump
+      def activate_handlers
+        start_lanes
+      end
+
+      private
+
+      def join_group
+        return unless @group.positive?
+
+        rc = @uv.kiln_uv_join(@group, @balance)
+        raise IOError, "kiln event loop group failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
+      end
+
+      def reset_event
+        init_streams
+        init_workers(@handlers)
+        init_wake
+        init_flags
+        init_counters
+        @ports = []
+      end
+
+      def cleanup_start
+        stop_workers_now
+        @dispatch_budget.detach
+        @uv.kiln_uv_abandon
+        @uv.kiln_uv_stop
+        @poller&.close
+        @uv.close
+        @uv = nil
+        @uv_closed = true
+        release_listeners
+      end
+
+      def start_lanes
+        @handlers.times do |index|
+          @workers << start_worker(index)
         end
+      end
 
-        def shutdown(grace: 5.0)
-          check_rules([['shutdown grace', grace, :seconds_at_least]])
-          return 0 if @stopped || @pump.nil?
+      def pump_thread
+        Thread.current.report_on_exception = false
+        rc = Uv.kiln_uv_sigpipe_enter
+        raise IOError, "cannot block SIGPIPE on event thread (#{rc})" unless rc.zero?
 
-          begin_drain
-          await_quiet(Kiln::Runtime.now + grace)
-          left = @quiet ? 0 : cut_off
-          stop_all(left.zero? ? 0.5 : 0)
-          left + @aborted_taken + @aborted_count
+        begin
+          pump
+        ensure
+          Uv.kiln_uv_sigpipe_leave
         end
+      end
 
-        private
+      def open_listeners
+        rc = @uv.kiln_uv_configure(@settings, @settings.size)
+        raise IOError, "kiln event server setup failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
 
-        def begin_drain
-          @stopped = true
-          @quiet = false
-          @draining = true
-          @start_gate&.close
-          wake_pump
+        start_listening
+        @ports = Array.new(@listen.size) { |index| @uv.kiln_uv_port(index) }
+        @port = Kiln::Runtime.first_port(@ports)
+      end
+
+      def start_listening
+        started = false
+        begin
+          @listen.each { |spec| adopt(spec) }
+          rc = @uv.kiln_uv_start
+          raise IOError, "kiln event server listen failed: #{Uv.kiln_uv_error_text(rc)} (#{rc})" unless rc.zero?
+
+          started = true
+        ensure
+          abandon_listen unless started
         end
+      end
 
-        def await_quiet(limit)
-          Kernel.sleep 0.01 until @quiet || !@pump.alive? || Kiln::Runtime.now >= limit
-        end
+      def abandon_listen
+        @uv.kiln_uv_abandon
+        release_listeners
+      end
 
-        def cut_off
-          @cutoff = true
-          return @inflight unless @handlers.positive?
+      def adopt(spec)
+        tls = spec.tls
+        context = tls.nil? ? -1 : tls.context
+        fd = spec.open(@backlog, @reuse_port)
+        @owned_paths << Transport::Sock.own_path(spec.path) if spec.owns_path?
+        index = @uv.kiln_uv_adopt(fd, context)
+        return unless index.negative?
 
-          wake_pump
-          ready_limit = Kiln::Runtime.now + 0.5
-          Kernel.sleep 0.001 until @dispatch_ready || !@pump.alive? || Kiln::Runtime.now >= ready_limit
-          @inflight
-        end
+        Transport::Sock.kiln_sock_close(fd)
+        raise IOError, "kiln event server cannot use #{spec}: #{Uv.kiln_uv_error_text(index)} (#{index})"
+      end
 
-        def stop_all(pause)
-          @jobs.close
-          @stop = true
-          wake_pump
-          threads = @worker_lock.synchronize { @workers + @retired }
-          stop_threads(threads, Kiln::Runtime.now + pause)
-          wake_pump
-          stop_pump(Kiln::Runtime.now + pause)
-          release_listeners
-        end
+      def release_listeners
+        @owned_paths.each { |record| Transport::Sock.unlink_owned(record) }
+        @owned_paths.clear
+        @listen.each { |spec| spec.tls&.release }
+      end
 
-        def stop_threads(threads, deadline)
-          threads.each do |thread|
-            wait_dead(thread, deadline)
-            thread.kill if thread.alive?
-            wait_dead(thread, Kiln::Runtime.now + 1.0)
-            next if thread.alive?
+      public
+      def drain
+        @draining = true
+        @start_gate&.close
+        wake_pump
+      end
 
-            join_or_log(thread)
-          end
-        end
+      def shutdown(grace: 5.0)
+        check_rules([['shutdown grace', grace, :seconds_at_least]])
+        return 0 if @stopped || @pump.nil?
 
-        def stop_pump(deadline)
-          thread = @pump
+        begin_drain
+        await_quiet(Kiln::Runtime.now + grace)
+        left = @quiet ? 0 : cut_off
+        stop_all(left.zero? ? 0.5 : 0)
+        left + @aborted_taken + @aborted_count
+      end
+
+      private
+
+      def begin_drain
+        @stopped = true
+        @quiet = false
+        @draining = true
+        @start_gate&.close
+        wake_pump
+      end
+
+      def await_quiet(limit)
+        Kernel.sleep 0.01 until @quiet || !@pump.alive? || Kiln::Runtime.now >= limit
+      end
+
+      def cut_off
+        @cutoff = true
+        return @inflight unless @handlers.positive?
+
+        wake_pump
+        ready_limit = Kiln::Runtime.now + 0.5
+        Kernel.sleep 0.001 until @dispatch_ready || !@pump.alive? || Kiln::Runtime.now >= ready_limit
+        @inflight
+      end
+
+      def stop_all(pause)
+        @jobs.close
+        @stop = true
+        wake_pump
+        threads = @worker_lock.synchronize { @workers + @retired }
+        stop_threads(threads, Kiln::Runtime.now + pause)
+        wake_pump
+        stop_pump(Kiln::Runtime.now + pause)
+        release_listeners
+      end
+
+      def stop_threads(threads, deadline)
+        threads.each do |thread|
           wait_dead(thread, deadline)
-          if thread.alive?
-            @wake_lock.synchronize do
-              thread.kill if @inline_busy && !@pump_stopping
-            end
-          end
+          cancel_worker(thread) if thread.alive?
           wait_dead(thread, Kiln::Runtime.now + 1.0)
-          return if thread.alive?
+          next if thread.alive?
 
           join_or_log(thread)
         end
+      end
 
-        def wait_dead(thread, deadline)
-          Kernel.sleep 0.01 while thread.alive? && Kiln::Runtime.now < deadline
+      def stop_pump(deadline)
+        thread = @pump
+        wait_dead(thread, deadline)
+        if thread.alive?
+          @wake_lock.synchronize do
+            thread.kill if @inline_busy && !@pump_stopping
+          end
         end
+        wait_dead(thread, Kiln::Runtime.now + 1.0)
+        return if thread.alive?
 
-        def join_or_log(thread)
-          thread.join
-        rescue StandardError => e
-          @log&.error("event server thread stopped with #{e.class}: #{e.message}")
-        end
+        join_or_log(thread)
+      end
+
+      def wait_dead(thread, deadline)
+        Kernel.sleep 0.01 while thread.alive? && Kiln::Runtime.now < deadline
+      end
+
+      def join_or_log(thread)
+        thread.join
+      rescue StandardError => e
+        @log&.error("event server thread stopped with #{e.class}: #{e.message}")
       end
 
     end

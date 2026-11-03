@@ -164,6 +164,7 @@ module Kiln
       end
 
       def open_tunnel(protocol, body, idle)
+        release_stream
         @status = Response::SWITCHING
         @body = ''
         @stream_body = nil
@@ -219,7 +220,7 @@ module Kiln
       NO_IDLE = -1.0
 
       attr_accessor :status, :body
-      attr_reader :headers, :stream_body, :stream_length, :noted_length, :noted_type
+      attr_reader :headers, :stream_body, :stream_length, :noted_length, :noted_type, :stream_release
 
       class Upgrade
         attr_reader :tunnel_protocol, :tunnel_proc, :tunnel_idle
@@ -241,6 +242,8 @@ module Kiln
         @body = ''
         @stream_body = nil
         @stream_length = nil
+        @stream_release = nil
+        @stream_release_lock = nil
         @noted_length = nil
         @noted_type = nil
         @tunnel = nil
@@ -252,21 +255,41 @@ module Kiln
       end
 
       def unstream
+        release_stream
         @stream_body = nil
         @stream_length = nil
         @tunnel = nil
       end
 
-      def stream(status: 200, type: nil, length: nil, &body)
+      def stream(status: 200, type: nil, length: nil, release: nil, &body)
         raise ArgumentError, 'stream needs a block' unless body
         raise ArgumentError, 'length must be a non-negative Integer' unless stream_length?(length)
+        raise ArgumentError, 'release must be a Proc' unless release.nil? || release.is_a?(Proc)
 
-        @status = status
-        @headers['Content-Type'] = type if type
-        @body = ''
-        @stream_length = length
-        @stream_body = body
-        @tunnel = nil
+        previous = replace_stream_release(release)
+        begin
+          @status = status
+          @headers['Content-Type'] = type if type
+          @body = ''
+          @stream_length = length
+          @stream_body = body
+          @tunnel = nil
+        ensure
+          previous.call if previous && !previous.equal?(release)
+        end
+      end
+
+      def release_stream
+        lock = @stream_release_lock
+        return nil unless lock
+
+        release = lock.synchronize do
+          callback = @stream_release
+          @stream_release = nil
+          callback
+        end
+        release.call if release
+        nil
       end
 
       def sse(status: 200, &body)
@@ -300,9 +323,21 @@ module Kiln
 
       private
 
+      def replace_stream_release(release)
+        return nil if release.nil? && @stream_release_lock.nil?
+
+        @stream_release_lock ||= Mutex.new
+        @stream_release_lock.synchronize do
+          previous = @stream_release
+          @stream_release = release
+          previous
+        end
+      end
+
       def stream_length?(length) = length.nil? || (length.is_a?(Integer) && length >= 0)
 
       def fixed(body, status)
+        release_stream
         @status = status
         @body = body
         @stream_body = nil

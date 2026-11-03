@@ -2,6 +2,7 @@ module Kiln
   class Server
     class Outlet
       HIGH_WATER = 256 * 1024
+      CANCEL_GRACE = 0.1
 
       module State
         private
@@ -15,11 +16,15 @@ module Kiln
         end
 
         def init_flags
+          @reserved = false
           @gone = false
+          @halted = false
+          @cancel_at = nil
           @finished = false
           @failed = false
           @flagged = false
           @thread = nil
+          @response = nil
           @tunnel = false
         end
       end
@@ -27,7 +32,7 @@ module Kiln
       include State
 
       attr_reader :slot, :gen, :keep, :chunked, :deferred
-      attr_accessor :thread, :ending, :tunnel
+      attr_accessor :thread, :ending, :tunnel, :reserved, :response
 
       def initialize(server, slot, gen, keep, chunked)
         @server = server
@@ -77,6 +82,7 @@ module Kiln
         @lock.synchronize do
           if left.negative?
             @gone = true
+            @cancel_at ||= Kiln::Runtime.now + CANCEL_GRACE
           else
             @backlog = left
           end
@@ -95,16 +101,29 @@ module Kiln
       end
 
       def halt
-        @lock.synchronize do
+        first = @lock.synchronize do
+          next false if @halted
+
+          @halted = true
           @gone = true
           @cond.broadcast
+          true
         end
+        return unless first
+
         thread = @thread
         thread.kill if thread&.alive?
       end
 
       def gone? = @gone
       def closed? = @gone || @server.draining?
+
+      def cancellation_due?(now)
+        @lock.synchronize do
+          limit = @cancel_at
+          !@finished && !limit.nil? && now >= limit
+        end
+      end
 
       private
 

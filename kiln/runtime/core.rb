@@ -85,6 +85,19 @@ module Kiln
 
       def apply_reply(ctx, reply) = ctx.res.text(reply[0], status: reply[1])
 
+      def release_response(log, response)
+        response.release_stream
+      rescue *FAILURES => e
+        release_error(log, e)
+      end
+
+      def release_error(log, error)
+        log&.error("stream release #{error.class}: #{error.message}")
+        nil
+      rescue *FAILURES
+        nil
+      end
+
       def first_port(ports)
         index = 0
         while index < ports.size

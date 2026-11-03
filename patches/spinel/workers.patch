@@ -1,7 +1,21 @@
 diff --git a/lib/sp_sched.c b/lib/sp_sched.c
+index 124f368..47aa5bf 100644
 --- a/lib/sp_sched.c
 +++ b/lib/sp_sched.c
-@@ -3562,6 +3562,12 @@
+@@ -2770,10 +2770,11 @@ static void sp_trim_thread_start(void) {}
+ #endif
+ 
+ static int sp_worker_count(void);   /* defined below; the pool size */
++int sp_sched_application_workers(void);
+ static int sp_sched_ensure_workers(void) {
+   if (g_workers_started) return 1;
+   sp_alloc_stress_init();   /* set the stress flags once here, before any helper reads them */
+-  sp_alloc_worker_tune(sp_worker_count());  /* and size the GC budget for the pool */
++  sp_alloc_worker_tune(sp_sched_application_workers());
+   if (!sp_sched_start_workers()) return 0;
+   g_workers_started = 1;
+   /* Hand parked workers their own slots from here on. Workers spawn lazily, so
+@@ -3561,6 +3562,12 @@ sp_PolyArray *sp_Thread_tls_keys(sp_thread *t) {
    return a;
  }
  
@@ -14,7 +28,7 @@ diff --git a/lib/sp_sched.c b/lib/sp_sched.c
  #ifdef SP_THREADS
  /* ---- helper OS workers (design 3.2, Appendix B) ---- */
  static pthread_t g_worker_threads[SP_MAX_WORKERS];
-@@ -3611,6 +3617,19 @@
+@@ -3610,6 +3617,20 @@ static int sp_available_cpus(void) {
  }
  
  /* min(available CPUs, SPINEL_WORKERS); the env var overrides the autodetect. */
@@ -25,8 +39,9 @@ diff --git a/lib/sp_sched.c b/lib/sp_sched.c
 +  errno = 0;
 +  long count = strtol(text, &end, 10);
 +  if (errno || *end || count < 1 || count > SP_MAX_WORKERS - 2) {
-+    fprintf(stderr, "kiln: KILN_WORKERS must be an integer from 1 to %d\n", SP_MAX_WORKERS - 2);
-+    exit(EXIT_FAILURE);
++    char message[128];
++    snprintf(message, sizeof message, "KILN_WORKERS must be an integer from 1 to %d", SP_MAX_WORKERS - 2);
++    sp_raise_cls("ArgumentError", message);
 +  }
 +  return (int)count;
 +}
@@ -34,12 +49,10 @@ diff --git a/lib/sp_sched.c b/lib/sp_sched.c
  static int sp_worker_count(void) {
    const char *e = getenv("SPINEL_WORKERS");
    int n;
-@@ -3618,6 +3637,17 @@
-   else n = sp_available_cpus();
-   if (n > SP_MAX_WORKERS) n = SP_MAX_WORKERS;
+@@ -3619,6 +3640,17 @@ static int sp_worker_count(void) {
    return n;
-+}
-+
+ }
+ 
 +int sp_sched_application_workers(void) {
 +  if (g_workers_started) return g_worker_cap > 0 ? g_worker_cap : 1;
 +  int count = kiln_worker_count();
@@ -49,10 +62,12 @@ diff --git a/lib/sp_sched.c b/lib/sp_sched.c
 +  if (text && *text && count > 1) count--;
 +  if (count > SP_MAX_WORKERS - 2) count = SP_MAX_WORKERS - 2;
 +  return count;
- }
- 
++}
++
  /* The monitor thread (sysmon, design §5). Two jobs, both off the workers' backs:
-@@ -4602,13 +4632,12 @@
+    (1) fire scheduler timers (sleep, timed I/O, and timed condition waits), and (2) enforce the
+    timeslice -- when a worker has run the same green thread past the quantum, flag
+@@ -4601,13 +4633,12 @@ static int sp_sched_start_workers(void) {
       it through the pthread_create happens-before edge (no lock needed). Helpers
       themselves are spawned on demand (sp_sched_maybe_grow), not here -- main
       stays worker 0 and starts as the only participant (sp_active_workers 1). */

@@ -127,22 +127,43 @@ available CPUs, including Linux affinity and container CPU quotas.
 `Kiln::Runtime.workers` reports the application worker budget.
 
 Standard settings follow that budget automatically. The event backend uses
-16 concurrent handlers per CPU worker; the default database pool has the same
-capacity and opens connections lazily. Base uses one accounting shard per CPU
-worker. Start with these defaults; there is no `N+1` calculation and no need
-to set `handlers` or pool size for ordinary startup.
+16 concurrent handlers per CPU worker. Base uses one accounting shard per CPU
+worker. Database pools open connections lazily and default to 16 connections
+per pool, independently of CPU count. Set pool capacity explicitly against the
+database budget, including other processes, pools and deployment overlap.
+There is no `N+1` calculation for application workers.
 
 These are bounded concurrency defaults, not a promise of linear throughput.
 Database latency, its connection limit, query cost and client concurrency
 still affect results. The standard event server starts one independent network
 loop per application worker, sharing the listening socket inside one process. Explicit small
-connection, stream, handshake or handler limits can reduce the loop count.
-`server.loops` reports the count.
+handshake or handler limits can reduce the loop count.
+`server.loops` reports the count. `max_conns` and `max_streams` are limits of
+the server as a whole, not of each loop. Beyond `max_conns`, a reserve of
+`max_conns / 16` sockets (at least 16, at most 1024) is answered with 503; past
+that, new connections are closed at once. The serving limit and refusal reserve
+are separate budgets; accepted handles pending close and one held libuv accept
+per loop can temporarily add physical descriptors. `server.admitted` counts
+serving connections, while `server.connections` counts tracked physical ones.
+`server.free_slots` uses the serving budget. A loop that already holds clearly more than
+its share of the connections leaves a burst of new ones to the other loops for
+up to 2 ms; this evens out bursts but does not guarantee equal loops.
+`server.loop_stats` returns, per loop, `[open, accepted, holds, refused,
+dropped, refusing, admitted]`; the last two gauges belong to that loop.
+`server.queued_requests` and `server.queued_bytes` expose the waiting dispatch
+budget. Event defaults are `max_pending_requests: 1024` and
+`max_pending_bytes: 16 << 20`, shared by all loops of one server, including
+requests waiting behind another request of the same connection. Bytes count
+buffered bodies, request-target and header text plus a fixed allowance; they
+are not an exact heap-size or process-RSS limit. Streamed upload data and
+native input buffers have separate transport limits. An idle connection gets
+503 when dispatch capacity is exhausted. An overflowing pipelined connection
+is closed to avoid sending a response ahead of earlier requests.
 Kiln does not spawn or supervise child processes.
 
 `backend: :base` selects the thread-per-connection engine. `handlers: N`
 overrides event handler concurrency; `handlers: 0` runs handlers inline on
-the event loop. A free handler takes the next request of any connection, and
+the event loop. A free handler takes the next request on its own loop, and
 requests of one connection run in order. With handler threads, an expired
 `request_timeout` produces a 504 and replaces that handler. Inline handlers
 share the event loop, so a waiting database operation is unsupported and a
@@ -530,6 +551,17 @@ rules to any handler that has an ETag.
 chunked framing; writing more than `n` bytes raises `ArgumentError`, and
 writing fewer closes the connection.
 
+`ctx.res.stream(release: -> { file.close }) { |out| ... }` releases a resource
+the stream holds. The server calls it exactly once when it is done with the
+response: after the block, or instead of it when the block never runs (a
+`HEAD` request, a stream refused with 503, a deadline replacement or a client
+that went away). Forced handler/upload cancellation also releases an unstarted
+response. Cleanup runs after its owner stops using the resource; an
+uninterruptible native operation can delay cancellation. TCP reset cancels a
+producer, and slot reuse does not detach an older generation from shutdown.
+Cleanup exceptions are logged and do not escape into the network pump.
+`Kiln::Static` closes its files this way.
+
 ## Compression
 
 ```ruby
@@ -552,7 +584,8 @@ alone.
 Do not compress responses that combine secrets with reflected user input over
 HTTPS. Set `Cache-Control: no-transform` on a response to disable this
 middleware for that response. The event backend allows up to 1024 active
-streams by default; set `max_streams:` to adjust the limit. Requests that exceed
+streams and tunnels by default, across all its loops; set `max_streams:` to
+adjust the limit. A slot is reserved before the response head is sent. Requests that exceed
 it receive 503. The base backend uses its `max_conns` limit for concurrent
 streams.
 

@@ -144,7 +144,9 @@ module Kiln
         return deliver_head(res, status, length) if req.verb == 'HEAD'
         return deliver_whole(res, status, slice(file, from, length)) if length <= WHOLE
 
-        res.stream(status:, length:) { |out| copy(file, from, length, out) }
+        res.stream(status:, length:, release: -> { file.close unless file.closed? }) do |out|
+          copy(file, from, length, out)
+        end
         :stream
       end
 

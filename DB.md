@@ -109,6 +109,10 @@ Kiln::DB::Scope.pool = pool
     transaction pooling needs `max_prepared_statements` (version 1.21 or
     later) or `statement_cache: 0`.
 
+The default capacity is 16 lazy connections per pool and does not scale with
+CPU workers. Pass an explicit size when tuning against the database budget;
+include every process, pool and temporary deployment overlap in that total.
+
 `Kiln::DB::Pool.new(size, timeout:) { Conn.open(...) }` hands each thread its own
 connection. A connection that timed out, lost its server, or is left inside a
 transaction is closed instead of being returned to the pool.

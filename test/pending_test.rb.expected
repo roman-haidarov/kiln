@@ -1,0 +1,11 @@
+ok   queued requests have a bounded byte budget
+ok   a full dispatch queue returns 503 without another queued job
+ok   the active request survives queue overload
+ok   a running handler gives back its queued budget
+ok   queued work completes after capacity frees
+ok   buffered headers count toward max_pending_bytes
+ok   all event loops share one pending request budget
+ok   overload preserves valid HTTP status responses
+ok   a drained queue gives every reservation back
+ok   max_pending_requests validates before starting
+ok   max_pending_bytes validates before starting

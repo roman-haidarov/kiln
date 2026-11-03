@@ -14,6 +14,11 @@ case "$prefix" in
   ''|/|"$root") printf 'Invalid Spinel installation prefix: %s\n' "$prefix" >&2; exit 1 ;;
 esac
 ref=$(cat "$root/ci/spinel-ref")
+test_hooks=${KILN_SPINEL_TEST_HOOKS:-0}
+case "$test_hooks" in
+  0|1) ;;
+  *) printf 'KILN_SPINEL_TEST_HOOKS must be 0 or 1\n' >&2; exit 2 ;;
+esac
 case "$ref" in
   *[!0-9a-f]*|'') printf 'ci/spinel-ref must contain a full commit SHA\n' >&2; exit 1 ;;
 esac
@@ -28,7 +33,7 @@ sha256() {
 }
 
 recipe() {
-  printf 'format=1\ncommit=%s\nplatform=%s/%s\n' "$ref" "$(uname -s)" "$(uname -m)"
+  printf 'format=2\ncommit=%s\nplatform=%s/%s\ntest-hooks=%s\n' "$ref" "$(uname -s)" "$(uname -m)" "$test_hooks"
   for input in ci/build-spinel.sh ci/with-build-lock.rb ci/spinel-cc.sh ci/spinel-ref; do
     printf '%s %s\n' "$(sha256 < "$root/$input")" "$input"
   done
@@ -36,6 +41,9 @@ recipe() {
     [ -f "$patch" ] || continue
     printf '%s patches/spinel/%s\n' "$(sha256 < "$patch")" "${patch##*/}"
   done
+  if [ "$test_hooks" = 1 ]; then
+    printf '%s ci/fixtures/spinel-placement-hold.patch\n' "$(sha256 < "$root/ci/fixtures/spinel-placement-hold.patch")"
+  fi
 }
 
 payload() {
@@ -132,11 +140,29 @@ for patch in "$root"/patches/spinel/*.patch; do
   git -C "$source_dir" apply "$patch" >&2
 done
 
+if [ "$test_hooks" = 1 ]; then
+  git -C "$source_dir" apply --check "$root/ci/fixtures/spinel-placement-hold.patch" >&2
+  git -C "$source_dir" apply "$root/ci/fixtures/spinel-placement-hold.patch" >&2
+fi
+
 spinel_cc=$root/ci/spinel-cc.sh
 export KILN_SPINEL_REAL_CC=${SPINEL_CC:-${KILN_SPINEL_REAL_CC:-${CC:-cc}}}
-make -C "$source_dir" deps CC="$spinel_cc" >&2
-make -C "$source_dir" -j1 CC="$spinel_cc" >&2
-make -C "$source_dir" install PREFIX="$stage" CC="$spinel_cc" >&2
+build_log=$work/build.log
+run_make() {
+  phase=$1
+  shift
+  printf '%s\n' "$phase" >&2
+  if "$@" >> "$build_log" 2>&1; then
+    return 0
+  else
+    result=$?
+  fi
+  cat "$build_log" >&2
+  return "$result"
+}
+run_make 'Fetching Spinel dependencies' make -C "$source_dir" deps CC="$spinel_cc"
+run_make 'Compiling Spinel' make -C "$source_dir" -j1 CC="$spinel_cc"
+run_make 'Installing Spinel' make -C "$source_dir" install PREFIX="$stage" CC="$spinel_cc"
 for tool in spinel spin spinel-cext-build; do
   ln -sf "../lib/spinel/$tool" "$stage/bin/$tool"
 done

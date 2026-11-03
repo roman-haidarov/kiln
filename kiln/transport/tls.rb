@@ -14,6 +14,7 @@ module Kiln
         init_options(options)
         @alpn = DEFAULT_ALPN
         @context = -1
+        @borrowed = false
       end
 
       def context
@@ -28,13 +29,28 @@ module Kiln
         @context = made
       end
 
+      def lend
+        made = copy
+        made.borrow(context)
+      end
+
+      def borrow(handle)
+        @context = handle
+        @borrowed = true
+        self
+      end
+
+      def borrowed? = @borrowed
+
       def copy
+        return self if @borrowed
+
         Tls.new(cert: @cert, key: @key, ca: @ca, verify: @verify, ciphers: @ciphers,
                 ciphersuites: @ciphersuites, min_version: @min_version, alpn: @alpn)
       end
 
       def release
-        return if @context.negative?
+        return if @borrowed || @context.negative?
 
         Sock.kiln_tls_context_free(@context)
         @context = -1

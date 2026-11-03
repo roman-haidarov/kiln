@@ -5,8 +5,6 @@ module Kiln
   class Server
     SIGNALS = %w[INT TERM].freeze
 
-    include Signals
-
     attr_reader :backend
 
     def initialize(handler, **options)
@@ -24,6 +22,7 @@ module Kiln
     def ports = @engine.ports
     def shutdown(grace: 5.0) = @engine.shutdown(grace: grace)
     def connections = @engine.connections
+    def admitted = @backend == :event ? @engine.admitted : @engine.connections
     def in_flight = @engine.in_flight
     def killed = @engine.killed
     def late = @engine.late
@@ -32,6 +31,9 @@ module Kiln
     def handshakes = @engine.handshakes
     def workers = Runtime.workers
     def loops = @backend == :event ? @engine.loops : 0
+    def loop_stats = @backend == :event ? @engine.loop_stats : []
+    def queued_requests = @backend == :event ? @engine.queued_requests : 0
+    def queued_bytes = @backend == :event ? @engine.queued_bytes : 0
 
     private
 

@@ -1,7 +1,7 @@
 module Kiln
   module DB
     class Conn
-      module Opening
+      class << self
         def open(kind, host, port, *auth, **options)
           raise Unsupported, 'Kiln::DB on an inline event-loop handler' if Thread.current[:kiln_inline]
 

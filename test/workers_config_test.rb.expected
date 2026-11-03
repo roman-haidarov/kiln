@@ -1,0 +1,2 @@
+ok   invalid KILN_WORKERS raises without terminating the process
+ok   production runtime ignores scheduler test hook variables

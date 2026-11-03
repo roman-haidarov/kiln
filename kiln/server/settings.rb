@@ -8,7 +8,8 @@ module Kiln
         buffer_body: nil, backlog: 1024, tcp_nodelay: true, reuse_port: false, max_connection_rate: 256,
         read_timeout: 5.0, request_timeout: 2.0, write_timeout: 10.0, header_timeout: nil, keep_alive_timeout: nil
       }.freeze
-      EVENT = SHARED.merge(host: '127.0.0.1', handlers: nil, max_streams: 1024, client_disconnect_timeout: 1.0).freeze
+      EVENT = SHARED.merge(host: '127.0.0.1', handlers: nil, max_streams: 1024, client_disconnect_timeout: 1.0,
+                           max_pending_requests: 1024, max_pending_bytes: 16 << 20).freeze
       BASE = SHARED.merge(host: '127.0.0.1', kill_grace: 1.0, coop_budget: 4, shards: nil,
                           client_disconnect_timeout: 0.5).freeze
       RULES = [
@@ -16,6 +17,8 @@ module Kiln
         [:read_timeout, 'read_timeout', :seconds_above], [:request_timeout, 'request_timeout', :seconds_above],
         [:write_timeout, 'write_timeout', :seconds_above], [:handlers, 'handlers', :int_at_least_zero],
         [:max_streams, 'max_streams', :int_at_least_one], [:kill_grace, 'kill_grace', :seconds_at_least],
+        [:max_pending_requests, 'max_pending_requests', :int_at_least_one],
+        [:max_pending_bytes, 'max_pending_bytes', :int_at_least_one],
         [:coop_budget, 'cooperative budget', :int_at_least_zero], [:shards, 'shards', :int_at_least_one],
         [:backlog, 'backlog', :int_at_least_one], [:max_connection_rate, 'max_connection_rate', :int_at_least_zero],
         [:client_disconnect_timeout, 'client_disconnect_timeout', :seconds_at_least],
@@ -69,6 +72,8 @@ module Kiln
       def client_disconnect_timeout = @raw[:client_disconnect_timeout].to_f
       def handlers = @raw[:handlers].nil? ? Runtime.concurrency : @raw[:handlers].to_i
       def max_streams = @raw[:max_streams].to_i
+      def max_pending_requests = @raw[:max_pending_requests].to_i
+      def max_pending_bytes = @raw[:max_pending_bytes].to_i
       def kill_grace = @raw[:kill_grace].to_f
       def coop_budget = @raw[:coop_budget].to_i
       def shards = @raw[:shards].nil? ? Runtime.workers : @raw[:shards].to_i

@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.0.19
+
+### Fixed
+
+- Event loops of one server share one TLS context per listener. 0.0.18 made
+  one per loop and listener, so a TLS server did not start with more than 16
+  loops (`too many TLS contexts`, the default above 16 CPUs) and TLS 1.2
+  sessions resumed only on the loop that issued them.
+- `max_conns` and `max_streams` apply to the whole server again instead of an
+  even split per loop (0.0.18, `max_conns: 16`, 16 clients, four workers:
+  7 accepted, 9 refused). A connection takes an atomic serving permit, so
+  concurrent loops cannot admit more than `max_conns`; stream and tunnel slots
+  are reserved atomically before the head is sent. Limits belong to one
+  server; separate servers and processes have separate budgets.
+- Refused connections are bounded: a reserve of `max_conns / 16` sockets
+  (16 to 1024) gets the 503, later ones are closed at once, and refusals do
+  not use serving capacity. 0.0.18 kept every refused socket open behind its
+  503 (161 sockets with `max_conns: 1`). Handles being closed and one held
+  accept per loop can briefly add descriptors.
+- `res.stream(release:)` releases a stream's resources exactly once: after
+  the body, or instead of it on HEAD, a 503 refusal, a forced handler or upload
+  timeout, a response replacement, a client disconnect, gzip wrapping or
+  shutdown. Errors raised by `release` are logged and do not stop the server.
+  `Kiln::Static` closes large files this way; 0.0.18 left a refused static
+  stream's file open until GC, and an exhausted descriptor table turned
+  existing files into 404.
+- A stream producer whose client reset the connection is cancelled after a
+  short grace period, also when its slot is reused by a new connection, and
+  keeps its stream slot until it has stopped. Shutdown stops producers of
+  every connection generation.
+- A rejected `shutdown` (for example `grace: -1`) leaves a multi-loop server,
+  its listeners and TLS contexts running. Group shutdown is serialized.
+- A draining multi-loop server refuses new connections at once; 0.0.18
+  accepted them during the grace period and reset them afterwards.
+- The Spinel GC budget follows `KILN_WORKERS` instead of `SPINEL_WORKERS` or
+  the CPU count (up to eight times different before). An invalid
+  `KILN_WORKERS` raises `ArgumentError` instead of exiting the process.
+- A binary whose build-time Connector/C path is missing falls back to the
+  system library; the 3.4.12 minimum still applies.
+- `package.sh` no longer packs `.tools` outside a Git checkout.
+
+### Changed
+
+- Update managed Spinel to `0c4519e7bae8b5993ac5162ba0a3b996773ae6bc`.
+  Server, Event, Base, Conn, Relation and Router define their single-owner
+  methods directly in their classes; shared mixins remain.
+- `ci/c-native.sh analyze` reports all findings but fails only when a finding's
+  path includes Kiln C sources. SARIF reports are saved with CI artifacts.
+- `test-spinel.sh` compiles selected tests in parallel (`TEST_JOBS`, default:
+  online CPU count) and runs them sequentially. `KILN_TEST_PREBUILT=1` reuses
+  existing binaries and rejects missing binaries or ones older than their
+  source. CI uses the first full run's binaries for the 2, 4 and 17 worker
+  passes.
+- The local extension builder supplies plain and `_mt` objects using
+  Spinel's documented selection convention, so loading Kiln or using JSON
+  in a single-threaded application also links against the correct runtime.
+- Requests waiting for an event handler are bounded per server by
+  `max_pending_requests: 1024` and `max_pending_bytes: 16 << 20`, including
+  pipelined requests waiting behind earlier ones. Past the limit an idle
+  connection gets `503 server busy`; a pipelined connection is closed so
+  responses keep their order. Bytes count buffered request data, not process
+  memory. `server.queued_requests` and `server.queued_bytes` report the use.
+- The default `Kiln::DB::Pool` size is 16 lazy connections per pool instead
+  of 16 per application worker. Size pools against the database connection
+  limit across pools, processes and deployment overlap.
+- Bursts of new connections are spread over the loops: a loop holding clearly
+  more than its share leaves new connections to the others for up to 2 ms,
+  and stops holding for 50 ms when they make no progress. This is best effort;
+  small bursts can still leave a loop idle.
+- `server.admitted` counts served connections; `free_slots` uses it.
+  `server.loop_stats` returns `[open, accepted, holds, refused, dropped,
+  refusing, admitted]` per loop.
+- The scheduler FIFO test uses a separate Spinel runtime; production builds
+  do not include its test hook.
+- CI runs a native two-loop admission test and the multi-loop Ruby tests
+  (TLS resumption across loops, cleanup, stream generations, pending limits)
+  with 2, 4 and 17 application workers.
+
+### Known limits
+
+- Handlers run on their own loop; there is no work stealing between loops.
+- Cancellation cannot interrupt a native call in progress; cleanup follows
+  when the owner stops.
+
 ## 0.0.18
 
 - Add `KILN_WORKERS=N`: N application CPU workers, with no main-thread offset.

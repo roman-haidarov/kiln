@@ -272,7 +272,7 @@ module Kiln
       def wrap(res)
         inner = res.stream_body
         level = @stream_level
-        res.stream(status: res.status) { |out| Compress.pipe(inner, out, level) }
+        res.stream(status: res.status, release: res.stream_release) { |out| Compress.pipe(inner, out, level) }
       end
     end
   end
