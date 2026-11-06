@@ -51,7 +51,7 @@ routing, room to organize application code by layer, and native compilation.
 
 ## Get started
 
-Kiln 0.0.20 builds its pinned, patched Spinel automatically. Run `bin/setup`
+Kiln 0.0.21 builds its pinned, patched Spinel automatically. Run `bin/setup`
 once, then use `bin/spin` or `bin/spinel` for application builds. Both commands
 also set up a missing toolchain and check its fingerprint before use.
 Start with `KILN_WORKERS=2 ./build/bin/my_app` for two application CPU workers.

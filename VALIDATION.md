@@ -6,6 +6,21 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+### 0.0.21 cache verification (2026-11-07)
+
+- macOS/ARM64: `CC=clang ci/cache-native.sh asan` and
+  `CC=clang ci/cache-native.sh tsan` passed. The full
+  `KILN_NATIVE_CC=clang ci/c-native.sh tsan` passed outside the sandbox,
+  including HTTP, TLS and cache lifecycle/concurrency harnesses. The sandbox
+  run stopped at the admission test's loopback `bind`.
+- Managed Spinel: `SPINEL="$PWD/.tools/spinel/bin/spinel" ./test-spinel.sh`
+  passed 37/37 tests.
+- ARM64 Linux, GCC `-O3`, 64 shards and cross-thread key ownership, five
+  interleaved runs: cache throughput at 1/2/4/8 threads was 11.71/15.94/9.10/
+  3.60 Mops/s before the changes and 11.42/20.72/16.17/23.91 Mops/s after.
+  On macOS/ARM64, full-shard insertion with eviction measured 56.3 ns/op before
+  and 58.7 ns/op after, the paired-round medians.
+
 ### 0.0.20 local release verification (2026-11-06)
 
 - macOS/ARM64, managed Spinel `9866dce67670fba63fd9b9fd79bb01a6b765da7c`:

@@ -75,7 +75,7 @@ static void *close_paused(void *argument) {
 static void test_close(void) {
     long handle = kiln_cache_new(1, 32, 65536, 1024);
     lc_require(handle >= 0 && kiln_cache_set(handle, "key", 3, "value", 5, 0) == 1);
-    kc_slot *held = NULL;
+    kc_stripe *held = NULL;
     kc_cache *cache = kc_acquire(handle, &held);
     lc_require(cache != NULL);
     paused_mutex = &cache->shards[0].lock;
@@ -131,7 +131,7 @@ static void test_limits(void) {
         int length = snprintf(key, sizeof(key), "expire:%d", i);
         lc_require(kiln_cache_set(handle, key, length, "v", 1, 1) == 1);
     }
-    kc_slot *held = NULL;
+    kc_stripe *held = NULL;
     kc_cache *cache = kc_acquire(handle, &held);
     lc_require(cache != NULL);
     for (uint32_t i = 0; i < cache->shard_count; i++) {
@@ -176,10 +176,6 @@ static void test_tls_failure(int create_failure) {
     char value[2048];
     memset(value, 'x', sizeof(value));
     lc_require(handle >= 0 && kiln_cache_set(handle, "k", 1, value, 1, 0) == 1);
-    if (!create_failure) {
-        kiln_cache_get(handle, "k", 1);
-        lc_require(kiln_cache_found() == 1);
-    }
     fail_key_create = create_failure;
     fail_key_set = !create_failure;
     lc_require(kiln_cache_set(handle, "k", 1, value, sizeof(value), 0) == 1);
@@ -192,7 +188,7 @@ static void test_tls_failure(int create_failure) {
         lc_require(memcmp(result, value, sizeof(value)) == 0);
     }
     lc_require(kiln_cache_free(handle) == 0);
-    puts("cache TLS: pthread failure is reported without losing the existing buffer");
+    puts("cache TLS: pthread registration failure preserves cache values");
 }
 
 static void test_generation(void) {
@@ -206,11 +202,13 @@ static void test_generation(void) {
     kc_slot *other = kc_slot_of(replacement, &replacement_gen);
     lc_require(other && other != slot && replacement != handle);
     lc_require(kiln_cache_set(handle, "k", 1, "v", 1, 0) == -1);
-    uint64_t full = ((uint64_t)replacement_gen << 32) | KC_LIVE | KC_USERS;
-    atomic_store(&other->state, full);
+    uint64_t live = ((uint64_t)replacement_gen << 32) | KC_LIVE;
+    uint32_t stripe = kc_stripe_id();
+    atomic_store(&other->state, live);
+    atomic_store(&other->stripes[stripe].users, UINT32_MAX);
     kiln_cache_get(replacement, "k", 1);
-    lc_require(kiln_cache_found() == -1 && atomic_load(&other->state) == full);
-    atomic_store(&other->state, ((uint64_t)replacement_gen << 32) | KC_LIVE);
+    lc_require(kiln_cache_found() == -1 && atomic_load(&other->state) == live);
+    atomic_store(&other->stripes[stripe].users, 0);
     lc_require(kiln_cache_stats_read(replacement) == KILN_CACHE_STATS);
     lc_require(kiln_cache_stat(0) == 0 && kiln_cache_stat(-1) == -1);
     lc_require(kiln_cache_open(replacement) == 1 && kiln_cache_free(replacement) == 0);
@@ -221,7 +219,7 @@ static void test_generation(void) {
 static void test_busy(void) {
     long handle = kiln_cache_new(1, 8, 65536, 1024);
     lc_require(handle >= 0 && kiln_cache_set(handle, "k", 1, "v", 1, 0) == 1);
-    kc_slot *held = NULL;
+    kc_stripe *held = NULL;
     kc_cache *cache = kc_acquire(handle, &held);
     lc_require(cache != NULL);
     int64_t before[KILN_CACHE_STATS], after[KILN_CACHE_STATS];

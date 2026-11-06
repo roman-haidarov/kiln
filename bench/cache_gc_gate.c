@@ -27,7 +27,7 @@ static long gc_handle;
 
 static void *gc_hold(void *unused) {
     (void)unused;
-    kc_slot *held = NULL;
+    kc_stripe *held = NULL;
     kc_cache *cache = kc_acquire(gc_handle, &held);
     if (!cache) {
         return NULL;
