@@ -45,9 +45,9 @@ end
 def run_db(db, host, port, user, password, database, ca_path, tls_name)
   conn = Kiln::DB::Conn.open(Kiln::DB::Native::KIND_PG, host, port, user, password, database, ca_path, tls_name)
   Kiln::DB::Scope.use(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_pipe_tx', [])
-  conn.exec('CREATE TABLE kiln_pipe_tx (id INT NOT NULL, PRIMARY KEY (id))', [])
-  conn.exec('INSERT INTO kiln_pipe_tx (id) VALUES (1)', [])
+  conn.query('DROP TABLE IF EXISTS kiln_pipe_tx', [])
+  conn.query('CREATE TABLE kiln_pipe_tx (id INT NOT NULL, PRIMARY KEY (id))', [])
+  conn.query('INSERT INTO kiln_pipe_tx (id) VALUES (1)', [])
   conn.transaction_open
   conn.pipeline_begin
   conn.pipeline_exec('SELECT 3', [])
@@ -65,14 +65,14 @@ def run_db(db, host, port, user, password, database, ca_path, tls_name)
   conn.pipeline_finish
   tx = 'open'
   begin
-    conn.exec('SELECT 1', [])
+    conn.query('SELECT 1', [])
     tx = 'open'
   rescue Kiln::DB::Error => e
     tx = token(e)
   end
   conn.transaction_fail
-  left = conn.exec('SELECT COUNT(*) FROM kiln_pipe_tx', [])
-  conn.exec('DROP TABLE IF EXISTS kiln_pipe_tx', [])
+  left = conn.query('SELECT COUNT(*) FROM kiln_pipe_tx', [])
+  conn.query('DROP TABLE IF EXISTS kiln_pipe_tx', [])
   line(db, 'g1', g1)
   line(db, 'g2', g2)
   line(db, 'g3', g3)

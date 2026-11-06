@@ -70,7 +70,7 @@ module Kiln
 
       def to_a
         sql, binds = compile
-        Scope.lease { |conn| conn.exec(sql, binds) }
+        Scope.lease { |conn| conn.query(sql, binds) }
       end
     end
 

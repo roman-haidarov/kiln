@@ -133,7 +133,7 @@ module Kiln
 
         def write_page(conn, part, offset, step, alias_rows)
           sql, binds = Import.insert_sql(@model, Import.page_part(part, offset, step), @mode, alias_rows)
-          got = conn.exec(sql, binds)
+          got = conn.query(sql, binds)
           affected = conn.affected_rows
           check_warnings(conn)
           @num_inserts += 1
@@ -160,7 +160,7 @@ module Kiln
           return if count.zero?
 
           if @ignore
-            warnings = conn.exec('SHOW WARNINGS', [])
+            warnings = conn.query('SHOW WARNINGS', [])
             return if warnings.all? { |row| row[1].to_i == 1062 }
           end
 
@@ -190,7 +190,7 @@ module Kiln
           marks = key_marks(page, key, binds)
           list = Import.returning_list(dialect, @model)
           table = Sql.quote(dialect, @model.table_name)
-          conn.exec("SELECT #{list} FROM #{table} WHERE #{Sql.quote(dialect, key)} IN (#{marks})", binds)
+          conn.query("SELECT #{list} FROM #{table} WHERE #{Sql.quote(dialect, key)} IN (#{marks})", binds)
         end
 
         def key_marks(page, key, binds)
@@ -250,7 +250,7 @@ module Kiln
           parts = []
           texts.each_with_index { |text, at| parts << lookup_part(at, Import.row_hash(@rows[firsts[text]]), binds) }
           resolved = {}
-          conn.exec(parts.join(' UNION ALL '), binds).each { |found| resolve_found(resolved, texts, found) }
+          conn.query(parts.join(' UNION ALL '), binds).each { |found| resolve_found(resolved, texts, found) }
           resolved
         end
 
@@ -555,7 +555,7 @@ module Kiln
         end
 
         def prove_session(conn)
-          rows = conn.exec('SELECT @@session.sql_mode, @@session.foreign_key_checks, @@session.unique_checks', [])
+          rows = conn.query('SELECT @@session.sql_mode, @@session.foreign_key_checks, @@session.unique_checks', [])
           raise UnsafeImportSchema, 'session' unless safe_session?(rows)
 
           nil
@@ -908,7 +908,7 @@ module Kiln
           shape
         end
 
-        def copy_stamp(conn) = conn.exec(COPY_STAMP_SQL, [])[0][0].to_s.b
+        def copy_stamp(conn) = conn.query(COPY_STAMP_SQL, [])[0][0].to_s.b
 
         def copy_text(encoded_rows, stamp = nil)
           copy_chunk(encoded_rows, 0, encoded_rows.length * COPY_LIMIT, stamp)[0]

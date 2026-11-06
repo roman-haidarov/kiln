@@ -29,8 +29,8 @@ def rows_for(offset)
 end
 
 def reset(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_probe_item', [])
-  conn.exec('CREATE TABLE kiln_probe_item (id INT PRIMARY KEY, name VARCHAR(40), v INT NOT NULL)', [])
+  conn.query('DROP TABLE IF EXISTS kiln_probe_item', [])
+  conn.query('CREATE TABLE kiln_probe_item (id INT PRIMARY KEY, name VARCHAR(40), v INT NOT NULL)', [])
   ProbeItem.define_table(conn.dialect, 'kiln_probe_item', %w[id name v], ['id'], 'pi')
 end
 
@@ -114,7 +114,7 @@ while i < targets.length
   per_floor = floor_ns(conn)
   print "#{t[0]} import_us_per_row #{per_import.round(2)} pluck_ns_per_row #{per_pluck.round} "
   print "floor_ns_per_row #{per_floor.round}\n"
-  conn.exec('DROP TABLE kiln_probe_item', [])
+  conn.query('DROP TABLE kiln_probe_item', [])
   Kiln::DB::Scope.use(nil)
   conn.close
   i += 1

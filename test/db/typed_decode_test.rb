@@ -99,9 +99,9 @@ def show_list(db, label, values)
 end
 
 def thrice(conn, db, label, sql)
-  first = conn.exec(sql, [])
-  second = conn.exec(sql, [])
-  third = conn.exec(sql, [])
+  first = conn.query(sql, [])
+  second = conn.query(sql, [])
+  third = conn.query(sql, [])
   need("#{db} #{label} stable", rows_same?(first, second) && rows_same?(second, third))
   streamed = []
   conn.each_row(sql, []) { |row| streamed << row }
@@ -111,27 +111,27 @@ def thrice(conn, db, label, sql)
 end
 
 def my_schema(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_p10_td', [])
-  conn.exec('DROP TABLE IF EXISTS kiln_p10_pluck', [])
-  conn.exec(
+  conn.query('DROP TABLE IF EXISTS kiln_p10_td', [])
+  conn.query('DROP TABLE IF EXISTS kiln_p10_pluck', [])
+  conn.query(
     'CREATE TABLE kiln_p10_td (id INT PRIMARY KEY, ti TINYINT, tiu TINYINT UNSIGNED, ' \
     'si SMALLINT, siu SMALLINT UNSIGNED, mi MEDIUMINT, miu MEDIUMINT UNSIGNED, ' \
     'ii INT, iiu INT UNSIGNED, bi BIGINT, biu BIGINT UNSIGNED, d DOUBLE, f FLOAT, ' \
     'decv DECIMAL(30,10), yr YEAR, bits BIT(8), flag TINYINT(1))', []
   )
-  conn.exec(
+  conn.query(
     'CREATE TABLE kiln_p10_pluck (id INT PRIMARY KEY, n INT, f DOUBLE, t VARCHAR(40), ' \
     'b TINYINT(1), z INT)', []
   )
 end
 
 def my_insert_bounds(conn)
-  conn.exec(
+  conn.query(
     'INSERT INTO kiln_p10_td (id, ti, tiu, si, siu, mi, miu, ii, iiu, bi, biu, d, f, decv, yr, bits, flag) VALUES ' \
     '(1, -128, 0, -32768, 0, -8388608, 0, -2147483648, 0, CAST(\'-9223372036854775808\' AS SIGNED), 0, ' \
     '0.1, 1.1, 12345678901234567890.1234567890, 2024, b\'10100101\', 1)', []
   )
-  conn.exec(
+  conn.query(
     'INSERT INTO kiln_p10_td (id, ti, tiu, si, siu, mi, miu, ii, iiu, bi, biu, d, f, decv, yr, bits, flag) VALUES ' \
     '(2, 127, 255, 32767, 65535, 8388607, 16777215, 2147483647, 4294967295, 9223372036854775807, ' \
     'CAST(\'18446744073709551615\' AS UNSIGNED), CAST(-0e0 AS DOUBLE), 1.1, ' \
@@ -140,11 +140,11 @@ def my_insert_bounds(conn)
 end
 
 def my_insert_rest(conn)
-  conn.exec(
+  conn.query(
     'INSERT INTO kiln_p10_td (id, d, f) VALUES (3, 1e308, 1.1), (4, 5e-324, 1.1)', []
   )
-  conn.exec('INSERT INTO kiln_p10_td (id) VALUES (5)', [])
-  conn.exec(
+  conn.query('INSERT INTO kiln_p10_td (id) VALUES (5)', [])
+  conn.query(
     'INSERT INTO kiln_p10_pluck (id, n, f, t, b, z) VALUES ' \
     '(1, -2147483648, 1.5, \'hello\', 1, 10), ' \
     '(2, 7, CAST(-0e0 AS DOUBLE), \'café🙂\', 0, NULL), ' \
@@ -153,19 +153,19 @@ def my_insert_rest(conn)
 end
 
 def pg_schema(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_p10_td', [])
-  conn.exec('DROP TABLE IF EXISTS kiln_p10_pluck', [])
-  conn.exec(
+  conn.query('DROP TABLE IF EXISTS kiln_p10_td', [])
+  conn.query('DROP TABLE IF EXISTS kiln_p10_pluck', [])
+  conn.query(
     'CREATE TABLE kiln_p10_td (id INT PRIMARY KEY, i2 INT2, i4 INT4, i8 INT8, f8 FLOAT8, ' \
     'f4 FLOAT4, flag BOOLEAN, num NUMERIC, raw BYTEA, txt TEXT, vc VARCHAR(40))', []
   )
-  conn.exec(
+  conn.query(
     'CREATE TABLE kiln_p10_pluck (id INT PRIMARY KEY, n INT, f FLOAT8, t TEXT, b BOOLEAN, z INT)', []
   )
 end
 
 def pg_insert_bounds(conn)
-  conn.exec(
+  conn.query(
     'INSERT INTO kiln_p10_td (id, i2, i4, i8, f8, f4, flag, num, raw, txt, vc) VALUES ' \
     '(1, -32768, -2147483648, -9223372036854775808, 0.1, 1.1::float4, true, ' \
     '12345678901234567890.1234567890, decode(\'00ff\', \'hex\'), \'café🙂\', \'varchar\'), ' \
@@ -175,14 +175,14 @@ def pg_insert_bounds(conn)
 end
 
 def pg_insert_special(conn)
-  conn.exec(
+  conn.query(
     'INSERT INTO kiln_p10_td (id, f8, f4, flag) VALUES ' \
     '(3, \'NaN\'::float8, 1.1::float4, true), ' \
     '(4, \'Infinity\'::float8, 1.1::float4, false), ' \
     '(5, \'-Infinity\'::float8, 1.1::float4, true)', []
   )
-  conn.exec('INSERT INTO kiln_p10_td (id) VALUES (6)', [])
-  conn.exec(
+  conn.query('INSERT INTO kiln_p10_td (id) VALUES (6)', [])
+  conn.query(
     'INSERT INTO kiln_p10_pluck (id, n, f, t, b, z) VALUES ' \
     '(1, -2147483648, 1.5, \'hello\', true, 10), ' \
     '(2, 7, \'-0\'::float8, \'café🙂\', false, NULL), ' \
@@ -217,7 +217,7 @@ def legacy_rows(conn, count)
 end
 
 def check_text_export(conn)
-  rows = conn.exec(PG_TYPED, [])
+  rows = conn.query(PG_TYPED, [])
   need('pg text export', rows_same?(legacy_rows(conn, rows.length), rows))
   bytea = Kiln::DB::Native.result_bytes(conn.handle, 1, 1, 0, 7)[0]
   print "ok text_export pg #{bytea.inspect}\n"
@@ -251,8 +251,8 @@ def check_pluck(db)
 end
 
 def finish(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_p10_td', [])
-  conn.exec('DROP TABLE IF EXISTS kiln_p10_pluck', [])
+  conn.query('DROP TABLE IF EXISTS kiln_p10_td', [])
+  conn.query('DROP TABLE IF EXISTS kiln_p10_pluck', [])
   Kiln::DB::Scope.use(nil)
   conn.close
 end

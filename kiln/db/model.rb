@@ -44,7 +44,7 @@ module Kiln
           raise ArgumentError, 'save' if names.empty?
 
           sql, binds = insert_statement(model, names, key)
-          Scope.lease { |conn| capture_key(conn, conn.exec(sql, binds), key) }
+          Scope.lease { |conn| capture_key(conn, conn.query(sql, binds), key) }
           nil
         end
 
@@ -61,7 +61,7 @@ module Kiln
         def capture_key(conn, rows, key)
           return if key.nil?
 
-          rows = conn.exec('SELECT LAST_INSERT_ID()', []) if self.class.dialect != :postgres
+          rows = conn.query('SELECT LAST_INSERT_ID()', []) if self.class.dialect != :postgres
           value = rows.length.positive? ? rows[0][0] : nil
           @attrs[key] = value if !value.nil? && value != 0
         end
@@ -83,7 +83,7 @@ module Kiln
           raise ArgumentError, 'save' if keys.empty? || keys.any? { |name| @attrs[name].nil? }
 
           sql, binds = update_statement(model, names, keys)
-          Scope.lease { |conn| conn.exec(sql, binds) }
+          Scope.lease { |conn| conn.query(sql, binds) }
           nil
         end
 

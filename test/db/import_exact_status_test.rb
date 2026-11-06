@@ -27,7 +27,7 @@ class ExactMail < Kiln::DB::Model
 end
 
 def exec_ddl(conn, sql)
-  conn.exec(sql, [])
+  conn.query(sql, [])
 end
 
 def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)

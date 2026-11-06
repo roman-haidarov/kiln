@@ -26,7 +26,7 @@ module ScalingWork
       sql = ENV.fetch('DB_KIND', 'pg') == 'pg' ? 'SELECT name FROM kiln_rps WHERE id = $1' :
                                              'SELECT name FROM kiln_rps WHERE id = ?'
       Kiln::DB::Scope.lease do |conn|
-        rows = conn.exec(sql, [id])
+        rows = conn.query(sql, [id])
         raise 'incorrect database response' unless rows.size == 1 && rows[0][0] == 'kiln'
       end
     end

@@ -49,7 +49,7 @@ class HookUser < Kiln::DB::Model
 end
 
 def exec_ddl(conn, sql)
-  conn.exec(sql, [])
+  conn.query(sql, [])
 end
 
 def drop_all(conn)

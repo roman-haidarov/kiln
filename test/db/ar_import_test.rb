@@ -55,7 +55,7 @@ class ImportConnection
     @rollbacks += 1
   end
 
-  def exec(sql, binds)
+  def query(sql, binds)
     if sql.start_with?('INSERT')
       @statements << [sql, binds.dup]
       @affected_rows = sql.scan(/\), \(/).length + 1

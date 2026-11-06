@@ -54,7 +54,7 @@ def conn_exec(conn)
   t = now
   i = 0
   while i < REPEATS
-    conn.exec(SQL, [])
+    conn.query(SQL, [])
     i += 1
   end
   now - t
@@ -64,7 +64,7 @@ def unique_exec(conn)
   t = now
   i = 0
   while i < UNIQUE
-    conn.exec("SELECT u.id, u.name FROM kiln_probe_user u WHERE u.score > #{i} LIMIT 10", [])
+    conn.query("SELECT u.id, u.name FROM kiln_probe_user u WHERE u.score > #{i} LIMIT 10", [])
     i += 1
   end
   now - t
@@ -90,9 +90,9 @@ def open_conn(text, kind, host_key, auth_key)
 end
 
 def seed(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_probe_user', [])
-  conn.exec('CREATE TABLE kiln_probe_user (id INT PRIMARY KEY, name VARCHAR(40), score INT)', [])
-  conn.exec("INSERT INTO kiln_probe_user VALUES (1, 'ada', 3), (2, 'bea', 4), (5, 'cy', 7)", [])
+  conn.query('DROP TABLE IF EXISTS kiln_probe_user', [])
+  conn.query('CREATE TABLE kiln_probe_user (id INT PRIMARY KEY, name VARCHAR(40), score INT)', [])
+  conn.query("INSERT INTO kiln_probe_user VALUES (1, 'ada', 3), (2, 'bea', 4), (5, 'cy', 7)", [])
 end
 
 text = File.read('build/db-runtime/session.env')
@@ -108,7 +108,7 @@ while i < targets.length
   seed(conn)
   probe(t[0], conn)
   probe(t[0], conn)
-  conn.exec('DROP TABLE kiln_probe_user', [])
+  conn.query('DROP TABLE kiln_probe_user', [])
   conn.close
   i += 1
 end

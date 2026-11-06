@@ -31,7 +31,7 @@ pg group => [[[1], 2], [[2], 1]]
 pg having => [[[1], 2]]
 pg count_user => 2
 pg sum => "33"
-pg exec => [[1, "Rebecca"], [3, "Leon"]]
+pg query => [[1, "Rebecca"], [3, "Leon"]]
 pg saved => ["Chris Redfield"]
 pg import => ["COMMITTED", 2, "inserted"]
 mysql attrs => [{"id" => 1, "name" => "Rebecca", "active" => 1}, {"id" => 2, "name" => "Ada", "active" => 0}, {"id" => 3, "name" => "Leon", "active" => 1}]
@@ -67,6 +67,6 @@ mysql group => [[[1], 2], [[2], 1]]
 mysql having => [[[1], 2]]
 mysql count_user => 2
 mysql sum => "33"
-mysql exec => [[1, "Rebecca"], [3, "Leon"]]
+mysql query => [[1, "Rebecca"], [3, "Leon"]]
 mysql saved => ["Chris Redfield"]
 mysql import => ["COMMITTED", 2, "inserted"]

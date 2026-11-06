@@ -1,7 +1,7 @@
 module Kiln
   module DB
     class Conn
-      def exec(sql, binds)
+      def query(sql, binds)
         check_query(sql)
         run_sql(sql.to_s, binds)
       end

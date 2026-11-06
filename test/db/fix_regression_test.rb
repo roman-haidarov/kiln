@@ -32,7 +32,7 @@ def need(label, cond)
 end
 
 def ddl(conn, sql)
-  conn.exec(sql, [])
+  conn.query(sql, [])
 end
 
 def wide_names
@@ -96,14 +96,14 @@ def check_utf8(db, conn)
   need("#{db} utf8 found", got.length == 1)
   need("#{db} utf8 equal", got[0] == text)
   need("#{db} utf8 encoding", got[0].encoding.to_s == 'UTF-8')
-  raw = conn.exec(
+  raw = conn.query(
     conn.dialect == :postgres ? 'SELECT octet_length(name) FROM kiln_fix_user WHERE id = 1' : 'SELECT LENGTH(name) FROM kiln_fix_user WHERE id = 1', []
   )
   need("#{db} utf8 bytes", raw[0][0] == text.bytesize)
   blob = [0, 1, 255, 0, 200, 65].pack('C*')
   sql = conn.dialect == :postgres ? 'INSERT INTO kiln_fix_blob (id, data, body) VALUES ($1, $2, $3)' : 'INSERT INTO kiln_fix_blob (id, data, body) VALUES (?, ?, ?)'
-  conn.exec(sql, [1, blob, 'x'])
-  back = conn.exec('SELECT data FROM kiln_fix_blob WHERE id = 1', [])
+  conn.query(sql, [1, blob, 'x'])
+  back = conn.query('SELECT data FROM kiln_fix_blob WHERE id = 1', [])
   need("#{db} blob equal", back[0][0] == blob)
   line(db, 'utf8', "#{got[0].bytesize} blob #{back[0][0].bytesize}")
 end
@@ -180,13 +180,13 @@ end
 
 def check_types(db, conn)
   if conn.dialect == :postgres
-    conn.exec('INSERT INTO kiln_fix_types VALUES ($1, $2, $3, $4, $5, $6)',
-              [9_223_372_036_854_775_807, '12.5000', 1.5, true, 'txt', nil])
+    conn.query('INSERT INTO kiln_fix_types VALUES ($1, $2, $3, $4, $5, $6)',
+               [9_223_372_036_854_775_807, '12.5000', 1.5, true, 'txt', nil])
   else
-    conn.exec('INSERT INTO kiln_fix_types VALUES (?, ?, ?, ?, ?, ?)',
-              ['18446744073709551615', '12.5000', 1.5, true, 'txt', nil])
+    conn.query('INSERT INTO kiln_fix_types VALUES (?, ?, ?, ?, ?, ?)',
+               ['18446744073709551615', '12.5000', 1.5, true, 'txt', nil])
   end
-  row = conn.exec('SELECT i, d, f, b, t, n FROM kiln_fix_types', [])[0]
+  row = conn.query('SELECT i, d, f, b, t, n FROM kiln_fix_types', [])[0]
   i_ok = conn.dialect == :postgres ? row[0] == 9_223_372_036_854_775_807 : row[0].is_a?(Kiln::DB::UInt64Value) && row[0].to_s == '18446744073709551615'
   b_ok = conn.dialect == :postgres ? row[3] == true : row[3] == 1
   need("#{db} type int", i_ok)
@@ -214,7 +214,7 @@ def error_name(err)
 end
 
 def try_sql(conn, sql, binds)
-  conn.exec(sql, binds)
+  conn.query(sql, binds)
   'none'
 rescue Kiln::DB::Error => e
   "#{error_name(e)}:#{e.sqlstate}"
@@ -285,16 +285,16 @@ def check_commit_failure(db, conn)
   got = 'none'
   begin
     Kiln::DB.transaction do
-      conn.exec('INSERT INTO kiln_fix_defer (k) VALUES (1), (1)', [])
+      conn.query('INSERT INTO kiln_fix_defer (k) VALUES (1), (1)', [])
     end
   rescue Kiln::DB::Error => e
     got = error_name(e)
   end
   need("#{db} commit depth", conn.depth.zero?)
   Kiln::DB.transaction do
-    conn.exec('INSERT INTO kiln_fix_defer (k) VALUES (2)', [])
+    conn.query('INSERT INTO kiln_fix_defer (k) VALUES (2)', [])
   end
-  n = conn.exec('SELECT count(*) FROM kiln_fix_defer', [])[0][0]
+  n = conn.query('SELECT count(*) FROM kiln_fix_defer', [])[0][0]
   ddl(conn, 'DROP TABLE kiln_fix_defer')
   line(db, 'commit-fail', "#{got} depth #{conn.depth} after #{n}")
 end
@@ -303,7 +303,7 @@ def check_inline(db, conn)
   Thread.current[:kiln_inline] = true
   got = 'none'
   begin
-    conn.exec('SELECT 1', [])
+    conn.query('SELECT 1', [])
   rescue Kiln::DB::Unsupported
     got = 'Unsupported'
   end
@@ -317,7 +317,7 @@ def check_deadline(db, conn)
   Thread.current[:kiln_deadline] = started + 0.4
   got = 'none'
   begin
-    conn.exec(sleep_sql, [])
+    conn.query(sleep_sql, [])
   rescue Kiln::DB::Timeout
     got = 'Timeout'
   end
@@ -327,16 +327,16 @@ def check_deadline(db, conn)
   after = 'n/a'
   if conn.dialect == :postgres
     need("#{db} pg reusable", !conn.broken?)
-    after = conn.exec('SELECT 42', [])[0][0].to_s
+    after = conn.query('SELECT 42', [])[0][0].to_s
     begin
       Kiln::DB.transaction do
-        conn.exec('INSERT INTO kiln_fix_flag (id, active) VALUES (99, true)', [])
+        conn.query('INSERT INTO kiln_fix_flag (id, active) VALUES (99, true)', [])
         raise ArgumentError, 'rollback'
       end
     rescue ArgumentError
       nil
     end
-    left = conn.exec('SELECT count(*) FROM kiln_fix_flag WHERE id = 99', [])[0][0]
+    left = conn.query('SELECT count(*) FROM kiln_fix_flag WHERE id = 99', [])[0][0]
     need("#{db} rollback after timeout", left.zero?)
   else
     need("#{db} my broken", conn.broken?)
@@ -353,15 +353,15 @@ def check_prepared(db, conn)
     FixBig.all.where(FixBig.col('id').eq(i + 1)).count
     i += 1
   end
-  n = conn.exec('SELECT count(*) FROM pg_prepared_statements', [])[0][0].to_s.to_i
+  n = conn.query('SELECT count(*) FROM pg_prepared_statements', [])[0][0].to_s.to_i
   line(db, 'prepared', n <= 32 ? 'bounded' : n.to_s)
 end
 
 def check_long(db, conn)
   body = 'x' * 1_000_000
   sql = conn.dialect == :postgres ? 'INSERT INTO kiln_fix_blob (id, data, body) VALUES ($1, $2, $3)' : 'INSERT INTO kiln_fix_blob (id, data, body) VALUES (?, ?, ?)'
-  conn.exec(sql, [2, nil, body])
-  back = conn.exec('SELECT body FROM kiln_fix_blob WHERE id = 2', [])
+  conn.query(sql, [2, nil, body])
+  back = conn.query('SELECT body FROM kiln_fix_blob WHERE id = 2', [])
   need("#{db} long text", back[0][0].bytesize == 1_000_000)
   line(db, 'longtext', back[0][0].bytesize.to_s)
 end
@@ -394,13 +394,13 @@ def check_pool(db, kind, host, port, user, password, database, ca_path, tls_name
     Kiln::DB::Conn.open(kind, host, port, user, password, database, ca_path, tls_name)
   end
   Kiln::DB::Scope.pool = pool
-  Kiln::DB::Scope.lease { |conn| conn.exec('DELETE FROM kiln_fix_flag', []) }
+  Kiln::DB::Scope.lease { |conn| conn.query('DELETE FROM kiln_fix_flag', []) }
   ph = kind == Kiln::DB::Native::KIND_PG ? '$1' : '?'
   seen = []
   lock = Mutex.new
   a = Thread.new do
     Kiln::DB.transaction do |conn|
-      conn.exec("INSERT INTO kiln_fix_flag (id, active) VALUES (#{ph}, NULL)", [7])
+      conn.query("INSERT INTO kiln_fix_flag (id, active) VALUES (#{ph}, NULL)", [7])
       sleep 0.3
       raise ArgumentError, 'rollback a'
     end
@@ -409,13 +409,13 @@ def check_pool(db, kind, host, port, user, password, database, ca_path, tls_name
   end
   sleep 0.1
   b = Thread.new do
-    n = Kiln::DB::Scope.lease { |conn| conn.exec('SELECT count(*) FROM kiln_fix_flag WHERE id = 7', [])[0][0] }
+    n = Kiln::DB::Scope.lease { |conn| conn.query('SELECT count(*) FROM kiln_fix_flag WHERE id = 7', [])[0][0] }
     lock.synchronize { seen << n }
     nil
   end
   a.join
   b.join
-  after = Kiln::DB::Scope.lease { |conn| conn.exec('SELECT count(*) FROM kiln_fix_flag WHERE id = 7', [])[0][0] }
+  after = Kiln::DB::Scope.lease { |conn| conn.query('SELECT count(*) FROM kiln_fix_flag WHERE id = 7', [])[0][0] }
   need("#{db} pool isolation", seen.length == 1 && seen[0].zero? && after.zero?)
   tokens_ok = true
   waits = 0
@@ -428,7 +428,7 @@ def check_pool(db, kind, host, port, user, password, database, ca_path, tls_name
         i = 0
         while i < 25
           before = Kiln::DB::Native.os_thread_token
-          conn.exec(kind == Kiln::DB::Native::KIND_PG ? 'SELECT pg_sleep(0.002)' : 'SELECT SLEEP(0.002)', [])
+          conn.query(kind == Kiln::DB::Native::KIND_PG ? 'SELECT pg_sleep(0.002)' : 'SELECT SLEEP(0.002)', [])
           changed += 1 if before != Kiln::DB::Native.os_thread_token
           i += 1
         end

@@ -4,7 +4,7 @@ ok   expired queued task is not started
 ok   full queue -> Runtime::PoolTimeout, task is not run
 -- Runtime::CpuPool: worker recovery
 ok   both workers started
-ok   SystemExit in task -> Runtime::WorkerLost, worker replaced
+ok   Interrupt in task -> Runtime::WorkerLost, worker replaced
 ok   pool runs tasks after worker replacement
 ok   kill during task: caller immediately gets Runtime::WorkerLost
 ok   after kill: two workers restored and busy is correct

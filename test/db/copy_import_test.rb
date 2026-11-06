@@ -46,7 +46,7 @@ def open_db(text, timeout = 30)
 end
 
 def count_of(conn, sql)
-  conn.exec(sql, [])[0][0].to_s.to_i
+  conn.query(sql, [])[0][0].to_s.to_i
 end
 
 def cell_same?(left, right)
@@ -120,7 +120,7 @@ def value_rows
 end
 
 def read_values(conn, table)
-  conn.exec("SELECT id, s, n, f, d, b FROM #{table} ORDER BY id", [])
+  conn.query("SELECT id, s, n, f, d, b FROM #{table} ORDER BY id", [])
 end
 
 def check_values(conn)
@@ -178,8 +178,8 @@ def check_split(conn)
   CopyBig.import(rows)
   count = count_of(conn, 'SELECT COUNT(*) FROM kiln_p10_copy_big')
   total = count_of(conn, 'SELECT SUM(LENGTH(body)) FROM kiln_p10_copy_big')
-  head = conn.exec('SELECT body FROM kiln_p10_copy_big WHERE id = 1', [])[0][0]
-  tail = conn.exec('SELECT body FROM kiln_p10_copy_big WHERE id = 40000', [])[0][0]
+  head = conn.query('SELECT body FROM kiln_p10_copy_big WHERE id = 1', [])[0][0]
+  tail = conn.query('SELECT body FROM kiln_p10_copy_big WHERE id = 40000', [])[0][0]
   print "copy_split #{count} #{total}\n"
   need('split', count == 40_000 && total == 18_000_000 && head.bytesize == 450 && tail.bytesize == 450)
 end
@@ -190,7 +190,7 @@ def check_fallback(conn)
   binary << 0
   binary << 1
   CopyBin.import([{ 'id' => 1, 'b' => binary }])
-  got = conn.exec('SELECT b FROM kiln_p10_copy_bin WHERE id = 1', [])[0][0]
+  got = conn.query('SELECT b FROM kiln_p10_copy_bin WHERE id = 1', [])[0][0]
   need('fallback', got.b == binary)
   print "copy_fallback insert\n"
 end
@@ -202,13 +202,13 @@ def stamps_equal(conn)
 end
 
 def check_stamps(conn)
-  conn.exec("SET TIME ZONE 'Asia/Tokyo'", [])
+  conn.query("SET TIME ZONE 'Asia/Tokyo'", [])
   Kiln::DB.transaction do
     CopyStamp.import([{ 'id' => 1 }, { 'id' => 2 }], { timestamps: true })
     InsStamp.import([{ 'id' => 1 }, { 'id' => 2 }], { timestamps: true, returning: true })
   end
   same = stamps_equal(conn)
-  conn.exec('RESET TIME ZONE', [])
+  conn.query('RESET TIME ZONE', [])
   print "copy_timestamps #{same}\n"
   need('timestamps', same == 2)
 end
@@ -223,10 +223,10 @@ end
 def check_timeout(text)
   locker = open_db(text)
   conn = open_db(text, 1)
-  locker.exec('BEGIN', [])
-  locker.exec('LOCK TABLE kiln_p10_copy_tx IN ACCESS EXCLUSIVE MODE', [])
+  locker.query('BEGIN', [])
+  locker.query('LOCK TABLE kiln_p10_copy_tx IN ACCESS EXCLUSIVE MODE', [])
   name = interrupted_copy(conn)
-  locker.exec('ROLLBACK', [])
+  locker.query('ROLLBACK', [])
   broken = conn.broken?
   conn.close
   locker.close
@@ -235,17 +235,17 @@ def check_timeout(text)
 end
 
 def prepare(conn)
-  TABLES.each { |table| conn.exec("DROP TABLE IF EXISTS #{table}", []) }
+  TABLES.each { |table| conn.query("DROP TABLE IF EXISTS #{table}", []) }
   cols = 'id INT PRIMARY KEY, s TEXT NULL, n BIGINT NULL, f DOUBLE PRECISION NULL, ' \
          'd NUMERIC(40, 9) NULL, b BOOLEAN NULL'
-  conn.exec("CREATE TABLE kiln_p10_copy (#{cols})", [])
-  conn.exec("CREATE TABLE kiln_p10_copy_ins (#{cols})", [])
-  conn.exec('CREATE TABLE kiln_p10_copy_dup (id INT PRIMARY KEY, name TEXT NOT NULL)', [])
-  conn.exec('CREATE TABLE kiln_p10_copy_tx (id INT PRIMARY KEY, name TEXT NOT NULL)', [])
-  conn.exec('CREATE TABLE kiln_p10_copy_big (id INT PRIMARY KEY, body TEXT NOT NULL)', [])
-  conn.exec('CREATE TABLE kiln_p10_copy_bin (id INT PRIMARY KEY, b BYTEA NULL)', [])
-  conn.exec("CREATE TABLE kiln_p10_copy_stamp (#{STAMP_COLS})", [])
-  conn.exec("CREATE TABLE kiln_p10_ins_stamp (#{STAMP_COLS})", [])
+  conn.query("CREATE TABLE kiln_p10_copy (#{cols})", [])
+  conn.query("CREATE TABLE kiln_p10_copy_ins (#{cols})", [])
+  conn.query('CREATE TABLE kiln_p10_copy_dup (id INT PRIMARY KEY, name TEXT NOT NULL)', [])
+  conn.query('CREATE TABLE kiln_p10_copy_tx (id INT PRIMARY KEY, name TEXT NOT NULL)', [])
+  conn.query('CREATE TABLE kiln_p10_copy_big (id INT PRIMARY KEY, body TEXT NOT NULL)', [])
+  conn.query('CREATE TABLE kiln_p10_copy_bin (id INT PRIMARY KEY, b BYTEA NULL)', [])
+  conn.query("CREATE TABLE kiln_p10_copy_stamp (#{STAMP_COLS})", [])
+  conn.query("CREATE TABLE kiln_p10_ins_stamp (#{STAMP_COLS})", [])
   CopyVal.define_table(:postgres, 'kiln_p10_copy', %w[id s n f d b], ['id'], 'cv')
   CopyIns.define_table(:postgres, 'kiln_p10_copy_ins', %w[id s n f d b], ['id'], 'ci')
   CopyDup.define_table(:postgres, 'kiln_p10_copy_dup', %w[id name], ['id'], 'cd')
@@ -257,7 +257,7 @@ def prepare(conn)
 end
 
 def finish(conn)
-  TABLES.each { |table| conn.exec("DROP TABLE IF EXISTS #{table}", []) }
+  TABLES.each { |table| conn.query("DROP TABLE IF EXISTS #{table}", []) }
   Kiln::DB::Scope.use(nil)
   conn.close
 end

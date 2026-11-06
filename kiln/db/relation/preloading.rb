@@ -29,7 +29,7 @@ module Kiln
 
       def fetch_assoc(parents, entry)
         query = preload_query(parents, entry)
-        raw = query.nil? ? nil : Scope.lease { |conn| conn.exec(query[0], query[1]) }
+        raw = query.nil? ? nil : Scope.lease { |conn| conn.query(query[0], query[1]) }
         pack_assoc(parents, entry, raw)
       end
 

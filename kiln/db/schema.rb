@@ -58,11 +58,11 @@ module Kiln
       def locked_for_import?(conn, table)
         quoted = Sql.quote(conn.dialect, table)
         if conn.dialect != :postgres
-          conn.exec("SELECT 1 FROM #{quoted} LIMIT 0", [])
+          conn.query("SELECT 1 FROM #{quoted} LIMIT 0", [])
           return true
         end
-        conn.exec("LOCK TABLE #{quoted} IN ROW EXCLUSIVE MODE", [])
-        LIVE_CATALOG.include?(conn.exec(PG_ISOLATION, [])[0][0])
+        conn.query("LOCK TABLE #{quoted} IN ROW EXCLUSIVE MODE", [])
+        LIVE_CATALOG.include?(conn.query(PG_ISOLATION, [])[0][0])
       end
 
       private
@@ -73,7 +73,7 @@ module Kiln
         raise UnsupportedReturn, 'returning: base table required' unless count_of(conn, MY_BASE_TABLE, [table]) == 1
       end
 
-      def count_of(conn, sql, binds) = conn.exec(sql, binds)[0][0].to_s.to_i
+      def count_of(conn, sql, binds) = conn.query(sql, binds)[0][0].to_s.to_i
     end
 
     module Schema
@@ -99,13 +99,13 @@ module Kiln
         def columns(conn, table)
           raise ArgumentError, 'identifier' unless Ident.ok?(table)
 
-          conn.exec(conn.dialect == :postgres ? PG_COLUMNS : MY_COLUMNS, [conn.schema_name, table])
+          conn.query(conn.dialect == :postgres ? PG_COLUMNS : MY_COLUMNS, [conn.schema_name, table])
         end
 
         def primary_key(conn, table)
           raise ArgumentError, 'identifier' unless Ident.ok?(table)
 
-          conn.exec(conn.dialect == :postgres ? PG_KEYS : MY_KEYS, ['PRIMARY KEY', conn.schema_name, table])
+          conn.query(conn.dialect == :postgres ? PG_KEYS : MY_KEYS, ['PRIMARY KEY', conn.schema_name, table])
         end
 
         def prove_update_key(conn, model)
@@ -122,7 +122,7 @@ module Kiln
           raise ArgumentError, 'identifier' unless Ident.ok?(table)
           raise ArgumentError, 'update' if conn.dialect == :postgres
 
-          conn.exec(UNIQUE, [table])
+          conn.query(UNIQUE, [table])
         end
 
         private

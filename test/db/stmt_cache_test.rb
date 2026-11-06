@@ -27,7 +27,7 @@ def open_at(target, cache)
 end
 
 def status_number(conn, name)
-  rows = conn.exec("SHOW GLOBAL STATUS LIKE '#{name}'", [])
+  rows = conn.query("SHOW GLOBAL STATUS LIKE '#{name}'", [])
   need(name, rows.length == 1)
   rows[0][1].to_s.to_i
 end
@@ -53,7 +53,7 @@ end
 def repeat_select(conn, sql, value, count)
   i = 0
   while i < count
-    rows = conn.exec(sql, [])
+    rows = conn.query(sql, [])
     need("repeat #{sql}", rows.length == 1 && rows[0][0].to_s == value)
     i += 1
   end
@@ -80,9 +80,9 @@ def values_list(count)
 end
 
 def fill_ids(conn, table, count)
-  conn.exec("DROP TABLE IF EXISTS #{table}", [])
-  conn.exec("CREATE TABLE #{table} (id INT PRIMARY KEY) ENGINE=InnoDB", [])
-  conn.exec("INSERT INTO #{table} (id) VALUES #{values_list(count)}", [])
+  conn.query("DROP TABLE IF EXISTS #{table}", [])
+  conn.query("CREATE TABLE #{table} (id INT PRIMARY KEY) ENGINE=InnoDB", [])
+  conn.query("INSERT INTO #{table} (id) VALUES #{values_list(count)}", [])
 end
 
 def take_some(conn, sql, limit)
@@ -98,7 +98,7 @@ end
 def distinct_selects?(conn, count)
   i = 0
   while i < count
-    rows = conn.exec("SELECT #{i} AS kiln_sc_n", [])
+    rows = conn.query("SELECT #{i} AS kiln_sc_n", [])
     return false unless rows.length == 1 && rows[0][0].to_s == i.to_s
 
     i += 1
@@ -123,8 +123,8 @@ def check_open_result(target)
   fill_ids(conn, 'kiln_sc_stream', 6)
   taken = take_some(conn, 'SELECT id FROM kiln_sc_stream ORDER BY id', 3)
   usable = distinct_selects?(conn, 40)
-  again = ids_in_order?(conn.exec('SELECT id FROM kiln_sc_stream ORDER BY id', []), 6)
-  conn.exec('DROP TABLE kiln_sc_stream', [])
+  again = ids_in_order?(conn.query('SELECT id FROM kiln_sc_stream ORDER BY id', []), 6)
+  conn.query('DROP TABLE kiln_sc_stream', [])
   conn.close
   ok = taken == 3 && usable && again
   line(target.db, 'open_result', ok ? 'yes' : 'no')
@@ -132,7 +132,7 @@ def check_open_result(target)
 end
 
 def drop_and_close(conn, table)
-  conn.exec("DROP TABLE #{table}", [])
+  conn.query("DROP TABLE #{table}", [])
   broken = conn.broken?
   conn.close
   broken
@@ -174,17 +174,17 @@ def alter_row?(rows, width)
 end
 
 def alter_setup(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_sc_alter', [])
-  conn.exec('CREATE TABLE kiln_sc_alter (id INT PRIMARY KEY, name VARCHAR(20) NOT NULL) ENGINE=InnoDB', [])
-  conn.exec("INSERT INTO kiln_sc_alter (id, name) VALUES (1, 'a')", [])
+  conn.query('DROP TABLE IF EXISTS kiln_sc_alter', [])
+  conn.query('CREATE TABLE kiln_sc_alter (id INT PRIMARY KEY, name VARCHAR(20) NOT NULL) ENGINE=InnoDB', [])
+  conn.query("INSERT INTO kiln_sc_alter (id, name) VALUES (1, 'a')", [])
 end
 
 def check_alter(target)
   conn = open_at(target, 32)
   alter_setup(conn)
-  need("#{target.db} alter before", alter_row?(conn.exec('SELECT * FROM kiln_sc_alter WHERE id = 1', []), 2))
-  conn.exec('ALTER TABLE kiln_sc_alter ADD COLUMN extra INT NOT NULL DEFAULT 7', [])
-  ok = alter_row?(conn.exec('SELECT * FROM kiln_sc_alter WHERE id = 1', []), 3)
+  need("#{target.db} alter before", alter_row?(conn.query('SELECT * FROM kiln_sc_alter WHERE id = 1', []), 2))
+  conn.query('ALTER TABLE kiln_sc_alter ADD COLUMN extra INT NOT NULL DEFAULT 7', [])
+  ok = alter_row?(conn.query('SELECT * FROM kiln_sc_alter WHERE id = 1', []), 3)
   drop_and_close(conn, 'kiln_sc_alter')
   line(target.db, 'alter', ok ? 'yes' : 'no')
   need("#{target.db} alter", ok)
@@ -209,7 +209,7 @@ def check_binds_eviction(target)
   k = 0
   while k < 800
     shift = k % 40
-    rows = conn.exec("SELECT ? + #{shift} AS a, ? AS b", [k * 7, "s#{k}"])
+    rows = conn.query("SELECT ? + #{shift} AS a, ? AS b", [k * 7, "s#{k}"])
     need("#{target.db} binds #{k}", bind_row?(rows, k * 7, shift, "s#{k}"))
     k += 1
   end
@@ -218,7 +218,7 @@ def check_binds_eviction(target)
 end
 
 def failed_class(conn)
-  conn.exec('SELEC 1 FROM kiln_sc_nowhere', [])
+  conn.query('SELEC 1 FROM kiln_sc_nowhere', [])
   'none'
 rescue Kiln::DB::Error => e
   e.class.to_s
