@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.0.20
+
+### Changed
+
+- Update managed Spinel to `9866dce67670fba63fd9b9fd79bb01a6b765da7c`.
+- Rename `Conn#exec` to `Conn#query` and update callers, examples and tests.
+  The old name is removed. Spinel `9866dce6` (upstream `d39cfefb8`) gives a
+  call on an untyped receiver an extra `Kernel.exec` arm and refuses it as
+  `exec with an options Hash`, so seven DB calls stopped compiling.
+- An `exit` inside a `CpuPool` task ends the program, as an `exit` in any
+  thread does in CRuby: the caller gets `WorkerLost`, then the `SystemExit`
+  reaches the main thread (Spinel `2bad8cbc7`). Earlier Spinel ended only the
+  worker, and the pool replaced it. A `SignalException` raised in a task
+  still ends only that worker, and the pool replaces it.
+
 ## 0.0.19
 
 ### Fixed

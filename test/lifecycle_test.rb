@@ -22,7 +22,7 @@ end
 retry_pool = FailingSpawn.new(1)
 retry_pool.failures = 2
 r = begin
-  retry_pool.run { raise SystemExit }
+  retry_pool.run { raise Interrupt }
 rescue Kiln::Runtime::WorkerLost
   :lost
 end
@@ -52,7 +52,7 @@ gated.entered = gate_entered
 spawn_results = Queue.new
 gated.results = spawn_results
 begin
-  gated.run { raise SystemExit }
+  gated.run { raise Interrupt }
 rescue StandardError
   Kiln::Runtime::WorkerLost
 end

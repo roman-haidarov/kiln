@@ -26,11 +26,11 @@ def need(label, cond)
 end
 
 def setup_items(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_si_item', [])
+  conn.query('DROP TABLE IF EXISTS kiln_si_item', [])
   if conn.dialect == :postgres
-    conn.exec('CREATE TABLE kiln_si_item (id INT PRIMARY KEY, name VARCHAR(40), v INT NOT NULL)', [])
+    conn.query('CREATE TABLE kiln_si_item (id INT PRIMARY KEY, name VARCHAR(40), v INT NOT NULL)', [])
   else
-    conn.exec('CREATE TABLE kiln_si_item (id INT PRIMARY KEY, name VARCHAR(40), v INT NOT NULL) ENGINE=InnoDB', [])
+    conn.query('CREATE TABLE kiln_si_item (id INT PRIMARY KEY, name VARCHAR(40), v INT NOT NULL) ENGINE=InnoDB', [])
   end
   SiItem.define_table(conn.dialect, 'kiln_si_item', %w[id name v], ['id'], 'si')
   rows = []
@@ -57,7 +57,7 @@ def check_stream(db, conn)
     sum += row.get('v')
     count += 1
   end
-  want = conn.exec('SELECT SUM(v) FROM kiln_si_item', [])[0][0].to_s.to_i
+  want = conn.query('SELECT SUM(v) FROM kiln_si_item', [])[0][0].to_s.to_i
   need("#{db} stream count", count == 3000)
   need("#{db} stream sum", sum == want)
   need("#{db} stream order", sorted)
@@ -151,7 +151,7 @@ def check_cancel(db, conn)
   took = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
   need("#{db} cancel fast", took < 3.0)
   need("#{db} cancel usable", !conn.broken?)
-  need("#{db} cancel after", conn.exec('SELECT 1', [])[0][0] == 1)
+  need("#{db} cancel after", conn.query('SELECT 1', [])[0][0] == 1)
   line(db, 'stream cancel', "#{taken} rows, usable")
 end
 
@@ -250,9 +250,9 @@ def check_import_my(db)
   line(db, 'import upsert status', statuses(result).join(','))
   line(db, 'import upsert returned', names.join(','))
   conn = Kiln::DB::Scope.current
-  conn.exec('DROP TABLE IF EXISTS kiln_si_code', [])
-  conn.exec('CREATE TABLE kiln_si_code (id VARCHAR(20) PRIMARY KEY, name VARCHAR(40), v INT NOT NULL) ENGINE=InnoDB',
-            [])
+  conn.query('DROP TABLE IF EXISTS kiln_si_code', [])
+  conn.query('CREATE TABLE kiln_si_code (id VARCHAR(20) PRIMARY KEY, name VARCHAR(40), v INT NOT NULL) ENGINE=InnoDB',
+             [])
   SiItem.define_table(conn.dialect, 'kiln_si_code', %w[id name v], ['id'], 'sc')
   SiItem.import([{ 'id' => 'ABC', 'name' => 'old', 'v' => 1 }, { 'id' => 'X1', 'name' => 'old', 'v' => 1 }])
   rows = [
@@ -263,7 +263,7 @@ def check_import_my(db)
   result = SiItem.import(rows, { on_duplicate_key_update: true, returning: true })
   line(db, 'import collation status', statuses(result).join(','))
   line(db, 'import collation returned', "#{returned_ids(result).join(',')} #{returned_names(result).join(',')}")
-  conn.exec('DROP TABLE kiln_si_code', [])
+  conn.query('DROP TABLE kiln_si_code', [])
   SiItem.define_table(conn.dialect, 'kiln_si_item', %w[id name v], ['id'], 'si')
 end
 
@@ -271,7 +271,7 @@ def check_pool_closed(db, kind, host, port, user, password, database, ca_path, t
   pool = Kiln::DB::Pool.new(1, timeout: 2.0) do
     Kiln::DB::Conn.open(kind, host, port, user, password, database, ca_path, tls_name)
   end
-  pool.with { |conn| conn.exec('SELECT 1', []) }
+  pool.with { |conn| conn.query('SELECT 1', []) }
   closed = pool.close
   name = 'none'
   begin
@@ -298,7 +298,7 @@ def run_one(db, kind, host, port, user, password, database, ca_path, tls_name)
   else
     check_import_my(db)
   end
-  conn.exec('DROP TABLE kiln_si_item', [])
+  conn.query('DROP TABLE kiln_si_item', [])
   Kiln::DB::Scope.use(nil)
   conn.close
   check_pool_closed(db, kind, host, port, user, password, database, ca_path, tls_name)

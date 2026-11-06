@@ -94,7 +94,7 @@ class QLock < Kiln::DB::Model
 end
 
 def exec_ddl(conn, sql)
-  conn.exec(sql, [])
+  conn.query(sql, [])
 end
 
 def drop_all(conn)
@@ -231,7 +231,7 @@ def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)
   ts = stamped.length == 1 && !stamped[0].nil? ? 'yes' : 'no'
   mode = ''
   if conn.dialect == :mysql
-    mode = conn.exec('SELECT @@session.sql_mode', [])[0][0].to_s
+    mode = conn.query('SELECT @@session.sql_mode', [])[0][0].to_s
     exec_ddl(conn, "SET SESSION sql_mode = ''")
   end
   session = 'pg'
@@ -251,22 +251,22 @@ def run_db(db, kind, host, port, user, password, database, ca_path, tls_name)
   end
   warned = 'pg'
   if conn.dialect == :mysql
-    conn.exec("DO CAST('abc' AS UNSIGNED)", [])
+    conn.query("DO CAST('abc' AS UNSIGNED)", [])
     warned = conn.warning_count.positive? ? 'yes' : 'no'
   end
   held = Kiln::DB::Conn.open(kind, host, port, user, password, database, ca_path, tls_name)
   exec_ddl(conn, 'INSERT INTO kiln_q_lock (id, name) VALUES (1, \'a\')')
   conn.transaction_open
-  conn.exec('SELECT id FROM kiln_q_lock WHERE id = 1 FOR UPDATE', [])
+  conn.query('SELECT id FROM kiln_q_lock WHERE id = 1 FOR UPDATE', [])
   if conn.dialect == :mysql
-    held.exec('SET SESSION innodb_lock_wait_timeout = 1', [])
+    held.query('SET SESSION innodb_lock_wait_timeout = 1', [])
   else
-    held.exec("SET lock_timeout = '1s'", [])
+    held.query("SET lock_timeout = '1s'", [])
   end
   held.transaction_open
   lock = 'open'
   begin
-    held.exec('SELECT id FROM kiln_q_lock WHERE id = 1 FOR UPDATE', [])
+    held.query('SELECT id FROM kiln_q_lock WHERE id = 1 FOR UPDATE', [])
     lock = 'open'
   rescue Kiln::DB::Deadlock
     lock = 'deadlock'

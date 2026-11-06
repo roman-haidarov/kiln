@@ -13,12 +13,12 @@ def open_pg(text, cache)
 end
 
 def seed(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_skew', [])
-  conn.exec('CREATE TABLE kiln_skew (id int PRIMARY KEY, k int NOT NULL)', [])
-  conn.exec('INSERT INTO kiln_skew SELECT g, CASE WHEN g % 2 = 0 THEN 1 ELSE g END ' \
-            'FROM generate_series(1, 100000) g', [])
-  conn.exec('CREATE INDEX kiln_skew_k ON kiln_skew (k)', [])
-  conn.exec('ANALYZE kiln_skew', [])
+  conn.query('DROP TABLE IF EXISTS kiln_skew', [])
+  conn.query('CREATE TABLE kiln_skew (id int PRIMARY KEY, k int NOT NULL)', [])
+  conn.query('INSERT INTO kiln_skew SELECT g, CASE WHEN g % 2 = 0 THEN 1 ELSE g END ' \
+             'FROM generate_series(1, 100000) g', [])
+  conn.query('CREATE INDEX kiln_skew_k ON kiln_skew (k)', [])
+  conn.query('ANALYZE kiln_skew', [])
 end
 
 def median_us(conn, value)
@@ -26,7 +26,7 @@ def median_us(conn, value)
   i = 0
   while i < 50
     t = now
-    conn.exec('SELECT count(*) FROM kiln_skew WHERE k = $1', [value])
+    conn.query('SELECT count(*) FROM kiln_skew WHERE k = $1', [value])
     spent << ((now - t) * 1e6)
     i += 1
   end
@@ -52,6 +52,6 @@ seed(setup)
   end
   conn.close
 end
-setup.exec('DROP TABLE kiln_skew', [])
+setup.query('DROP TABLE kiln_skew', [])
 setup.close
 print "ok plan_skew\n"

@@ -70,7 +70,7 @@ def run_groups(conn, db)
   line(db, 'g3', g3)
   line(db, 'syncs', "#{s1},#{s2},#{s3}")
   line(db, 'published', published.to_s)
-  line(db, 'idle', value_of(conn.exec('SELECT 1', [])))
+  line(db, 'idle', value_of(conn.query('SELECT 1', [])))
 end
 
 def run_ends(conn, db)
@@ -106,7 +106,7 @@ def run_ends(conn, db)
 end
 
 def exec_ddl(conn, sql)
-  conn.exec(sql, [])
+  conn.query(sql, [])
 end
 
 def run_preload(conn, db)

@@ -89,7 +89,7 @@ module Kiln
 
       def run(mode)
         compiled = compile(mode)
-        Scope.lease { |conn| conn.exec(compiled[0], compiled[1]) }
+        Scope.lease { |conn| conn.query(compiled[0], compiled[1]) }
       end
 
       def pick_names

@@ -21,12 +21,12 @@ end
 
 def create_doc_tables(conn)
   bool = conn.dialect == :postgres ? 'BOOLEAN' : 'TINYINT(1)'
-  conn.exec('DROP TABLE IF EXISTS posts', [])
-  conn.exec('DROP TABLE IF EXISTS tags', [])
-  conn.exec('DROP TABLE IF EXISTS users', [])
-  conn.exec("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(40), active #{bool})", [])
-  conn.exec('CREATE TABLE posts (id INT PRIMARY KEY, user_id INT, title VARCHAR(40))', [])
-  conn.exec('CREATE TABLE tags (id INT PRIMARY KEY, label VARCHAR(40))', [])
+  conn.query('DROP TABLE IF EXISTS posts', [])
+  conn.query('DROP TABLE IF EXISTS tags', [])
+  conn.query('DROP TABLE IF EXISTS users', [])
+  conn.query("CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(40), active #{bool})", [])
+  conn.query('CREATE TABLE posts (id INT PRIMARY KEY, user_id INT, title VARCHAR(40))', [])
+  conn.query('CREATE TABLE tags (id INT PRIMARY KEY, label VARCHAR(40))', [])
 end
 
 def define_doc_models(d)
@@ -105,7 +105,7 @@ def show_doc_writes(db, conn, d)
   show(db, 'count_user', Post.all.where(Post.col('user_id').eq(1)).count)
   show(db, 'sum', Post.all.sum(Post.col('id')).to_s)
   sql = d == :postgres ? 'SELECT id, name FROM users WHERE active = $1' : 'SELECT id, name FROM users WHERE active = ?'
-  show(db, 'exec', Kiln::DB::Scope.lease { |c| c.exec(sql, [true]) })
+  show(db, 'query', Kiln::DB::Scope.lease { |c| c.query(sql, [true]) })
   user = User.new({ 'id' => 5, 'name' => 'Leon', 'active' => true })
   user.save!
   user.assign('name', 'Chris Redfield')
@@ -114,9 +114,9 @@ def show_doc_writes(db, conn, d)
   result = User.import([{ 'id' => 6, 'name' => 'Leon', 'active' => true },
                         { id: 7, name: 'Chris', active: true }])
   show(db, 'import', [result.state, result.length, result.input_status(0)])
-  conn.exec('DROP TABLE posts', [])
-  conn.exec('DROP TABLE tags', [])
-  conn.exec('DROP TABLE users', [])
+  conn.query('DROP TABLE posts', [])
+  conn.query('DROP TABLE tags', [])
+  conn.query('DROP TABLE users', [])
 end
 
 def docs(db, conn)

@@ -71,7 +71,7 @@ def pooled_queries(target, threads, rounds)
         conn = pool.checkout
         begin
           value = (index * 1000) + round
-          ok = false unless conn.exec(sql, [value])[0][0] == value
+          ok = false unless conn.query(sql, [value])[0][0] == value
           if index.zero? && (round % 20).zero?
             now = fd_count
             peak = now if now > peak
@@ -117,12 +117,12 @@ end
 def check_close_releases(target)
   observer = target.open
   conn = target.open
-  6.times { |i| need("#{target.db} reuse #{i}", conn.exec('SELECT 1', [])[0][0] == 1) }
-  session = conn.exec(target.session_sql, [])[0][0]
+  6.times { |i| need("#{target.db} reuse #{i}", conn.query('SELECT 1', [])[0][0] == 1) }
+  session = conn.query(target.session_sql, [])[0][0]
   conn.close
   alive = 1
   20.times do
-    alive = observer.exec(target.alive_sql, [session])[0][0]
+    alive = observer.query(target.alive_sql, [session])[0][0]
     break if alive.zero?
 
     sleep 0.05
@@ -136,24 +136,24 @@ def check_cancel_reuse(target)
   return unless target.postgres?
 
   conn = target.open
-  conn.exec('SELECT 1', [])
+  conn.query('SELECT 1', [])
   conn.timeout = 0.05
   timed_out = false
   begin
-    conn.exec('SELECT pg_sleep(0.5)', [])
+    conn.query('SELECT pg_sleep(0.5)', [])
   rescue Kiln::DB::Timeout
     timed_out = true
   end
   conn.timeout = 5.0
   need("#{target.db} timeout", timed_out)
-  need("#{target.db} query after cancel", conn.exec('SELECT 9', [])[0][0] == 9)
+  need("#{target.db} query after cancel", conn.query('SELECT 9', [])[0][0] == 9)
   conn.pipeline_begin
   conn.pipeline_exec('SELECT 11', [])
   conn.pipeline_sync
   need("#{target.db} pipeline read", conn.pipeline_read[0][0] == 11)
   conn.pipeline_sync_read
   conn.pipeline_finish
-  need("#{target.db} query after pipeline", conn.exec('SELECT 13', [])[0][0] == 13)
+  need("#{target.db} query after pipeline", conn.query('SELECT 13', [])[0][0] == 13)
   conn.close
   line(target.db, 'cancel and pipeline reuse', 'ok')
 end
@@ -165,15 +165,15 @@ def check_streaming(target)
         else
           'WITH RECURSIVE s(g) AS (SELECT 1 UNION ALL SELECT g + 1 FROM s WHERE g < 3000) SELECT g FROM s'
         end
-  conn.exec('SET SESSION cte_max_recursion_depth = 5000', []) if target.db == 'mysql84'
-  conn.exec('SET SESSION max_recursive_iterations = 5000', []) if target.db == 'mariadb114'
+  conn.query('SET SESSION cte_max_recursion_depth = 5000', []) if target.db == 'mysql84'
+  conn.query('SET SESSION max_recursive_iterations = 5000', []) if target.db == 'mariadb114'
   count = 0
   conn.each_row(sql, []) do |row|
     count += 1
     break if count == 1500 && !row.empty?
   end
   need("#{target.db} streamed rows", count == 1500)
-  need("#{target.db} usable after break", conn.exec('SELECT 5', [])[0][0] == 5 && !conn.broken?)
+  need("#{target.db} usable after break", conn.query('SELECT 5', [])[0][0] == 5 && !conn.broken?)
   conn.close
   line(target.db, 'stream break reuse', 'ok')
 end

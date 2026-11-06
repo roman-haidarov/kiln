@@ -90,8 +90,8 @@ def text_type(conn) = conn.kind == Kiln::DB::Native::KIND_PG ? 'text' : 'LONGTEX
 def mark(conn, index) = conn.kind == Kiln::DB::Native::KIND_PG ? "$#{index}" : '?'
 
 def make_table(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_rb', [])
-  conn.exec("CREATE TABLE kiln_rb (id INT PRIMARY KEY, b #{blob_type(conn)}, t #{text_type(conn)}, n INT)", [])
+  conn.query('DROP TABLE IF EXISTS kiln_rb', [])
+  conn.query("CREATE TABLE kiln_rb (id INT PRIMARY KEY, b #{blob_type(conn)}, t #{text_type(conn)}, n INT)", [])
 end
 
 def text_for(id)
@@ -107,7 +107,7 @@ def insert_rows(conn, from, upto, size)
   id = from
   while id <= upto
     blob = size.positive? ? ("\x00\xFF".b * (size / 2)) : "\x00\xFF#{id}".b
-    conn.exec(sql, [id, blob, size.positive? ? 'x' * size : text_for(id), id * 3])
+    conn.query(sql, [id, blob, size.positive? ? 'x' * size : text_for(id), id * 3])
     id += 1
   end
 end
@@ -123,7 +123,7 @@ def wide_sql
 end
 
 def compare(conn, label, sql)
-  fresh = conn.exec(sql, [])
+  fresh = conn.query(sql, [])
   need("#{label} batch equals per-row", same_rows?(fresh, old_rows(conn, sql)))
   fresh.length
 end
@@ -132,7 +132,7 @@ def check_counts(conn, db)
   make_table(conn)
   sizes = []
   [0, 1, 1000, 3000].each do |count|
-    conn.exec('DELETE FROM kiln_rb', [])
+    conn.query('DELETE FROM kiln_rb', [])
     insert_rows(conn, 1, count, 0)
     sizes << compare(conn, "#{db} rows #{count}", 'SELECT id, b, t, n FROM kiln_rb ORDER BY id')
   end
@@ -141,10 +141,10 @@ def check_counts(conn, db)
 end
 
 def check_big(conn, db)
-  conn.exec('DELETE FROM kiln_rb', [])
+  conn.query('DELETE FROM kiln_rb', [])
   insert_rows(conn, 1, 1, 1_048_576)
   one = compare(conn, "#{db} 1MiB", 'SELECT id, b, t, n FROM kiln_rb ORDER BY id')
-  conn.exec('DELETE FROM kiln_rb', [])
+  conn.query('DELETE FROM kiln_rb', [])
   insert_rows(conn, 1, 3, 614_400)
   three = compare(conn, "#{db} 3x600KB", 'SELECT id, b, t, n FROM kiln_rb ORDER BY id')
   print "#{db} big #{one} #{three}\n"
@@ -160,14 +160,14 @@ def streamed_until(conn, sql, stop)
 end
 
 def refill(conn, count)
-  conn.exec('DELETE FROM kiln_rb', [])
+  conn.query('DELETE FROM kiln_rb', [])
   insert_rows(conn, 1, count, 0)
 end
 
 def check_stream(conn, db)
   refill(conn, 1000)
   sql = 'SELECT id, b, t, n FROM kiln_rb ORDER BY id'
-  whole = conn.exec(sql, [])
+  whole = conn.query(sql, [])
   part = streamed_until(conn, sql, 300)
   need("#{db} stream prefix", same_rows?(part, whole.first(300)))
   full = streamed_until(conn, sql, 5000)
@@ -175,7 +175,7 @@ def check_stream(conn, db)
   print "#{db} stream #{part.length} #{full.length} #{row_count(conn)} broken=#{conn.broken?}\n"
 end
 
-def row_count(conn) = conn.exec('SELECT COUNT(*) FROM kiln_rb', [])[0][0].to_s
+def row_count(conn) = conn.query('SELECT COUNT(*) FROM kiln_rb', [])[0][0].to_s
 
 text = File.read('build/db-runtime/session.env')
 targets = [
@@ -188,7 +188,7 @@ targets.each do |target|
   check_counts(conn, target.db)
   check_big(conn, target.db)
   check_stream(conn, target.db)
-  conn.exec('DROP TABLE kiln_rb', [])
+  conn.query('DROP TABLE kiln_rb', [])
   conn.close
 end
 print "ok row_batch\n"

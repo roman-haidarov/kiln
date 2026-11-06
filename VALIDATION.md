@@ -6,6 +6,18 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ## Test suite
 
+### 0.0.20 local release verification (2026-11-06)
+
+- macOS/ARM64, managed Spinel `9866dce67670fba63fd9b9fd79bb01a6b765da7c`:
+  `SPINEL_WORKERS=1 TEST_JOBS=4 ./test-spinel.sh` passed 37/37 tests,
+  including the separate CPU task exit check.
+- `ci/db-offline.sh` passed 17/17 after the `Conn#query` rename.
+  `ci/spin-build-smoke.sh` installed the package, built it and verified
+  `Kiln::VERSION == 0.0.20` in the compiled application.
+- Ruby and C static checks were run. RuboCop, Reek, rubyfast, clang-tidy,
+  cppcheck and Lizard retain findings in the tree; no first-party C source
+  changed for this release. GitHub Actions has not been run locally.
+
 ### Parallel test compilation and binary reuse (2026-11-04)
 
 - macOS/ARM64: `TEST_JOBS=2 SPINEL_WORKERS=1 ./test-spinel.sh` passed
@@ -1564,8 +1576,8 @@ chunked `stream`, keeps up to `statement_cache:` named statements
 before a new one is prepared. `0A000` and `26000` on a cached statement drop
 it (`26000` drops all) and retry once unprepared when `PQtransactionStatus`
 was `PQTRANS_IDLE` before the send; inside a transaction the error is raised
-with its SQLSTATE. `DEALLOCATE`/`DISCARD` through `exec` empty the cache;
-`ALTER`/`CREATE`/`DROP`/`TRUNCATE` through `exec` mark every entry stale, so
+with its SQLSTATE. `DEALLOCATE`/`DISCARD` through `query` empty the cache;
+`ALTER`/`CREATE`/`DROP`/`TRUNCATE` through `query` mark every entry stale, so
 the next use closes and prepares again instead of failing. A transaction in
 error state, pipeline mode, `OP_PREPARE` and `BEGIN`/`COMMIT`/`ROLLBACK` use
 the unnamed path as before. A cancel during the prepare step queues the new
@@ -1627,7 +1639,7 @@ call that marshals arrays across the FFI. The end-to-end rows pass in both
 runs: the earlier run gave `exec_per_row` 776 → 701.5 ns (90%) and
 `exec_per_row_2_threads` 1896 → 1276 ns (67%).
 
-`test/db/row_batch_test.rb` (N-03, N-04) compares `conn.exec` with the old
+`test/db/row_batch_test.rb` (N-03, N-04) compares `conn.query` with the old
 per-row `Native.result_row` path on the same result for PostgreSQL 17, MySQL
 and MariaDB: 0, 1, 1000 and 3000 rows (across the 256-row batch and the
 1024-row MySQL fetch block), bytea/BLOB with NUL and 0xFF, empty strings and

@@ -29,14 +29,14 @@ end
 def named(conn)
   tag = (Kiln::Runtime.now * 1e9).to_i
   sql = "SELECT count(*) FROM pg_prepared_statements WHERE name LIKE 'kiln_s%' AND #{tag} > 0"
-  conn.exec(sql, [])[0][0].to_s.to_i
+  conn.query(sql, [])[0][0].to_s.to_i
 end
 
 def times(conn, sql, binds, count)
   rows = []
   i = 0
   while i < count
-    rows = conn.exec(sql, binds)
+    rows = conn.query(sql, binds)
     i += 1
   end
   rows
@@ -89,7 +89,7 @@ def check_disabled(text)
 end
 
 def bind_ok?(conn, value)
-  rows = conn.exec('SELECT $1::int8 + 1, $2::text, $3::bytea', [value, "v#{value}", "\x00\xFF#{value}".b])
+  rows = conn.query('SELECT $1::int8 + 1, $2::text, $3::bytea', [value, "v#{value}", "\x00\xFF#{value}".b])
   rows[0][0].to_s == (value + 1).to_s && rows[0][1].to_s == "v#{value}" && rows[0][2] == "\x00\xFF#{value}".b
 end
 
@@ -104,9 +104,9 @@ def binds_ok?(conn, count)
 end
 
 def null_binds_ok?(conn)
-  conn.exec('SELECT $1::text IS NULL', [nil])
-  null_hit = conn.exec('SELECT $1::text IS NULL', [nil])[0][0]
-  null_hit == true && conn.exec('SELECT $1::text IS NULL', ['x'])[0][0] == false
+  conn.query('SELECT $1::text IS NULL', [nil])
+  null_hit = conn.query('SELECT $1::text IS NULL', [nil])[0][0]
+  null_hit == true && conn.query('SELECT $1::text IS NULL', ['x'])[0][0] == false
 end
 
 def check_binds(text)
@@ -117,19 +117,19 @@ def check_binds(text)
 end
 
 def reset_table(conn)
-  conn.exec('DROP TABLE IF EXISTS kiln_pg_alter', [])
-  conn.exec('CREATE TABLE kiln_pg_alter (id int PRIMARY KEY, name text NOT NULL)', [])
-  conn.exec("INSERT INTO kiln_pg_alter VALUES (1, 'a')", [])
+  conn.query('DROP TABLE IF EXISTS kiln_pg_alter', [])
+  conn.query('CREATE TABLE kiln_pg_alter (id int PRIMARY KEY, name text NOT NULL)', [])
+  conn.query("INSERT INTO kiln_pg_alter VALUES (1, 'a')", [])
 end
 
 def width(conn)
-  conn.exec('SELECT * FROM kiln_pg_alter WHERE id = 1', [])[0].length
+  conn.query('SELECT * FROM kiln_pg_alter WHERE id = 1', [])[0].length
 end
 
 def width_after_alter_in_tx(conn)
   inside = 0
   in_transaction(conn) do |tx|
-    tx.exec('ALTER TABLE kiln_pg_alter ADD COLUMN more int DEFAULT 8', [])
+    tx.query('ALTER TABLE kiln_pg_alter ADD COLUMN more int DEFAULT 8', [])
     inside = width(tx)
   end
   inside
@@ -139,10 +139,10 @@ def check_same_session_alter(text)
   conn = open_pg(text, 32)
   reset_table(conn)
   times(conn, 'SELECT * FROM kiln_pg_alter WHERE id = 1', [], 3)
-  conn.exec('ALTER TABLE kiln_pg_alter ADD COLUMN extra int DEFAULT 7', [])
+  conn.query('ALTER TABLE kiln_pg_alter ADD COLUMN extra int DEFAULT 7', [])
   outside = width(conn)
   inside = width_after_alter_in_tx(conn)
-  conn.exec('DROP TABLE kiln_pg_alter', [])
+  conn.query('DROP TABLE kiln_pg_alter', [])
   conn.close
   verdict('same_session_alter', outside == 3 && inside == 4, "#{outside} #{inside}")
 end
@@ -156,10 +156,10 @@ end
 
 def other_alter_results(conn, other)
   times(conn, 'SELECT * FROM kiln_pg_alter WHERE id = 1', [], 3)
-  other.exec('ALTER TABLE kiln_pg_alter ADD COLUMN extra int DEFAULT 7', [])
+  other.query('ALTER TABLE kiln_pg_alter ADD COLUMN extra int DEFAULT 7', [])
   outside = width(conn)
   times(conn, 'SELECT * FROM kiln_pg_alter WHERE id = 1', [], 2)
-  other.exec('ALTER TABLE kiln_pg_alter ADD COLUMN more int DEFAULT 8', [])
+  other.query('ALTER TABLE kiln_pg_alter ADD COLUMN more int DEFAULT 8', [])
   state = tx_width_state(conn)
   [outside, state, width(conn)]
 end
@@ -169,7 +169,7 @@ def check_other_session_alter(text)
   other = open_pg(text, 0)
   reset_table(other)
   outside, state, after = other_alter_results(conn, other)
-  other.exec('DROP TABLE kiln_pg_alter', [])
+  other.query('DROP TABLE kiln_pg_alter', [])
   other.close
   conn.close
   verdict('other_session_alter', outside == 3 && state == '0A000' && after == 4, "#{outside} #{state} #{after}")
@@ -177,16 +177,16 @@ end
 
 def after_deallocate_in_tx(conn)
   times(conn, 'SELECT 9 AS kiln_pg_dealloc', [], 3)
-  conn.exec('DEALLOCATE ALL', [])
+  conn.query('DEALLOCATE ALL', [])
   inside = ''
-  in_transaction(conn) { |tx| inside = tx.exec('SELECT 9 AS kiln_pg_dealloc', [])[0][0].to_s }
+  in_transaction(conn) { |tx| inside = tx.query('SELECT 9 AS kiln_pg_dealloc', [])[0][0].to_s }
   inside
 end
 
 def after_hidden_deallocate(conn)
   times(conn, 'SELECT 9 AS kiln_pg_dealloc', [], 2)
-  conn.exec('/* hidden */ DEALLOCATE ALL', [])
-  conn.exec('SELECT 9 AS kiln_pg_dealloc', [])[0][0].to_s
+  conn.query('/* hidden */ DEALLOCATE ALL', [])
+  conn.query('SELECT 9 AS kiln_pg_dealloc', [])[0][0].to_s
 end
 
 def check_deallocate(text)

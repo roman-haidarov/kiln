@@ -13,10 +13,10 @@ end
 
 def tls_state(conn, db)
   if db == 'pg'
-    on = conn.exec('SELECT CAST(ssl AS int) FROM pg_stat_ssl WHERE pid = pg_backend_pid()', [])[0][0].to_s == '1'
+    on = conn.query('SELECT CAST(ssl AS int) FROM pg_stat_ssl WHERE pid = pg_backend_pid()', [])[0][0].to_s == '1'
     return on ? 'on' : 'off'
   end
-  conn.exec("SHOW SESSION STATUS LIKE 'Ssl_cipher'", [])[0][1].to_s.empty? ? 'off' : 'on'
+  conn.query("SHOW SESSION STATUS LIKE 'Ssl_cipher'", [])[0][1].to_s.empty? ? 'off' : 'on'
 end
 
 def plain_outcome(label, db)

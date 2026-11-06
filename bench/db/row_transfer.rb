@@ -82,7 +82,7 @@ end
 def exec_rounds(conn, rounds)
   k = 0
   while k < rounds
-    conn.exec(SQL, [])
+    conn.query(SQL, [])
     k += 1
   end
 end

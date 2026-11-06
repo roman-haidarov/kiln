@@ -94,10 +94,10 @@ Kiln::DB::Scope.pool = pool
   - PostgreSQL prepares a named statement (`kiln_s<N>`) the second time the
     same text runs outside pipeline mode; the first run uses the unnamed
     statement as before. The least recently used statement is closed when the
-    cache is full. `DISCARD ALL` and `DEALLOCATE ALL` run through `exec` empty
+    cache is full. `DISCARD ALL` and `DEALLOCATE ALL` run through `query` empty
     the cache, `DEALLOCATE <name>` forgets that one statement, and `DISCARD
     PLANS`, `DISCARD SEQUENCES` and `DISCARD TEMP` keep it, because the server
-    keeps the statements. `ALTER`, `CREATE`, `DROP` or `TRUNCATE` run through `exec` make
+    keeps the statements. `ALTER`, `CREATE`, `DROP` or `TRUNCATE` run through `query` make
     the next use prepare again. When another session changes a table so that a
     cached statement returns different columns, PostgreSQL reports `0A000`
     (`cached plan must not change result type`); outside a transaction Kiln
@@ -412,7 +412,7 @@ stored by this cache.
 
 ### Direct SQL
 
-Use `Conn#exec` when a relation is not the right fit. Put values in the bind
+Use `Conn#query` when a relation is not the right fit. Put values in the bind
 array. This raw SQL example uses PostgreSQL `$1` placeholders; MySQL uses `?`.
 `Scope.lease` supplies the current scoped connection.
 
@@ -420,13 +420,13 @@ Execute a parameterized SQL query for active users:
 
 ```ruby
 rows = Kiln::DB::Scope.lease do |conn|
-  conn.exec("SELECT id, name FROM users WHERE active = $1", [true])
+  conn.query("SELECT id, name FROM users WHERE active = $1", [true])
 end
 rows
 => [[1, "Rebecca"], [3, "Leon"]]
 ```
 
-`Conn#exec` returns rows as arrays in column order. Values are converted by
+`Conn#query` returns rows as arrays in column order. Values are converted by
 column type:
 
 | Column type | Ruby value |

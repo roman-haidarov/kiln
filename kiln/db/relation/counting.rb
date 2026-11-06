@@ -75,7 +75,7 @@ module Kiln
 
         binds = []
         sql = aggregate_sql(function, col, binds)
-        rows = Scope.lease { |conn| conn.exec(sql, binds) }
+        rows = Scope.lease { |conn| conn.query(sql, binds) }
         return nil if rows.empty? || rows[0][0].nil?
 
         rows[0][0]

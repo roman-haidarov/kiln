@@ -50,7 +50,7 @@ def run_pg(db, host, port, user, password, database, ca_path, tls_name, cap)
     blocked = 'blocked'
   end
   conn.pipeline_finish
-  reused = cell(conn.exec('SELECT 1', []))
+  reused = cell(conn.query('SELECT 1', []))
   if cap
     conn.pipeline_begin
     n = 0

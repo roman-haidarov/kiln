@@ -69,12 +69,12 @@ puts '-- Runtime::CpuPool: worker recovery'
 sup = Kiln::Runtime::CpuPool.new(2, queue: 8)
 check 'both workers started', sup.alive_workers == 2
 r = begin
-  sup.run(timeout: 2) { raise SystemExit }
+  sup.run(timeout: 2) { raise Interrupt }
 rescue Kiln::Runtime::WorkerLost
   :lost
 end
 Kernel.sleep 0.1
-check 'SystemExit in task -> Runtime::WorkerLost, worker replaced',
+check 'Interrupt in task -> Runtime::WorkerLost, worker replaced',
       r == :lost && sup.alive_workers == 2 && sup.respawned == 1
 check 'pool runs tasks after worker replacement', sup.run(timeout: 2) { 21 * 2 } == 42
 started = Queue.new
