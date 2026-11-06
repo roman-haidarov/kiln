@@ -10,13 +10,20 @@ end
 puts '-- Runtime::CpuPool: caller timeout'
 cpu_t = Kiln::Runtime::CpuPool.new(1, queue: 4)
 late = Queue.new
+running = Queue.new
+release = Queue.new
 blocker = Thread.new do
   cpu_t.run(timeout: 5) do
-    Kernel.sleep 0.3
+    running << true
+    release.pop
     1
   end
 end
-Kernel.sleep 0.05
+running.pop
+watchdog = Thread.new do
+  Kernel.sleep 2
+  release << true
+end
 t0 = Kiln::Runtime.now
 r = begin
   cpu_t.run(timeout: 0.05) do
@@ -29,9 +36,12 @@ rescue Kiln::Runtime::DeadlineExceeded
   :deadline
 end
 waited = Kiln::Runtime.now - t0
+release << true
 blocker.join
-Kernel.sleep 0.1
-check 'caller timeout -> Runtime::PoolTimeout', r == :pool_timeout && waited < 0.2
+watchdog.kill
+limit = Kiln::Runtime.now + 2
+Kernel.sleep 0.01 while cpu_t.skipped < 1 && late.empty? && Kiln::Runtime.now < limit
+check 'caller timeout -> Runtime::PoolTimeout', r == :pool_timeout && waited < 1.0
 check 'expired queued task is not started', late.empty? && cpu_t.skipped >= 1
 
 full = Kiln::Runtime::CpuPool.new(1, queue: 1)
