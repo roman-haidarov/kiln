@@ -17,7 +17,7 @@ default; set `KILN_VALIDATION_DIR` to choose another directory.
 
 ### Spinel `0c4519e7` and analyzer scope (2026-11-02)
 
-- `0c4519e7bae8b5993ac5162ba0a3b996773ae6bc` with `placement.patch` and
+- `9866dce67670fba63fd9b9fd79bb01a6b765da7c` with `placement.patch` and
   `workers.patch` (the scheduler hold fixture still applies). Linux x86-64,
   2 CPUs, GCC 13.3, clang 18 for `ci/c-native.sh`; PostgreSQL 17,
   MySQL 8.4.2 and MariaDB 10.11.

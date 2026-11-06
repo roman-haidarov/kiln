@@ -43,7 +43,7 @@
 
 ### Changed
 
-- Update managed Spinel to `0c4519e7bae8b5993ac5162ba0a3b996773ae6bc`.
+- Update managed Spinel to `9866dce67670fba63fd9b9fd79bb01a6b765da7c`.
   Server, Event, Base, Conn, Relation and Router define their single-owner
   methods directly in their classes; shared mixins remain.
 - `ci/c-native.sh analyze` reports all findings but fails only when a finding's
