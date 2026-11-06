@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.21
+
+### Fixed
+
+- Cache handles use cache-line-separated reader counters. Concurrent cache
+  operations no longer update one shared state word, and closing a cache waits
+  for all in-flight operations before destroying it.
+- Cache `get` output storage is owned by thread-specific state and released
+  when the thread exits.
+
+### Performance
+
+- Reduce cache handle-acquisition contention under concurrent writes. In the
+  ARM64 Linux cross-thread replacement benchmark with 64 shards, throughput
+  increased from 3.60 to 23.91 Mops/s at eight threads. Single-thread results
+  were effectively flat.
+
 ## 0.0.20
 
 ### Changed

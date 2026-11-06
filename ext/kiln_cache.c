@@ -22,13 +22,12 @@
 #define KC_SCAN_BUDGET  64
 #define KC_EVICT_BUDGET 64
 #define KC_SWEEP_CHUNK  64
+#define KC_STRIPES      16
 #define KC_LINE         64
 #define KC_SLOT_BITS    6
 #define KC_GEN_MAX      0x7fffffffu
 #define KC_LIVE         1u
 #define KC_CLOSING      2u
-#define KC_USER         4u
-#define KC_USERS        0xfffffffcu
 #define KC_BUSY         KILN_CACHE_BUSY
 
 typedef struct kc_entry {
@@ -42,6 +41,11 @@ typedef struct kc_entry {
     uint8_t visited;
     char data[];
 } kc_entry;
+
+typedef struct {
+    char *out;
+    size_t out_cap;
+} kc_thread;
 
 typedef struct {
     int frozen;
@@ -108,23 +112,26 @@ typedef struct {
 } kc_cache;
 
 typedef struct {
-    _Atomic uint64_t state;
+    _Alignas(KC_LINE) _Atomic uint32_t users;
+} kc_stripe;
+
+typedef struct {
+    _Alignas(KC_LINE) _Atomic uint64_t state;
     _Atomic(kc_cache *) cache;
+    _Alignas(KC_LINE) kc_stripe stripes[KC_STRIPES];
 } kc_slot;
 
 static kc_slot kc_slots[KC_MAX_CACHES];
 static pthread_mutex_t kc_registry = PTHREAD_MUTEX_INITIALIZER;
+static _Atomic uint32_t kc_stripe_next;
+static _Thread_local uint32_t kc_stripe_local = UINT32_MAX;
 
 #ifdef SP_THREADS
 extern __thread int sp_ffi_bin_len;
-static __thread char *kc_out;
-static __thread size_t kc_out_cap;
 static __thread long kc_found;
 static __thread int64_t kc_snapshot[KILN_CACHE_STATS];
 #else
 extern int sp_ffi_bin_len;
-static char *kc_out;
-static size_t kc_out_cap;
 static long kc_found;
 static int64_t kc_snapshot[KILN_CACHE_STATS];
 #endif
@@ -132,14 +139,45 @@ static int64_t kc_snapshot[KILN_CACHE_STATS];
 static const char kc_empty[1] = {0};
 static pthread_key_t kc_out_key;
 static pthread_once_t kc_out_once = PTHREAD_ONCE_INIT;
-static int kc_out_key_ready;
+static _Atomic int kc_out_key_ready;
 
-static void kc_out_release(void *buffer) {
-    free(buffer);
+static void kc_out_release(void *value) {
+    kc_thread *thread = value;
+    free(thread->out);
+    free(thread);
 }
 
 static void kc_out_key_init(void) {
-    kc_out_key_ready = pthread_key_create(&kc_out_key, kc_out_release) == 0;
+    if (pthread_key_create(&kc_out_key, kc_out_release) == 0) {
+        atomic_store_explicit(&kc_out_key_ready, 1, memory_order_release);
+    }
+}
+
+static kc_thread *kc_thread_current(void) {
+    if (!atomic_load_explicit(&kc_out_key_ready, memory_order_acquire)) {
+        return NULL;
+    }
+    return pthread_getspecific(kc_out_key);
+}
+
+static kc_thread *kc_thread_register(void) {
+    if (pthread_once(&kc_out_once, kc_out_key_init) != 0 ||
+        !atomic_load_explicit(&kc_out_key_ready, memory_order_acquire)) {
+        return NULL;
+    }
+    kc_thread *thread = pthread_getspecific(kc_out_key);
+    if (thread) {
+        return thread;
+    }
+    thread = calloc(1, sizeof(*thread));
+    if (!thread) {
+        return NULL;
+    }
+    if (pthread_setspecific(kc_out_key, thread) != 0) {
+        free(thread);
+        return NULL;
+    }
+    return thread;
 }
 
 static int64_t kc_now_ms(void) {
@@ -185,31 +223,54 @@ static int kc_open_in(uint64_t state, uint32_t gen) {
     return (uint32_t)(state >> 32) == gen && (state & (KC_LIVE | KC_CLOSING)) == KC_LIVE;
 }
 
+static uint32_t kc_stripe_id(void) {
+    if (kc_stripe_local == UINT32_MAX) {
+        kc_stripe_local =
+            atomic_fetch_add_explicit(&kc_stripe_next, 1, memory_order_relaxed) % KC_STRIPES;
+    }
+    return kc_stripe_local;
+}
+
+static int kc_stripe_acquire(kc_stripe *stripe) {
+    uint32_t users = atomic_load_explicit(&stripe->users, memory_order_relaxed);
+    for (;;) {
+        if (users == UINT32_MAX) {
+            return 0;
+        }
+        if (atomic_compare_exchange_weak_explicit(
+                &stripe->users, &users, users + 1, memory_order_seq_cst, memory_order_relaxed)) {
+            return 1;
+        }
+    }
+}
+
 long kiln_cache_open(long handle) {
     uint32_t gen = 0;
     kc_slot *slot = kc_slot_of(handle, &gen);
     return slot && kc_open_in(atomic_load_explicit(&slot->state, memory_order_acquire), gen);
 }
 
-static kc_cache *kc_acquire(long handle, kc_slot **held) {
+static kc_cache *kc_acquire(long handle, kc_stripe **held) {
     uint32_t gen = 0;
     kc_slot *slot = kc_slot_of(handle, &gen);
     if (!slot) {
         return NULL;
     }
-    uint64_t state = atomic_load_explicit(&slot->state, memory_order_acquire);
-    do {
-        if (!kc_open_in(state, gen) || (state & KC_USERS) == KC_USERS) {
-            return NULL;
-        }
-    } while (!atomic_compare_exchange_weak_explicit(
-        &slot->state, &state, state + KC_USER, memory_order_acquire, memory_order_acquire));
-    *held = slot;
+    kc_stripe *stripe = &slot->stripes[kc_stripe_id()];
+    if (!kc_stripe_acquire(stripe)) {
+        return NULL;
+    }
+    uint64_t state = atomic_load_explicit(&slot->state, memory_order_seq_cst);
+    if (!kc_open_in(state, gen)) {
+        atomic_fetch_sub_explicit(&stripe->users, 1, memory_order_release);
+        return NULL;
+    }
+    *held = stripe;
     return atomic_load_explicit(&slot->cache, memory_order_acquire);
 }
 
-static void kc_release(kc_slot *slot) {
-    atomic_fetch_sub_explicit(&slot->state, KC_USER, memory_order_release);
+static void kc_release(kc_stripe *stripe) {
+    atomic_fetch_sub_explicit(&stripe->users, 1, memory_order_release);
 }
 
 static uint64_t kc_hash(const kc_cache *cache, const char *key, size_t klen) {
@@ -363,7 +424,9 @@ static long kc_refuse(kc_shard *shard, const char *key, size_t klen, uint64_t ha
     }
     shard->refusals++;
     pthread_mutex_unlock(&shard->lock);
-    free(old);
+    if (old) {
+        free(old);
+    }
     return 0;
 }
 
@@ -402,13 +465,13 @@ static long kc_set_call(long handle, const char *key, long klen, const char *val
     if (klen < 0 || vlen < 0 || (klen && !key) || (vlen && !val)) {
         return -1;
     }
-    kc_slot *slot = NULL;
-    const kc_cache *cache = kc_acquire(handle, &slot);
+    kc_stripe *stripe = NULL;
+    const kc_cache *cache = kc_acquire(handle, &stripe);
     if (!cache) {
         return -1;
     }
     long stored = kc_set(cache, key, klen, val, vlen, ttl_ms, try_lock);
-    kc_release(slot);
+    kc_release(stripe);
     return stored;
 }
 
@@ -423,31 +486,49 @@ long kiln_cache_set_try(
 }
 
 static int kc_out_reserve(size_t size) {
-    if (size <= kc_out_cap) {
+    kc_thread *thread = kc_thread_current();
+    if (thread && size <= thread->out_cap) {
         return 1;
     }
-    size_t cap = kc_out_cap ? kc_out_cap : 256;
+    size_t cap = thread && thread->out_cap ? thread->out_cap : 256;
     while (cap < size) {
         if (cap > SIZE_MAX / 2) {
             return 0;
         }
         cap *= 2;
     }
-    if (pthread_once(&kc_out_once, kc_out_key_init) != 0 || !kc_out_key_ready) {
+    thread = kc_thread_register();
+    if (!thread) {
         return 0;
     }
     char *grown = malloc(cap);
     if (!grown) {
         return 0;
     }
-    if (pthread_setspecific(kc_out_key, grown) != 0) {
-        free(grown);
-        return 0;
-    }
-    free(kc_out);
-    kc_out = grown;
-    kc_out_cap = cap;
+    free(thread->out);
+    thread->out = grown;
+    thread->out_cap = cap;
     return 1;
+}
+
+static inline void kc_get_result(
+    kc_shard *shard, kc_entry *entry, kc_thread **thread, size_t *want) {
+    if (!entry) {
+        shard->misses++;
+    } else {
+        *thread = *thread ? *thread : kc_thread_current();
+        if (entry->vlen > (*thread ? (*thread)->out_cap : 0)) {
+            *want = entry->vlen;
+        } else {
+            entry->visited = 1;
+            shard->hits++;
+            if (entry->vlen) {
+                memcpy((*thread)->out, entry->data + entry->klen, entry->vlen);
+            }
+            sp_ffi_bin_len = (int)entry->vlen;
+            kc_found = 1;
+        }
+    }
 }
 
 static const char *kc_get(const kc_cache *cache, const char *key, long klen, int try_lock) {
@@ -457,6 +538,7 @@ static const char *kc_get(const kc_cache *cache, const char *key, long klen, int
     }
     uint64_t hash = kc_hash(cache, key, (size_t)klen);
     kc_shard *shard = kc_shard_of(cache, hash);
+    kc_thread *thread = NULL;
     for (;;) {
         int64_t now = 0;
         kc_entry *stale = NULL;
@@ -472,28 +554,19 @@ static const char *kc_get(const kc_cache *cache, const char *key, long klen, int
             stale = entry;
             entry = NULL;
         }
-        if (!entry) {
-            shard->misses++;
-        } else if (entry->vlen > kc_out_cap) {
-            want = entry->vlen;
-        } else {
-            entry->visited = 1;
-            shard->hits++;
-            if (entry->vlen) {
-                memcpy(kc_out, entry->data + entry->klen, entry->vlen);
-            }
-            sp_ffi_bin_len = (int)entry->vlen;
-            kc_found = 1;
-        }
+        kc_get_result(shard, entry, &thread, &want);
         pthread_mutex_unlock(&shard->lock);
-        free(stale);
+        if (stale) {
+            free(stale);
+        }
         if (!want) {
-            return kc_found == 1 && kc_out ? kc_out : kc_empty;
+            return kc_found == 1 && thread && thread->out ? thread->out : kc_empty;
         }
         if (!kc_out_reserve(want)) {
             kc_found = -2;
             return kc_empty;
         }
+        thread = kc_thread_current();
     }
 }
 
@@ -503,13 +576,13 @@ static const char *kc_get_call(long handle, const char *key, long klen, int try_
     if (klen < 0 || (klen && !key)) {
         return kc_empty;
     }
-    kc_slot *slot = NULL;
-    const kc_cache *cache = kc_acquire(handle, &slot);
+    kc_stripe *stripe = NULL;
+    const kc_cache *cache = kc_acquire(handle, &stripe);
     if (!cache) {
         return kc_empty;
     }
     const char *out = kc_get(cache, key, klen, try_lock);
-    kc_release(slot);
+    kc_release(stripe);
     return out;
 }
 
@@ -540,7 +613,9 @@ static long kc_delete(const kc_cache *cache, const char *key, long klen, int try
     }
     pthread_mutex_unlock(&shard->lock);
     long removed = entry ? 1 : 0;
-    free(entry);
+    if (entry) {
+        free(entry);
+    }
     return removed;
 }
 
@@ -548,13 +623,13 @@ static long kc_delete_call(long handle, const char *key, long klen, int try_lock
     if (klen < 0 || (klen && !key)) {
         return -1;
     }
-    kc_slot *slot = NULL;
-    const kc_cache *cache = kc_acquire(handle, &slot);
+    kc_stripe *stripe = NULL;
+    const kc_cache *cache = kc_acquire(handle, &stripe);
     if (!cache) {
         return -1;
     }
     long removed = kc_delete(cache, key, klen, try_lock);
-    kc_release(slot);
+    kc_release(stripe);
     return removed;
 }
 
@@ -616,13 +691,13 @@ long kiln_cache_sweep(long handle, long budget) {
     if (budget < 0) {
         return -1;
     }
-    kc_slot *slot = NULL;
-    kc_cache *cache = kc_acquire(handle, &slot);
+    kc_stripe *stripe = NULL;
+    kc_cache *cache = kc_acquire(handle, &stripe);
     if (!cache) {
         return -1;
     }
     long removed = budget > 0 ? kc_sweep(cache, budget) : 0;
-    kc_release(slot);
+    kc_release(stripe);
     return removed;
 }
 
@@ -657,13 +732,13 @@ static long kc_clear(kc_cache *cache) {
 }
 
 long kiln_cache_clear(long handle) {
-    kc_slot *slot = NULL;
-    kc_cache *cache = kc_acquire(handle, &slot);
+    kc_stripe *stripe = NULL;
+    kc_cache *cache = kc_acquire(handle, &stripe);
     if (!cache) {
         return -1;
     }
     long removed = kc_clear(cache);
-    kc_release(slot);
+    kc_release(stripe);
     return removed;
 }
 
@@ -688,13 +763,13 @@ long kiln_cache_stats(long handle, int64_t *out, long cap) {
     if (!out || cap < KILN_CACHE_STATS) {
         return -1;
     }
-    kc_slot *slot = NULL;
-    kc_cache *cache = kc_acquire(handle, &slot);
+    kc_stripe *stripe = NULL;
+    kc_cache *cache = kc_acquire(handle, &stripe);
     if (!cache) {
         return -1;
     }
     kc_stats(cache, out);
-    kc_release(slot);
+    kc_release(stripe);
     return KILN_CACHE_STATS;
 }
 
@@ -760,7 +835,7 @@ static long kc_register(kc_cache *cache) {
         }
         uint32_t gen = previous + 1;
         atomic_store_explicit(&slot->cache, cache, memory_order_relaxed);
-        atomic_store_explicit(&slot->state, ((uint64_t)gen << 32) | KC_LIVE, memory_order_release);
+        atomic_store_explicit(&slot->state, ((uint64_t)gen << 32) | KC_LIVE, memory_order_seq_cst);
         handle = ((long)gen << KC_SLOT_BITS) | i;
         break;
     }
@@ -809,18 +884,20 @@ long kiln_cache_free(long handle) {
     if (!slot) {
         return -1;
     }
-    uint64_t state = atomic_load_explicit(&slot->state, memory_order_acquire);
+    uint64_t state = atomic_load_explicit(&slot->state, memory_order_seq_cst);
     do {
         if (!kc_open_in(state, gen)) {
             return -1;
         }
     } while (!atomic_compare_exchange_weak_explicit(
-        &slot->state, &state, state | KC_CLOSING, memory_order_acq_rel, memory_order_acquire));
-    while (atomic_load_explicit(&slot->state, memory_order_acquire) & KC_USERS) {
-        sched_yield();
+        &slot->state, &state, state | KC_CLOSING, memory_order_seq_cst, memory_order_seq_cst));
+    for (uint32_t i = 0; i < KC_STRIPES; i++) {
+        while (atomic_load_explicit(&slot->stripes[i].users, memory_order_seq_cst) != 0) {
+            sched_yield();
+        }
     }
     kc_cache *cache = atomic_exchange_explicit(&slot->cache, NULL, memory_order_acq_rel);
     kc_destroy(cache, cache->shard_count);
-    atomic_store_explicit(&slot->state, (uint64_t)gen << 32, memory_order_release);
+    atomic_store_explicit(&slot->state, (uint64_t)gen << 32, memory_order_seq_cst);
     return 0;
 }
